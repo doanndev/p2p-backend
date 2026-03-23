@@ -4,10 +4,6 @@ import { ConfigService } from '@nestjs/config';
 import * as cookieParser from 'cookie-parser';
 import { DatabaseExceptionFilter } from './exceptions/database-exception.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as errsole from 'errsole';
-import ErrsoleSQLite from 'errsole-sqlite';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -55,35 +51,6 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
-  const errsoleEnabled =
-    (configService.get<string>('ERRSOLE_ENABLED') ?? 'true').toLowerCase() !==
-    'false';
-  if (errsoleEnabled) {
-    const errsoleDbPath =
-      configService.get<string>('ERRSOLE_DB_PATH') ??
-      path.join(process.cwd(), 'data', 'errsole', 'errsole.sqlite');
-    const errsoleAppName =
-      configService.get<string>('ERRSOLE_APP_NAME') ?? 'backend2.5';
-    const errsoleEnvName =
-      configService.get<string>('ERRSOLE_ENV_NAME') ??
-      configService.get<string>('NODE_ENV') ??
-      'development';
-
-    fs.mkdirSync(path.dirname(errsoleDbPath), { recursive: true });
-
-    const storage = new ErrsoleSQLite(errsoleDbPath);
-    errsole.initialize({
-      storage,
-      enableConsoleOutput: true,
-      enableDashboard: true,
-      appName: errsoleAppName,
-      environmentName: errsoleEnvName,
-      collectLogs: ['debug', 'info', 'warn', 'error'],
-    });
-
-    app.use('/errsole', errsole.expressProxyMiddleware());
-  }
-
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Backend 2.5 API')
     .setDescription('API documentation for frontend integration and testing')
@@ -103,16 +70,19 @@ async function bootstrap() {
     .build();
 
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  const swaggerJsonPath = 'docs-json';
   SwaggerModule.setup('docs', app, swaggerDocument, {
+    jsonDocumentUrl: swaggerJsonPath,
     swaggerOptions: {
       persistAuthorization: true,
+      url: `/${swaggerJsonPath}`,
     },
   });
 
   await app.listen(port);
   console.log(`\uD83D\uDE80 Ứng dụng đang chạy tại: http://localhost:${port}`);
   console.log(`📚 Swagger docs: http://localhost:${port}/docs`);
-  console.log(`🪵 Errsole logs: http://localhost:${port}/errsole`);
+  console.log(`📄 Swagger JSON: http://localhost:${port}/${swaggerJsonPath}`);
 }
 
 bootstrap();
