@@ -19,7 +19,9 @@ async function bootstrap() {
   const frontendUrlsRaw = configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
   const frontendUrls = frontendUrlsRaw.split(','); // Tách các URL nếu có nhiều hơn 1 domain
 
-  const port = configService.get<number>('APP_PORT', 8080);
+  const port =
+    Number(process.env.PORT) ||
+    configService.get<number>('APP_PORT', 8080);
 
   // Cấu hình CORS hỗ trợ subdomain
   app.enableCors({
