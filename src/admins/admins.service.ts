@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -44,15 +49,37 @@ import {
 } from './entities/permission.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { Admin, AdminLevel, AdminStatus } from './entities/admin.entity';
-import { AdminLog, AdminLogAction, AdminLogModule } from './entities/admin-log.entity';
+import {
+  AdminLog,
+  AdminLogAction,
+  AdminLogModule,
+} from './entities/admin-log.entity';
 import { LoginAdminDto } from './dto/login-admin.dto';
-import { AdminSetting, FundType, Difficulty } from '../settings/entities/admin-setting.entity';
+import {
+  AdminSetting,
+  FundType,
+  Difficulty,
+} from '../settings/entities/admin-setting.entity';
 import { User, UserSex, UserStatus } from '../users/entities/user.entity';
-import { UserVerify, UserVerifyStatus } from '../users/entities/user-verify.entity';
+import {
+  UserVerify,
+  UserVerifyStatus,
+} from '../users/entities/user-verify.entity';
 import { VerifyLog } from '../users/entities/verify-log.entity';
-import { KolRegister, KolRegisterStatus } from '../users/entities/kol-register.entity';
-import { KolArticle, KolArticleStatus } from '../users/entities/kol-article.entity';
-import { WalletHistory, WalletHistoryType, WalletHistoryOption, WalletHistoryStatus } from '../wallets/entities/wallet-history.entity';
+import {
+  KolRegister,
+  KolRegisterStatus,
+} from '../users/entities/kol-register.entity';
+import {
+  KolArticle,
+  KolArticleStatus,
+} from '../users/entities/kol-article.entity';
+import {
+  WalletHistory,
+  WalletHistoryType,
+  WalletHistoryOption,
+  WalletHistoryStatus,
+} from '../wallets/entities/wallet-history.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import {
   WalletTransfer,
@@ -62,10 +89,13 @@ import {
 } from '../wallets/entities/wallet-transfer.entity';
 import { Coin, CoinStatus } from '../settings/entities/coin.entity';
 import { Network, NetStatus } from '../settings/entities/network.entity';
-import { UseWalletNetwork } from '../wallets/entities/use-wallet-network.entity';
+import { UserWalletNetwork } from '../wallets/entities/user-wallet-network.entity';
 import { ActiveWalletTracker } from '../wallets/entities/active-wallet-tracker.entity';
 import { WalletDepositTracker } from '../wallets/entities/wallet-deposit-tracker.entity';
-import { CoinNetwork, CoinNetworkStatus } from '../settings/entities/coin-network.entity';
+import {
+  CoinNetwork,
+  CoinNetworkStatus,
+} from '../settings/entities/coin-network.entity';
 import { VideoSettingsDto } from './dto/video-settings.dto';
 import { WithdrawSettingsDto } from './dto/withdraw-settings.dto';
 import { AddCoinDto } from './dto/add-coin.dto';
@@ -122,8 +152,8 @@ export class AdminsService implements OnModuleInit {
     private coinRepository: Repository<Coin>,
     @InjectRepository(Network)
     private networkRepository: Repository<Network>,
-    @InjectRepository(UseWalletNetwork)
-    private useWalletNetworkRepository: Repository<UseWalletNetwork>,
+    @InjectRepository(UserWalletNetwork)
+    private useWalletNetworkRepository: Repository<UserWalletNetwork>,
     @InjectRepository(ActiveWalletTracker)
     private activeWalletTrackerRepository: Repository<ActiveWalletTracker>,
     @InjectRepository(WalletDepositTracker)
@@ -336,7 +366,7 @@ export class AdminsService implements OnModuleInit {
     let payload: any;
     try {
       payload = await this.jwtService.verifyAsync(refreshToken);
-    } catch (error) {
+    } catch {
       throw new BadRequestException('Invalid or expired refresh token');
     }
 
@@ -473,7 +503,7 @@ export class AdminsService implements OnModuleInit {
       order: { permission_resource: 'ASC', permission_action: 'ASC' },
     });
 
-    let grantedPermissionIds = new Set<number>();
+    const grantedPermissionIds = new Set<number>();
 
     if (admin.admin_level === AdminLevel.SUPER_ADMIN) {
       allPermissions.forEach((p) => grantedPermissionIds.add(p.permission_id));
@@ -519,9 +549,21 @@ export class AdminsService implements OnModuleInit {
       role = await this.adminRoleRepository.save(role);
     }
 
-    const permissionsToGrant: Array<{ resource: PermissionResource; action: PermissionAction; name: string }> = [
-      { resource: PermissionResource.USERS, action: PermissionAction.READ, name: 'users:read' },
-      { resource: PermissionResource.USERS, action: PermissionAction.ADVANCED, name: 'users:advanced' },
+    const permissionsToGrant: Array<{
+      resource: PermissionResource;
+      action: PermissionAction;
+      name: string;
+    }> = [
+      {
+        resource: PermissionResource.USERS,
+        action: PermissionAction.READ,
+        name: 'users:read',
+      },
+      {
+        resource: PermissionResource.USERS,
+        action: PermissionAction.ADVANCED,
+        name: 'users:advanced',
+      },
     ];
 
     for (const { resource, action, name } of permissionsToGrant) {
@@ -612,8 +654,7 @@ export class AdminsService implements OnModuleInit {
         );
       }
       role = existingRole;
-      adminLevel =
-        level === 'admin' ? AdminLevel.ADMIN : AdminLevel.SUPPORT;
+      adminLevel = level === 'admin' ? AdminLevel.ADMIN : AdminLevel.SUPPORT;
     }
 
     const hashedPassword = await bcrypt.hash(createAdminDto.password, 10);
@@ -716,7 +757,10 @@ export class AdminsService implements OnModuleInit {
       if (videoSettingsDto.turn_default && videoSettingsDto.turn_default > 0) {
         adminSetting.as_turn_watch_default = videoSettingsDto.turn_default;
       }
-      if (videoSettingsDto.devices_default && videoSettingsDto.devices_default > 0) {
+      if (
+        videoSettingsDto.devices_default &&
+        videoSettingsDto.devices_default > 0
+      ) {
         adminSetting.as_devices_default = videoSettingsDto.devices_default;
       }
       if (videoSettingsDto.time_gap && videoSettingsDto.time_gap > 0) {
@@ -729,7 +773,10 @@ export class AdminsService implements OnModuleInit {
       if (videoSettingsDto.turn_default && videoSettingsDto.turn_default > 0) {
         adminSetting.as_turn_watch_default = videoSettingsDto.turn_default;
       }
-      if (videoSettingsDto.devices_default && videoSettingsDto.devices_default > 0) {
+      if (
+        videoSettingsDto.devices_default &&
+        videoSettingsDto.devices_default > 0
+      ) {
         adminSetting.as_devices_default = videoSettingsDto.devices_default;
       }
       if (videoSettingsDto.time_gap && videoSettingsDto.time_gap > 0) {
@@ -759,7 +806,6 @@ export class AdminsService implements OnModuleInit {
       },
     };
   }
-
 
   async updateWithdrawSettings(
     withdrawSettingsDto: WithdrawSettingsDto,
@@ -827,7 +873,6 @@ export class AdminsService implements OnModuleInit {
       },
     };
   }
-
 
   async getPlatformStatistics(): Promise<{
     statusCode: number;
@@ -901,7 +946,9 @@ export class AdminsService implements OnModuleInit {
       .select('COALESCE(SUM(wt.wt_amount), 0)', 'total')
       .where('wt.wt_from = :from', { from: WalletTransferFrom.GIFT })
       .andWhere('wt.wt_to = :to', { to: WalletTransferTo.MAIN })
-      .andWhere('wt.wt_status = :status', { status: WalletTransferStatus.SUCCESS })
+      .andWhere('wt.wt_status = :status', {
+        status: WalletTransferStatus.SUCCESS,
+      })
       .getRawOne();
     const totalTransferMain = parseFloat(totalTransferMainResult?.total || '0');
 
@@ -946,7 +993,6 @@ export class AdminsService implements OnModuleInit {
       statistics: platform.statistics,
     };
   }
-
 
   async getAdminSettingsSummary(): Promise<{
     statusCode: number;
@@ -1137,9 +1183,7 @@ export class AdminsService implements OnModuleInit {
     };
   }
 
-  async getUserById(
-    uid: number,
-  ): Promise<{
+  async getUserById(uid: number): Promise<{
     statusCode: number;
     data: {
       uid: number;
@@ -1249,7 +1293,7 @@ export class AdminsService implements OnModuleInit {
       // If status is not provided, toggle (xen kẽ)
       newKol = !user.ukol;
     }
-    
+
     // If status is provided, always update kol_registers based on status
     if (status !== undefined) {
       if (status === 'fail' && newKol === false) {
@@ -1312,7 +1356,7 @@ export class AdminsService implements OnModuleInit {
           },
         );
       }
-      
+
       // If changing from false to true, update kol_registers
       if (user.ukol === false && newKol === true) {
         // Update all kol_registers with status = pending to success
@@ -1388,18 +1432,18 @@ export class AdminsService implements OnModuleInit {
 
     // Filter by status (default to pending if not provided)
     const filterStatus = status || KolRegisterStatus.PENDING;
-    
+
     // Validate status
     const validStatuses = [
       KolRegisterStatus.PENDING,
       KolRegisterStatus.SUCCESS,
       KolRegisterStatus.FAIL,
     ];
-    
+
     // Check if status matches enum (case-insensitive)
     const normalizedStatus = filterStatus.toLowerCase();
     let matchedStatus: KolRegisterStatus | null = null;
-    
+
     for (const validStatus of validStatuses) {
       if (validStatus.toLowerCase() === normalizedStatus) {
         matchedStatus = validStatus;
@@ -1575,7 +1619,10 @@ export class AdminsService implements OnModuleInit {
 
     // Generate exchange wallet for each network
     const mainWallets = networks.map((network) => {
-      const exchangeWallet = this.getExchangeWallet(mnemonic, network.net_symbol);
+      const exchangeWallet = this.getExchangeWallet(
+        mnemonic,
+        network.net_symbol,
+      );
       const publicKey = this.getExchangeWalletPublicKey(
         exchangeWallet,
         network.net_symbol,
@@ -2110,9 +2157,7 @@ export class AdminsService implements OnModuleInit {
     };
   }
 
-  async getUserWallets(
-    uid: number,
-  ): Promise<{
+  async getUserWallets(uid: number): Promise<{
     statusCode: number;
     message: string;
     data: {
@@ -2182,7 +2227,9 @@ export class AdminsService implements OnModuleInit {
           coin_symbol: coinSymbol,
           balance: parseFloat(wallet.uw_balance?.toString() || '0'),
           balance_gift: parseFloat(wallet.uw_balance_gift?.toString() || '0'),
-          balance_reward: parseFloat(wallet.uw_balance_reward?.toString() || '0'),
+          balance_reward: parseFloat(
+            wallet.uw_balance_reward?.toString() || '0',
+          ),
         };
       }),
     );
@@ -2269,7 +2316,10 @@ export class AdminsService implements OnModuleInit {
     // Determine which options to filter
     let options: WalletHistoryOption[] = [];
     if (option === 'deposit') {
-      options = [WalletHistoryOption.DEPOSIT, WalletHistoryOption.ADMIN_DEPOSIT];
+      options = [
+        WalletHistoryOption.DEPOSIT,
+        WalletHistoryOption.ADMIN_DEPOSIT,
+      ];
     } else if (option === 'withdraw') {
       options = [WalletHistoryOption.WITHDRAW];
     } else {
@@ -2405,11 +2455,11 @@ export class AdminsService implements OnModuleInit {
         UserVerifyStatus.CANCEL,
         UserVerifyStatus.RETRY,
       ];
-      
+
       // Check if status matches enum (case-insensitive)
       const normalizedStatus = status.toLowerCase();
       let matchedStatus: UserVerifyStatus | null = null;
-      
+
       for (const validStatus of validStatuses) {
         if (validStatus.toLowerCase() === normalizedStatus) {
           matchedStatus = validStatus;
@@ -2716,8 +2766,13 @@ export class AdminsService implements OnModuleInit {
 
       if (updateKycStatusDto.status === 'retry') {
         // If status = retry, message is required
-        if (!updateKycStatusDto.message || updateKycStatusDto.message.trim() === '') {
-          throw new BadRequestException('Message is required when status is retry');
+        if (
+          !updateKycStatusDto.message ||
+          updateKycStatusDto.message.trim() === ''
+        ) {
+          throw new BadRequestException(
+            'Message is required when status is retry',
+          );
         }
 
         // Update all verification records to retry
@@ -2760,9 +2815,7 @@ export class AdminsService implements OnModuleInit {
     throw new BadRequestException('Invalid status update');
   }
 
-  async searchWallet(
-    query: string,
-  ): Promise<{
+  async searchWallet(query: string): Promise<{
     statusCode: number;
     message: string;
     data: Array<{
@@ -2848,7 +2901,9 @@ export class AdminsService implements OnModuleInit {
 
     // Filter out results where user is null (shouldn't happen, but just in case)
     const validResults = results.filter(
-      (r): r is {
+      (
+        r,
+      ): r is {
         wallet_network: {
           uwn_id: number;
           public_key: string;
@@ -2999,7 +3054,10 @@ export class AdminsService implements OnModuleInit {
       });
 
       // Đảm bảo đích là ví CEO/main, không bao giờ là ví trợ phí (path 369)
-      const feeSupportWallet = this.getFeeSupportWallet(mnemonic, 'SOL') as Keypair;
+      const feeSupportWallet = this.getFeeSupportWallet(
+        mnemonic,
+        'SOL',
+      ) as Keypair;
       const feeSupportAddress = feeSupportWallet.publicKey.toBase58();
       let effectiveTarget = targetWalletAddress;
       if (effectiveTarget === feeSupportAddress) {
@@ -3015,7 +3073,9 @@ export class AdminsService implements OnModuleInit {
       );
 
       try {
-        await this.rpcRateLimitService.withRpcLimit(() => getAccount(connection, toTokenAccount));
+        await this.rpcRateLimitService.withRpcLimit(() =>
+          getAccount(connection, toTokenAccount),
+        );
         return; // ATA đã tồn tại
       } catch {
         // ATA chưa có, tạo bằng ví trợ phí (path 369)
@@ -3106,8 +3166,8 @@ export class AdminsService implements OnModuleInit {
 
           const lamports = Math.floor(amount * 1e9);
 
-          const supportBalance = await this.rpcRateLimitService.withRpcLimit(() =>
-            connection.getBalance(keypair.publicKey),
+          const supportBalance = await this.rpcRateLimitService.withRpcLimit(
+            () => connection.getBalance(keypair.publicKey),
           );
           if (supportBalance < lamports) {
             console.warn(
@@ -3133,7 +3193,10 @@ export class AdminsService implements OnModuleInit {
               Promise.race([
                 connection.confirmTransaction(signature, 'confirmed'),
                 new Promise((_, reject) =>
-                  setTimeout(() => reject(new Error('Confirm timeout 30s')), 30000),
+                  setTimeout(
+                    () => reject(new Error('Confirm timeout 30s')),
+                    30000,
+                  ),
                 ),
               ]),
             );
@@ -3152,17 +3215,24 @@ export class AdminsService implements OnModuleInit {
           let provider: JsonRpcProvider;
           if (network.net_symbol === 'ETH') {
             const ethNetwork = EthersNetwork.from('mainnet');
-            provider = new JsonRpcProvider(rpcUrl, ethNetwork, { staticNetwork: ethNetwork });
-          } else if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
+            provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
+              staticNetwork: ethNetwork,
+            });
+          } else if (
+            network.net_symbol === 'BNB' ||
+            network.net_symbol === 'BSC'
+          ) {
             const bscNetwork = new EthersNetwork('bsc', 56);
-            provider = new JsonRpcProvider(rpcUrl, bscNetwork, { staticNetwork: bscNetwork });
+            provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
+              staticNetwork: bscNetwork,
+            });
           } else {
             provider = new JsonRpcProvider(rpcUrl);
           }
           const evmWallet = feeWallet as HDNodeWallet;
           const connected = evmWallet.connect(provider);
-          const supportBalance = await this.rpcRateLimitService.withRpcLimit(() =>
-            provider.getBalance(connected.address),
+          const supportBalance = await this.rpcRateLimitService.withRpcLimit(
+            () => provider.getBalance(connected.address),
           );
           if (supportBalance < valueWei) {
             if (rpcUrls.indexOf(rpcUrl) < rpcUrls.length - 1) continue;
@@ -3182,7 +3252,9 @@ export class AdminsService implements OnModuleInit {
           return tx.hash;
         } catch (err: any) {
           const isEvmWithFallbacks =
-            (network.net_symbol === 'BNB' || network.net_symbol === 'BSC' || network.net_symbol === 'ETH') &&
+            (network.net_symbol === 'BNB' ||
+              network.net_symbol === 'BSC' ||
+              network.net_symbol === 'ETH') &&
             rpcUrls.indexOf(rpcUrl) < rpcUrls.length - 1;
           if (isEvmWithFallbacks) {
             continue;
@@ -3265,10 +3337,10 @@ export class AdminsService implements OnModuleInit {
           // Kiểm tra balance
           let fromTokenAccountInfo;
           try {
-            fromTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(() =>
-              getAccount(connection, fromTokenAccount),
+            fromTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(
+              () => getAccount(connection, fromTokenAccount),
             );
-          } catch (error) {
+          } catch {
             throw new BadRequestException(
               `Sender token account does not exist or has no balance`,
             );
@@ -3284,10 +3356,10 @@ export class AdminsService implements OnModuleInit {
           // Kiểm tra token account của receiver
           let toTokenAccountInfo;
           try {
-            toTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(() =>
-              getAccount(connection, toTokenAccount),
+            toTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(
+              () => getAccount(connection, toTokenAccount),
             );
-          } catch (error) {
+          } catch {
             toTokenAccountInfo = null;
           }
 
@@ -3318,14 +3390,14 @@ export class AdminsService implements OnModuleInit {
             ),
           );
 
-          const { blockhash } = await this.rpcRateLimitService.withRpcLimit(() =>
-            connection.getLatestBlockhash('confirmed'),
+          const { blockhash } = await this.rpcRateLimitService.withRpcLimit(
+            () => connection.getLatestBlockhash('confirmed'),
           );
           transaction.recentBlockhash = blockhash;
           transaction.feePayer = keypair.publicKey;
 
-          const feePayerBalance = await this.rpcRateLimitService.withRpcLimit(() =>
-            connection.getBalance(keypair.publicKey),
+          const feePayerBalance = await this.rpcRateLimitService.withRpcLimit(
+            () => connection.getBalance(keypair.publicKey),
           );
           if (feePayerBalance < AdminsService.MIN_SOL_LAMPORTS_FOR_SPL_FEE) {
             throw new BadRequestException(
@@ -3363,10 +3435,17 @@ export class AdminsService implements OnModuleInit {
           let provider: JsonRpcProvider;
           if (network.net_symbol === 'ETH') {
             const ethNetwork = EthersNetwork.from('mainnet');
-            provider = new JsonRpcProvider(rpcUrl, ethNetwork, { staticNetwork: ethNetwork });
-          } else if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
+            provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
+              staticNetwork: ethNetwork,
+            });
+          } else if (
+            network.net_symbol === 'BNB' ||
+            network.net_symbol === 'BSC'
+          ) {
             const bscNetwork = new EthersNetwork('bsc', 56);
-            provider = new JsonRpcProvider(rpcUrl, bscNetwork, { staticNetwork: bscNetwork });
+            provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
+              staticNetwork: bscNetwork,
+            });
           } else {
             provider = new JsonRpcProvider(rpcUrl);
           }
@@ -3375,10 +3454,12 @@ export class AdminsService implements OnModuleInit {
 
           if (isNativeToken) {
             const transferAmount = parseUnits(amount.toString(), 18);
-            const senderBalance = await this.rpcRateLimitService.withRpcLimit(() =>
-              provider.getBalance(connectedWallet.address),
+            const senderBalance = await this.rpcRateLimitService.withRpcLimit(
+              () => provider.getBalance(connectedWallet.address),
             );
-            const feeData = await this.rpcRateLimitService.withRpcLimit(() => provider.getFeeData());
+            const feeData = await this.rpcRateLimitService.withRpcLimit(() =>
+              provider.getFeeData(),
+            );
             const estimatedGasLimit = 21000;
             const estimatedGasFee = feeData.gasPrice
               ? feeData.gasPrice * BigInt(estimatedGasLimit)
@@ -3401,15 +3482,21 @@ export class AdminsService implements OnModuleInit {
               'function transfer(address to, uint256 amount) returns (bool)',
               'function decimals() view returns (uint8)',
             ];
-            const tokenContractAddress = this.normalizeEvmAddress(coinNetwork.cn_coin_mint);
+            const tokenContractAddress = this.normalizeEvmAddress(
+              coinNetwork.cn_coin_mint,
+            );
             const tokenContract = new Contract(
               tokenContractAddress,
               new Interface(erc20Abi),
               connectedWallet,
             );
-            const decimalsRaw = await this.rpcRateLimitService.withRpcLimit(() => tokenContract.decimals());
+            const decimalsRaw = await this.rpcRateLimitService.withRpcLimit(
+              () => tokenContract.decimals(),
+            );
             const decimals =
-              typeof decimalsRaw === 'bigint' ? Number(decimalsRaw) : Number(decimalsRaw);
+              typeof decimalsRaw === 'bigint'
+                ? Number(decimalsRaw)
+                : Number(decimalsRaw);
             const transferAmount = parseUnits(amount.toString(), decimals);
             const tx = await this.rpcRateLimitService.withRpcLimit(() =>
               tokenContract.transfer(mainWalletAddress, transferAmount),
@@ -3420,7 +3507,9 @@ export class AdminsService implements OnModuleInit {
         } catch (err: any) {
           lastEvmError = err;
           const tryNextRpc =
-            (network.net_symbol === 'BNB' || network.net_symbol === 'BSC' || network.net_symbol === 'ETH') &&
+            (network.net_symbol === 'BNB' ||
+              network.net_symbol === 'BSC' ||
+              network.net_symbol === 'ETH') &&
             rpcUrls.indexOf(rpcUrl) < rpcUrls.length - 1;
           if (tryNextRpc) {
             continue;
@@ -3452,7 +3541,8 @@ export class AdminsService implements OnModuleInit {
 
     if (fromApi) {
       const now = Date.now();
-      const remainingMs = this.nextAutoMainWithdrawAt > 0 ? this.nextAutoMainWithdrawAt - now : 0;
+      const remainingMs =
+        this.nextAutoMainWithdrawAt > 0 ? this.nextAutoMainWithdrawAt - now : 0;
       if (remainingMs > MAIN_WITHDRAW_API_MAX_WAIT_MS) {
         const remainingMin = Math.ceil(remainingMs / 60000);
         throw new BadRequestException(
@@ -3549,7 +3639,8 @@ export class AdminsService implements OnModuleInit {
       .finally(() => {
         this.isMainWithdrawProcessing = false;
         // Reset lịch tự động: lần chạy tự động tiếp theo sau 10 phút (cron hoặc API thành công)
-        this.nextAutoMainWithdrawAt = Date.now() + MAIN_WITHDRAW_AUTO_INTERVAL_MS;
+        this.nextAutoMainWithdrawAt =
+          Date.now() + MAIN_WITHDRAW_AUTO_INTERVAL_MS;
       });
 
     // Create admin log
@@ -3583,7 +3674,7 @@ export class AdminsService implements OnModuleInit {
     mainWalletAddress: string,
   ): string {
     let ceoWalletAddress: string | undefined;
-    
+
     if (networkSymbol === 'ETH') {
       ceoWalletAddress = this.configService.get<string>('WALLET_CEO_ETH');
     } else if (networkSymbol === 'BNB' || networkSymbol === 'BSC') {
@@ -3593,7 +3684,10 @@ export class AdminsService implements OnModuleInit {
     }
 
     // Validate CEO wallet address
-    if (ceoWalletAddress && this.isValidWalletAddress(ceoWalletAddress, networkSymbol)) {
+    if (
+      ceoWalletAddress &&
+      this.isValidWalletAddress(ceoWalletAddress, networkSymbol)
+    ) {
       return ceoWalletAddress;
     }
 
@@ -3604,7 +3698,10 @@ export class AdminsService implements OnModuleInit {
   /**
    * Validate wallet address format
    */
-  private isValidWalletAddress(address: string, networkSymbol: string): boolean {
+  private isValidWalletAddress(
+    address: string,
+    networkSymbol: string,
+  ): boolean {
     if (!address || address.trim().length === 0) {
       return false;
     }
@@ -3651,7 +3748,8 @@ export class AdminsService implements OnModuleInit {
     derivedAddress: string,
   ): Promise<boolean> {
     try {
-      const solUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+      const solUrls =
+        await this.adminSettingsConfigService.getRpcSolUrlsToTry();
       if (solUrls.length === 0) return true;
       return await this.runWithSolRpcUrl(async (rpcUrl) => {
         const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
@@ -3679,8 +3777,11 @@ export class AdminsService implements OnModuleInit {
         const mintInfo = await this.rpcRateLimitService.withRpcLimit(() =>
           getMint(connection, mintPublicKey),
         );
-        const balanceNum = Number(accountInfo.amount) / Math.pow(10, mintInfo.decimals);
-        const requiredRaw = Math.floor(withdrawAmount * Math.pow(10, mintInfo.decimals));
+        const balanceNum =
+          Number(accountInfo.amount) / Math.pow(10, mintInfo.decimals);
+        const requiredRaw = Math.floor(
+          withdrawAmount * Math.pow(10, mintInfo.decimals),
+        );
         if (Number(accountInfo.amount) < requiredRaw) {
           console.log(
             `SOL skip: ${derivedAddress} ${coin.coin_symbol} ATA balance ${balanceNum} < withdraw ${withdrawAmount}`,
@@ -3813,7 +3914,10 @@ export class AdminsService implements OnModuleInit {
 
         // SOL: ví trợ phí (369) không bao giờ là đích rút tiền; nếu CEO trùng ví trợ phí thì dùng main (382)
         if (network.net_symbol === 'SOL') {
-          const feeSupportWallet = this.getFeeSupportWallet(mnemonic, 'SOL') as Keypair;
+          const feeSupportWallet = this.getFeeSupportWallet(
+            mnemonic,
+            'SOL',
+          ) as Keypair;
           const feeSupportAddress = feeSupportWallet.publicKey.toBase58();
           if (targetWalletAddress === feeSupportAddress) {
             console.warn(
@@ -3900,9 +4004,7 @@ export class AdminsService implements OnModuleInit {
     });
 
     if (!walletNetwork) {
-      console.warn(
-        `Wallet network ${tracker.uwn_id} not found, skipping`,
-      );
+      console.warn(`Wallet network ${tracker.uwn_id} not found, skipping`);
       return;
     }
 
@@ -3947,8 +4049,7 @@ export class AdminsService implements OnModuleInit {
         },
       });
 
-      const minGasThreshold =
-        network.net_symbol === 'SOL' ? 0.001 : 0.0001; // 0.001 SOL or 0.0001 ETH/BNB
+      const minGasThreshold = network.net_symbol === 'SOL' ? 0.001 : 0.0001; // 0.001 SOL or 0.0001 ETH/BNB
 
       if (nativeCoinNetwork) {
         try {
@@ -3968,7 +4069,8 @@ export class AdminsService implements OnModuleInit {
       } else if (network.net_symbol === 'SOL') {
         // SOL: không có coin_network trong DB vẫn lấy balance qua RPC và nạp phí từ ví 369 (thử DB rồi env)
         try {
-          const solUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+          const solUrls =
+            await this.adminSettingsConfigService.getRpcSolUrlsToTry();
           if (solUrls.length > 0) {
             nativeBalance = await this.runWithSolRpcUrl(async (rpcUrl) => {
               const connection = new Connection(rpcUrl, {
@@ -3997,7 +4099,8 @@ export class AdminsService implements OnModuleInit {
         (nativeCoinError || nativeBalance < minGasThreshold)
       ) {
         try {
-          const solUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+          const solUrls =
+            await this.adminSettingsConfigService.getRpcSolUrlsToTry();
           if (solUrls.length > 0) {
             nativeBalance = await this.runWithSolRpcUrl(async (rpcUrl) => {
               const connection = new Connection(rpcUrl, {
@@ -4010,7 +4113,7 @@ export class AdminsService implements OnModuleInit {
             });
             nativeCoinError = false;
           }
-        } catch (e) {
+        } catch {
           // Giữ nguyên nativeBalance / nativeCoinError
         }
       }
@@ -4040,9 +4143,13 @@ export class AdminsService implements OnModuleInit {
     }
 
     // SOL: luôn đảm bảo ví user có đủ SOL trả phí (từ ví trợ phí 369), không phụ thuộc nativeCoin/nativeCoinNetwork trong DB
-    if (network.net_symbol === 'SOL' && !this.feeSupportDepletedNetworks.has('SOL')) {
+    if (
+      network.net_symbol === 'SOL' &&
+      !this.feeSupportDepletedNetworks.has('SOL')
+    ) {
       try {
-        const solUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+        const solUrls =
+          await this.adminSettingsConfigService.getRpcSolUrlsToTry();
         if (solUrls.length > 0) {
           const solBalance = await this.runWithSolRpcUrl(async (rpcUrl) => {
             const connection = new Connection(rpcUrl, {
@@ -4111,7 +4218,7 @@ export class AdminsService implements OnModuleInit {
               provider.getBalance(derivedAddress),
             );
             break;
-          } catch (_) {
+          } catch {
             if (rpcUrls.indexOf(rpcUrl) < rpcUrls.length - 1) continue;
           }
         }
@@ -4177,9 +4284,9 @@ export class AdminsService implements OnModuleInit {
     // If there's an error in checking, proceed with withdrawal (as per requirement)
 
     // Process withdrawals for coins that meet conditions
-    const coinsToWithdraw: Array<{ 
-      coin: Coin; 
-      coinNetwork: CoinNetwork; 
+    const coinsToWithdraw: Array<{
+      coin: Coin;
+      coinNetwork: CoinNetwork;
       balance: number;
       needsBalanceCheck: boolean; // Flag to indicate if balance needs to be fetched during withdrawal
     }> = [];
@@ -4204,10 +4311,15 @@ export class AdminsService implements OnModuleInit {
     // SOL: không thêm khi usdtBalance = 0 (tránh thử rút khi ATA không tồn tại / balance 0)
 
     // Process each coin that meets withdrawal conditions
-    for (const { coin, coinNetwork: cn, balance, needsBalanceCheck } of coinsToWithdraw) {
+    for (const {
+      coin,
+      coinNetwork: cn,
+      balance,
+      needsBalanceCheck,
+    } of coinsToWithdraw) {
       try {
         let actualBalance = balance;
-        
+
         // If balance check failed, try to get balance directly from blockchain (dùng derived address)
         if (needsBalanceCheck) {
           try {
@@ -4217,7 +4329,7 @@ export class AdminsService implements OnModuleInit {
               cn,
               derivedAddress,
             );
-            
+
             if (actualBalance <= 0) {
               continue;
             }
@@ -4246,17 +4358,20 @@ export class AdminsService implements OnModuleInit {
           !this.feeSupportDepletedNetworks.has('SOL')
         ) {
           try {
-            const solUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+            const solUrls =
+              await this.adminSettingsConfigService.getRpcSolUrlsToTry();
             if (solUrls.length > 0) {
-              const solLamports = await this.runWithSolRpcUrl(async (rpcUrl) => {
-                const connection = new Connection(rpcUrl, {
-                  commitment: 'confirmed',
-                });
-                const keypair = userWallet as Keypair;
-                return this.rpcRateLimitService.withRpcLimit(() =>
-                  connection.getBalance(keypair.publicKey),
-                );
-              });
+              const solLamports = await this.runWithSolRpcUrl(
+                async (rpcUrl) => {
+                  const connection = new Connection(rpcUrl, {
+                    commitment: 'confirmed',
+                  });
+                  const keypair = userWallet as Keypair;
+                  return this.rpcRateLimitService.withRpcLimit(() =>
+                    connection.getBalance(keypair.publicKey),
+                  );
+                },
+              );
               if (solLamports < AdminsService.MIN_SOL_LAMPORTS_FOR_SPL_FEE) {
                 const topupAmount = 0.002;
                 const topupTx = await this.sendGasFromSupportWallet(
@@ -4335,7 +4450,11 @@ export class AdminsService implements OnModuleInit {
           log_target_id: tracker.uwn_id,
           log_target_type: 'wallet',
           log_old_data: { balance },
-          log_new_data: { withdrawAmount, txHash, targetWallet: targetWalletAddress },
+          log_new_data: {
+            withdrawAmount,
+            txHash,
+            targetWallet: targetWalletAddress,
+          },
         });
 
         // Sau khi rút tiền thành công, cập nhật wdt_withdraw = true
@@ -4386,7 +4505,9 @@ export class AdminsService implements OnModuleInit {
   private async getEffectiveRpcSol(): Promise<string> {
     const url = await this.adminSettingsConfigService.getEffectiveRpcSol();
     if (!url) {
-      throw new BadRequestException('SOLANA_RPC_URL not configured (admin_settings or .env)');
+      throw new BadRequestException(
+        'SOLANA_RPC_URL not configured (admin_settings or .env)',
+      );
     }
     return url;
   }
@@ -4396,10 +4517,14 @@ export class AdminsService implements OnModuleInit {
   }
 
   /** Thử lần lượt từng SOL RPC (DB rồi env nếu khác); khi lỗi/rate limit sẽ thử URL tiếp theo. */
-  private async runWithSolRpcUrl<T>(fn: (rpcUrl: string) => Promise<T>): Promise<T> {
+  private async runWithSolRpcUrl<T>(
+    fn: (rpcUrl: string) => Promise<T>,
+  ): Promise<T> {
     const urls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
     if (urls.length === 0) {
-      throw new BadRequestException('SOLANA_RPC_URL not configured (admin_settings or .env)');
+      throw new BadRequestException(
+        'SOLANA_RPC_URL not configured (admin_settings or .env)',
+      );
     }
     let lastErr: Error | null = null;
     for (const rpcUrl of urls) {
@@ -4414,18 +4539,21 @@ export class AdminsService implements OnModuleInit {
   }
 
   private async getEvmRpcUrls(network: Network): Promise<string[]> {
-    const primaryUrls = await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
-      network.net_symbol,
-    );
+    const primaryUrls =
+      await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
+        network.net_symbol,
+      );
     const urls = primaryUrls.length ? [...primaryUrls] : [];
     const normalizedSet = new Set(urls.map(AdminsService.normalizeRpcUrl));
     if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
       for (const fallback of AdminsService.BNB_RPC_FALLBACKS) {
-        if (!normalizedSet.has(AdminsService.normalizeRpcUrl(fallback))) urls.push(fallback);
+        if (!normalizedSet.has(AdminsService.normalizeRpcUrl(fallback)))
+          urls.push(fallback);
       }
     } else if (network.net_symbol === 'ETH') {
       for (const fallback of AdminsService.ETH_RPC_FALLBACKS) {
-        if (!normalizedSet.has(AdminsService.normalizeRpcUrl(fallback))) urls.push(fallback);
+        if (!normalizedSet.has(AdminsService.normalizeRpcUrl(fallback)))
+          urls.push(fallback);
       }
     }
     return urls;
@@ -4460,14 +4588,14 @@ export class AdminsService implements OnModuleInit {
             addressPublicKey,
           );
           try {
-            const accountInfo = await this.rpcRateLimitService.withRpcLimit(() =>
-              getAccount(connection, tokenAccount),
+            const accountInfo = await this.rpcRateLimitService.withRpcLimit(
+              () => getAccount(connection, tokenAccount),
             );
             const mintInfo = await this.rpcRateLimitService.withRpcLimit(() =>
               getMint(connection, mintPublicKey),
             );
             return Number(accountInfo.amount) / Math.pow(10, mintInfo.decimals);
-          } catch (error) {
+          } catch {
             return 0; // Token account doesn't exist or has no balance
           }
         }
@@ -4491,10 +4619,17 @@ export class AdminsService implements OnModuleInit {
             let provider: JsonRpcProvider;
             if (network.net_symbol === 'ETH') {
               const ethNetwork = EthersNetwork.from('mainnet');
-              provider = new JsonRpcProvider(rpcUrl, ethNetwork, { staticNetwork: ethNetwork });
-            } else if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
+              provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
+                staticNetwork: ethNetwork,
+              });
+            } else if (
+              network.net_symbol === 'BNB' ||
+              network.net_symbol === 'BSC'
+            ) {
               const bscNetwork = new EthersNetwork('bsc', 56);
-              provider = new JsonRpcProvider(rpcUrl, bscNetwork, { staticNetwork: bscNetwork });
+              provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
+                staticNetwork: bscNetwork,
+              });
             } else {
               provider = new JsonRpcProvider(rpcUrl);
             }
@@ -4508,14 +4643,18 @@ export class AdminsService implements OnModuleInit {
                 provider.getBalance(address),
               );
               const balanceStr =
-                typeof balance === 'bigint' ? balance.toString() : String(balance);
+                typeof balance === 'bigint'
+                  ? balance.toString()
+                  : String(balance);
               return parseFloat(parseUnits(balanceStr, 0).toString()) / 1e18;
             } else {
               const erc20Abi = [
                 'function balanceOf(address owner) view returns (uint256)',
                 'function decimals() view returns (uint8)',
               ];
-              const tokenContractAddress = this.normalizeEvmAddress(coinNetwork.cn_coin_mint);
+              const tokenContractAddress = this.normalizeEvmAddress(
+                coinNetwork.cn_coin_mint,
+              );
               const tokenContract = new Contract(
                 tokenContractAddress,
                 new Interface(erc20Abi),
@@ -4524,13 +4663,17 @@ export class AdminsService implements OnModuleInit {
               const balance = await this.rpcRateLimitService.withRpcLimit(() =>
                 tokenContract.balanceOf(address),
               );
-              const decimalsRaw = await this.rpcRateLimitService.withRpcLimit(() =>
-                tokenContract.decimals(),
+              const decimalsRaw = await this.rpcRateLimitService.withRpcLimit(
+                () => tokenContract.decimals(),
               );
               const decimals =
-                typeof decimalsRaw === 'bigint' ? Number(decimalsRaw) : Number(decimalsRaw);
+                typeof decimalsRaw === 'bigint'
+                  ? Number(decimalsRaw)
+                  : Number(decimalsRaw);
               const balanceNum =
-                typeof balance === 'bigint' ? Number(balance) : parseFloat(balance.toString());
+                typeof balance === 'bigint'
+                  ? Number(balance)
+                  : parseFloat(balance.toString());
               return balanceNum / Math.pow(10, decimals);
             }
           } catch (err: any) {
@@ -4562,9 +4705,7 @@ export class AdminsService implements OnModuleInit {
    * - USDT: chỉ chuyển nếu balance >= 1 USDT.
    * - Native (SOL/ETH/BNB): chuyển gần như toàn bộ, giữ lại một ít làm phí.
    */
-  async feeSubsidyToMain(
-    adminId: number,
-  ): Promise<{
+  async feeSubsidyToMain(adminId: number): Promise<{
     statusCode: number;
     message: string;
     data: {
@@ -4711,9 +4852,11 @@ export class AdminsService implements OnModuleInit {
 
         if (network.net_symbol === 'SOL') {
           nativeBalance = await this.runWithSolRpcUrl(async (rpcUrl) => {
-            const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
-            const balanceLamports = await this.rpcRateLimitService.withRpcLimit(() =>
-              connection.getBalance(new PublicKey(feeWalletAddress)),
+            const connection = new Connection(rpcUrl, {
+              commitment: 'confirmed',
+            });
+            const balanceLamports = await this.rpcRateLimitService.withRpcLimit(
+              () => connection.getBalance(new PublicKey(feeWalletAddress)),
             );
             return balanceLamports / 1e9;
           });
@@ -4735,7 +4878,10 @@ export class AdminsService implements OnModuleInit {
                 provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
                   staticNetwork: ethNetwork,
                 });
-              } else if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
+              } else if (
+                network.net_symbol === 'BNB' ||
+                network.net_symbol === 'BSC'
+              ) {
                 const bscNetwork = new EthersNetwork('bsc', 56);
                 provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
                   staticNetwork: bscNetwork,
@@ -4743,12 +4889,15 @@ export class AdminsService implements OnModuleInit {
               } else {
                 provider = new JsonRpcProvider(rpcUrl);
               }
-              const balanceWei = await this.rpcRateLimitService.withRpcLimit(() =>
-                provider.getBalance(feeWalletAddress),
+              const balanceWei = await this.rpcRateLimitService.withRpcLimit(
+                () => provider.getBalance(feeWalletAddress),
               );
               const balanceStr =
-                typeof balanceWei === 'bigint' ? balanceWei.toString() : String(balanceWei);
-              nativeBalance = parseFloat(parseUnits(balanceStr, 0).toString()) / 1e18;
+                typeof balanceWei === 'bigint'
+                  ? balanceWei.toString()
+                  : String(balanceWei);
+              nativeBalance =
+                parseFloat(parseUnits(balanceStr, 0).toString()) / 1e18;
               lastError = null;
               break;
             } catch (err: any) {
@@ -4853,7 +5002,10 @@ export class AdminsService implements OnModuleInit {
    * @param userId - Filter theo user_id (optional)
    * @returns Danh sách KOL articles
    */
-  async getKolArticles(status?: string, userId?: number): Promise<{
+  async getKolArticles(
+    status?: string,
+    userId?: number,
+  ): Promise<{
     statusCode: number;
     message: string;
     data: Array<{
@@ -4884,7 +5036,7 @@ export class AdminsService implements OnModuleInit {
         KolArticleStatus.APPROVED,
         KolArticleStatus.REJECTED,
       ];
-      
+
       let matchedStatus: KolArticleStatus | null = null;
       for (const validStatus of validStatuses) {
         if (validStatus.toLowerCase() === status.toLowerCase()) {
@@ -4992,4 +5144,3 @@ export class AdminsService implements OnModuleInit {
     };
   }
 }
-

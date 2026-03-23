@@ -10,10 +10,10 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 
-@Entity('use_wallet_networks')
+@Entity('user_wallet_networks')
 @Index(['uwn_user_id'])
 @Index(['uwn_network_id'])
-export class UseWalletNetwork {
+export class UserWalletNetwork {
   @PrimaryGeneratedColumn({ name: 'uwn_id', type: 'integer' })
   uwn_id: number;
 

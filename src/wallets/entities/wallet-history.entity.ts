@@ -9,7 +9,7 @@ import {
   Index,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import { UseWalletNetwork } from './use-wallet-network.entity';
+import { UserWalletNetwork } from './user-wallet-network.entity';
 
 export enum WalletHistoryType {
   NATIONAL = 'national',
@@ -92,9 +92,9 @@ export class WalletHistory {
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updated_at: Date;
 
-  @ManyToOne(() => UseWalletNetwork)
+  @ManyToOne(() => UserWalletNetwork)
   @JoinColumn({ name: 'wh_wallet_netword_id' })
-  wallet_network: UseWalletNetwork | null;
+  wallet_network: UserWalletNetwork | null;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'wh_user' })

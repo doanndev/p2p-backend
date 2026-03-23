@@ -10,7 +10,7 @@ import { Keypair, Connection, PublicKey, SystemProgram, Transaction } from '@sol
 import { getAssociatedTokenAddress, createTransferInstruction, TOKEN_PROGRAM_ID, getMint, getAccount, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { HDNodeWallet, Mnemonic, JsonRpcProvider, parseUnits, Contract, Interface, Wallet, Network as EthersNetwork, getAddress } from 'ethers';
 import * as QRCode from 'qrcode';
-import { UseWalletNetwork } from './entities/use-wallet-network.entity';
+import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { UserWallet } from './entities/user-wallet.entity';
 import { WalletHistory, WalletHistoryType, WalletHistoryOption, WalletHistoryStatus } from './entities/wallet-history.entity';
 import { WalletTransfer, WalletTransferFrom, WalletTransferTo, WalletTransferStatus } from './entities/wallet-transfer.entity';
@@ -31,8 +31,8 @@ const WITHDRAW_ERROR_MESSAGE =
 @Injectable()
 export class WalletsService {
   constructor(
-    @InjectRepository(UseWalletNetwork)
-    private useWalletNetworkRepository: Repository<UseWalletNetwork>,
+    @InjectRepository(UserWalletNetwork)
+    private useWalletNetworkRepository: Repository<UserWalletNetwork>,
     @InjectRepository(UserWallet)
     private userWalletRepository: Repository<UserWallet>,
     @InjectRepository(WalletHistory)
@@ -73,7 +73,7 @@ export class WalletsService {
     });
   }
 
-  async getWalletByNetwork(userId: number, networkId: number): Promise<UseWalletNetwork | null> {
+  async getWalletByNetwork(userId: number, networkId: number): Promise<UserWalletNetwork | null> {
     const wallet = await this.useWalletNetworkRepository.findOne({
       where: {
         uwn_user_id: userId,

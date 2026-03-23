@@ -11,7 +11,7 @@ import { WalletHistory, WalletHistoryOption, WalletHistoryStatus } from './entit
 import { WalletTransfer, WalletTransferFrom, WalletTransferStatus } from './entities/wallet-transfer.entity';
 import { WalletDepositTracker } from './entities/wallet-deposit-tracker.entity';
 import { UserWallet } from './entities/user-wallet.entity';
-import { UseWalletNetwork } from './entities/use-wallet-network.entity';
+import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { Network } from '../settings/entities/network.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { CoinNetwork, CoinNetworkStatus } from '../settings/entities/coin-network.entity';
@@ -60,8 +60,8 @@ export class WalletsSchedulerService implements OnModuleInit {
     private coinNetworkRepository: Repository<CoinNetwork>,
     @InjectRepository(WalletTransfer)
     private walletTransferRepository: Repository<WalletTransfer>,
-    @InjectRepository(UseWalletNetwork)
-    private useWalletNetworkRepository: Repository<UseWalletNetwork>,
+    @InjectRepository(UserWalletNetwork)
+    private useWalletNetworkRepository: Repository<UserWalletNetwork>,
     private configService: ConfigService,
     private cacheService: CacheService,
     private fileStorageService: WalletsFileStorageService,

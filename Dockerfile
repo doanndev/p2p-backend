@@ -17,10 +17,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=10000
 ENV APP_PORT=10000
+ENV YARN_CACHE_FOLDER=/tmp/.yarn-cache
 
 # Install production dependencies only
 COPY package.json yarn.lock ./
-RUN corepack enable && yarn install --frozen-lockfile --production=true
+RUN corepack enable \
+  && yarn install --frozen-lockfile --production=true \
+  && yarn cache clean \
+  && rm -rf /tmp/.yarn-cache /root/.cache /tmp/*
 
 # Copy build output
 COPY --from=builder /app/dist ./dist

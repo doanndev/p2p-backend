@@ -4,7 +4,7 @@ import { WalletsController } from './wallets.controller';
 import { WalletsService } from './wallets.service';
 import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { WalletsFileStorageService } from './wallets-file-storage.service';
-import { UseWalletNetwork } from './entities/use-wallet-network.entity';
+import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { UserWallet } from './entities/user-wallet.entity';
 import { WalletHistory } from './entities/wallet-history.entity';
 import { ActiveWalletTracker } from './entities/active-wallet-tracker.entity';
@@ -22,7 +22,7 @@ import { SettingsModule } from '../settings/settings.module';
   imports: [
     SettingsModule,
     TypeOrmModule.forFeature([
-      UseWalletNetwork,
+      UserWalletNetwork,
       UserWallet,
       WalletHistory,
       ActiveWalletTracker,

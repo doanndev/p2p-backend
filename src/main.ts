@@ -4,24 +4,28 @@ import { ConfigService } from '@nestjs/config';
 import * as cookieParser from 'cookie-parser';
 import { DatabaseExceptionFilter } from './exceptions/database-exception.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as errsole from 'errsole';
+import ErrsoleSQLite from 'errsole-sqlite';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   // Set global prefix cho tất cả routes
   app.setGlobalPrefix('api/v1');
-  
+
   app.useGlobalFilters(new DatabaseExceptionFilter());
 
   const configService = app.get(ConfigService);
 
   // Lấy danh sách các domain từ biến môi trường, nếu không thì mặc định là localhost
-  const frontendUrlsRaw = configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
+  const frontendUrlsRaw =
+    configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
   const frontendUrls = frontendUrlsRaw.split(','); // Tách các URL nếu có nhiều hơn 1 domain
 
   const port =
-    Number(process.env.PORT) ||
-    configService.get<number>('APP_PORT', 8080);
+    Number(process.env.PORT) || configService.get<number>('APP_PORT', 8080);
 
   // Cấu hình CORS hỗ trợ subdomain
   app.enableCors({
@@ -32,7 +36,9 @@ async function bootstrap() {
       }
 
       const isAllowed = frontendUrls.some((url) => {
-        const regex = new RegExp(`^https?://([a-z0-9-]+\.)?${url.replace('http://', '').replace('https://', '')}$`);
+        const regex = new RegExp(
+          `^https?://([a-z0-9-]+\.)?${url.replace('http://', '').replace('https://', '')}$`,
+        );
         return regex.test(origin);
       });
 
@@ -48,6 +54,35 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+
+  const errsoleEnabled =
+    (configService.get<string>('ERRSOLE_ENABLED') ?? 'true').toLowerCase() !==
+    'false';
+  if (errsoleEnabled) {
+    const errsoleDbPath =
+      configService.get<string>('ERRSOLE_DB_PATH') ??
+      path.join(process.cwd(), 'data', 'errsole', 'errsole.sqlite');
+    const errsoleAppName =
+      configService.get<string>('ERRSOLE_APP_NAME') ?? 'backend2.5';
+    const errsoleEnvName =
+      configService.get<string>('ERRSOLE_ENV_NAME') ??
+      configService.get<string>('NODE_ENV') ??
+      'development';
+
+    fs.mkdirSync(path.dirname(errsoleDbPath), { recursive: true });
+
+    const storage = new ErrsoleSQLite(errsoleDbPath);
+    errsole.initialize({
+      storage,
+      enableConsoleOutput: true,
+      enableDashboard: true,
+      appName: errsoleAppName,
+      environmentName: errsoleEnvName,
+      collectLogs: ['debug', 'info', 'warn', 'error'],
+    });
+
+    app.use('/errsole', errsole.expressProxyMiddleware());
+  }
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Backend 2.5 API')
@@ -77,6 +112,7 @@ async function bootstrap() {
   await app.listen(port);
   console.log(`\uD83D\uDE80 Ứng dụng đang chạy tại: http://localhost:${port}`);
   console.log(`📚 Swagger docs: http://localhost:${port}/docs`);
+  console.log(`🪵 Errsole logs: http://localhost:${port}/errsole`);
 }
 
 bootstrap();

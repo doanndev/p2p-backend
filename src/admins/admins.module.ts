@@ -20,12 +20,12 @@ import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionGuard } from './guards/admin-permission.guard';
 import { AdminSetting } from '../settings/entities/admin-setting.entity';
 import { User } from '../users/entities/user.entity';
-import { WalletHistory, WalletHistoryOption, WalletHistoryStatus } from '../wallets/entities/wallet-history.entity';
+import { WalletHistory } from '../wallets/entities/wallet-history.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { WalletTransfer } from '../wallets/entities/wallet-transfer.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { Network } from '../settings/entities/network.entity';
-import { UseWalletNetwork } from '../wallets/entities/use-wallet-network.entity';
+import { UserWalletNetwork } from '../wallets/entities/user-wallet-network.entity';
 import { ActiveWalletTracker } from '../wallets/entities/active-wallet-tracker.entity';
 import { WalletDepositTracker } from '../wallets/entities/wallet-deposit-tracker.entity';
 import { CoinNetwork } from '../settings/entities/coin-network.entity';
@@ -61,7 +61,7 @@ import { SettingsModule } from '../settings/settings.module';
       WalletTransfer,
       Coin,
       Network,
-      UseWalletNetwork,
+      UserWalletNetwork,
       ActiveWalletTracker,
       WalletDepositTracker,
       CoinNetwork,
@@ -110,4 +110,3 @@ import { SettingsModule } from '../settings/settings.module';
   exports: [AdminsService],
 })
 export class AdminsModule {}
-

@@ -9,7 +9,7 @@ import {
   Index,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import { UseWalletNetwork } from './use-wallet-network.entity';
+import { UserWalletNetwork } from './user-wallet-network.entity';
 import { Network } from '../../settings/entities/network.entity';
 
 @Entity('active_wallet_trackers')
@@ -53,9 +53,9 @@ export class ActiveWalletTracker {
   })
   updated_at: Date;
 
-  @ManyToOne(() => UseWalletNetwork)
+  @ManyToOne(() => UserWalletNetwork)
   @JoinColumn({ name: 'uwn_id' })
-  wallet_network: UseWalletNetwork;
+  wallet_network: UserWalletNetwork;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'awt_user_id' })
