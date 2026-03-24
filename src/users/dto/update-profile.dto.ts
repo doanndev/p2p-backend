@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'John Developer', description: 'Tên hiển thị mới' })
-  display_name?: string;
+  displayName?: string;
 
   @ApiPropertyOptional({ example: '1998-12-31', description: 'Ngày sinh theo định dạng YYYY-MM-DD' })
   birthday?: string;

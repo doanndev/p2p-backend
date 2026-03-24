@@ -77,4 +77,3 @@ export class UserLog {
   @JoinColumn({ name: 'log_user_id' })
   user: User;
 }
-

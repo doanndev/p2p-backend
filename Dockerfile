@@ -15,8 +15,6 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=10000
-ENV APP_PORT=10000
 ENV YARN_CACHE_FOLDER=/tmp/.yarn-cache
 
 # Install production dependencies only
@@ -28,8 +26,5 @@ RUN corepack enable \
 
 # Copy build output
 COPY --from=builder /app/dist ./dist
-
-# Render provides PORT dynamically; default exposed for local docker run
-EXPOSE 10000
 
 CMD ["node", "dist/main.js"]

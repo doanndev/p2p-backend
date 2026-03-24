@@ -72,11 +72,13 @@ export class UsersService {
     path: string;
     domain?: string;
   } {
-    const frontendUrlsRaw = this.configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
+    const frontendUrlsRaw =
+      this.configService.get<string>('FRONTEND_URLS') ||
+      'http://localhost:3000';
     const frontendUrl = frontendUrlsRaw.split(',')[0];
     const isHttps = frontendUrl.startsWith('https://');
     const isProduction = process.env.NODE_ENV === 'production' || isHttps;
-    
+
     let domain: string | undefined;
     // TẠM THỜI: Không set domain để test xem có phải do domain gây vấn đề không
     // Nếu không set domain, browser sẽ tự xử lý và có thể parse cả 2 cookies đúng cách
@@ -94,7 +96,8 @@ export class UsersService {
     //   }
     // }
 
-    const sameSite: 'none' | 'lax' | 'strict' = isProduction && isHttps ? 'none' : 'lax';
+    const sameSite: 'none' | 'lax' | 'strict' =
+      isProduction && isHttps ? 'none' : 'lax';
     const secure = isProduction && isHttps;
 
     return {
@@ -108,7 +111,7 @@ export class UsersService {
 
   async register(registerDto: RegisterDto): Promise<User> {
     // ref_code is optional: only validate when client sends it
-    const normalizedRefCode = registerDto.ref_code?.trim();
+    const normalizedRefCode = registerDto.refCode?.trim();
     if (normalizedRefCode) {
       const referrerUser = await this.userRepository.findOne({
         where: { uref: normalizedRefCode },
@@ -171,7 +174,7 @@ export class UsersService {
       uggauth: null,
       upassword: hashedPassword,
       uref: newUref,
-      ufulllname: registerDto.display_name,
+      ufulllname: registerDto.displayName,
       ubirthday: null,
       usex: UserSex.OTHER,
       u_active_email: false,
@@ -855,11 +858,11 @@ export class UsersService {
 
     // Validate at least one URL is provided and not just whitespace
     const urls = [
-      registerKolDto.facebook_url,
-      registerKolDto.x_url,
-      registerKolDto.group_telegram_url,
-      registerKolDto.youtube_url,
-      registerKolDto.website_url,
+      registerKolDto.facebookUrl,
+      registerKolDto.xUrl,
+      registerKolDto.groupTelegramUrl,
+      registerKolDto.youtubeUrl,
+      registerKolDto.websiteUrl,
     ];
 
     const validUrls = urls.filter((url) => url && url.trim() !== '');
@@ -931,11 +934,11 @@ export class UsersService {
     const newKolRegister = this.kolRegisterRepository.create({
       kr_user_id: userId,
       kr_name: registerKolDto.name.trim(),
-      kr_facebook_url: registerKolDto.facebook_url?.trim() || null,
-      kr_x_url: registerKolDto.x_url?.trim() || null,
-      kr_gruop_telegram_url: registerKolDto.group_telegram_url?.trim() || null,
-      kr_youtube_url: registerKolDto.youtube_url?.trim() || null,
-      kr_website_url: registerKolDto.website_url?.trim() || null,
+      kr_facebook_url: registerKolDto.facebookUrl?.trim() || null,
+      kr_x_url: registerKolDto.xUrl?.trim() || null,
+      kr_gruop_telegram_url: registerKolDto.groupTelegramUrl?.trim() || null,
+      kr_youtube_url: registerKolDto.youtubeUrl?.trim() || null,
+      kr_website_url: registerKolDto.websiteUrl?.trim() || null,
       kr_status: KolRegisterStatus.PENDING,
     });
 
@@ -1008,7 +1011,7 @@ export class UsersService {
     };
   }> {
     // Validate id_card_number
-    if (!kycDto.id_card_number || kycDto.id_card_number.trim() === '') {
+    if (!kycDto.idCardNumber || kycDto.idCardNumber.trim() === '') {
       throw new BadRequestException('ID card number is required');
     }
 
@@ -1082,7 +1085,7 @@ export class UsersService {
     try {
       const userVerify = this.userVerifyRepository.create({
         uv_user_id: userId,
-        uv_id_card_number: kycDto.id_card_number.trim(),
+        uv_id_card_number: kycDto.idCardNumber.trim(),
         uv_front_image: frontImageUrl,
         uv_backside_image: backsideImageUrl,
         uv_status: UserVerifyStatus.PENDING,
@@ -1136,7 +1139,7 @@ export class UsersService {
     };
   }> {
     // Validate id_card_number
-    if (!kycDto.id_card_number || kycDto.id_card_number.trim() === '') {
+    if (!kycDto.idCardNumber || kycDto.idCardNumber.trim() === '') {
       throw new BadRequestException('ID card number is required');
     }
 
@@ -1217,7 +1220,7 @@ export class UsersService {
     // This allows users to retry verification with new images while keeping the same ID card number
     let savedVerify: UserVerify;
     try {
-      existingVerify.uv_id_card_number = kycDto.id_card_number.trim();
+      existingVerify.uv_id_card_number = kycDto.idCardNumber.trim();
       existingVerify.uv_front_image = frontImageUrl;
       existingVerify.uv_backside_image = backsideImageUrl;
       existingVerify.uv_status = UserVerifyStatus.PENDING;
@@ -1449,17 +1452,17 @@ export class UsersService {
     message: string;
   }> {
     // Validate current_password
-    if (!changePasswordDto.current_password || changePasswordDto.current_password.trim() === '') {
+    if (!changePasswordDto.currentPassword || changePasswordDto.currentPassword.trim() === '') {
       throw new BadRequestException('Current password is required');
     }
 
     // Validate new_password
-    if (!changePasswordDto.new_password || changePasswordDto.new_password.trim() === '') {
+    if (!changePasswordDto.newPassword || changePasswordDto.newPassword.trim() === '') {
       throw new BadRequestException('New password is required');
     }
 
     // Check new password minimum length (6 characters)
-    if (changePasswordDto.new_password.length < 6) {
+    if (changePasswordDto.newPassword.length < 6) {
       throw new BadRequestException('New password must be at least 6 characters long');
     }
 
@@ -1474,7 +1477,7 @@ export class UsersService {
 
     // Verify current password
     const isCurrentPasswordValid = await bcrypt.compare(
-      changePasswordDto.current_password,
+      changePasswordDto.currentPassword,
       user.upassword,
     );
 
@@ -1483,7 +1486,7 @@ export class UsersService {
     }
 
     // Hash new password
-    const hashedPassword = await bcrypt.hash(changePasswordDto.new_password, 10);
+    const hashedPassword = await bcrypt.hash(changePasswordDto.newPassword, 10);
 
     // Update user password
     user.upassword = hashedPassword;
@@ -1517,8 +1520,8 @@ export class UsersService {
     }
 
     // Update display_name (ufulllname) if provided
-    if (updateProfileDto.display_name !== undefined) {
-      const trimmedDisplayName = updateProfileDto.display_name.trim();
+    if (updateProfileDto.displayName !== undefined) {
+      const trimmedDisplayName = updateProfileDto.displayName.trim();
       if (trimmedDisplayName === '') {
         throw new BadRequestException('Display name cannot be empty');
       }
@@ -1711,14 +1714,14 @@ export class UsersService {
     }
 
     // 3. Validate article_url
-    if (!submitKolArticleDto.article_url || submitKolArticleDto.article_url.trim() === '') {
+    if (!submitKolArticleDto.articleUrl || submitKolArticleDto.articleUrl.trim() === '') {
       throw new BadRequestException('Article URL is required');
     }
 
     // 4. Tạo record mới trong kol_articles với status = pending
     const kolArticle = this.kolArticleRepository.create({
       ka_user_id: userId,
-      ka_article_url: submitKolArticleDto.article_url.trim(),
+      ka_article_url: submitKolArticleDto.articleUrl.trim(),
       ka_status: KolArticleStatus.PENDING,
     });
 

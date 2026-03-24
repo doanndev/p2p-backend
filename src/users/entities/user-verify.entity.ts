@@ -47,4 +47,3 @@ export class UserVerify {
   @OneToMany(() => VerifyLog, (verifyLog) => verifyLog.user_verify)
   verify_logs: VerifyLog[];
 }
-

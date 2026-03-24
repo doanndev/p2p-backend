@@ -64,4 +64,3 @@ export class UserCode {
   @JoinColumn({ name: 'uc_user_id' })
   user: User;
 }
-

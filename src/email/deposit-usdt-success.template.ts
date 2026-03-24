@@ -34,4 +34,3 @@ export function getDepositSuccessEmailHtml(amount: number): string {
     </div>
   `;
 }
-

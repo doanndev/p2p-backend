@@ -1,7 +1,9 @@
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
-export const databaseConfig = (configService: ConfigService): TypeOrmModuleOptions => {
+export const databaseConfig = (
+  configService: ConfigService,
+): TypeOrmModuleOptions => {
   return {
     type: 'postgres',
     host: configService.get('DB_HOST', 'localhost'),
@@ -11,6 +13,6 @@ export const databaseConfig = (configService: ConfigService): TypeOrmModuleOptio
     database: configService.get('DB_DATABASE', 'my_project'),
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
     synchronize: true,
-    logging: false
+    logging: false,
   };
 };

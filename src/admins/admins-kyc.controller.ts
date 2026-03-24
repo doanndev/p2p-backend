@@ -14,7 +14,13 @@ import { AdminsService } from './admins.service';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionReadUsersGuard } from './guards/admin-permission-read-users.guard';
 import { UpdateKycStatusDto } from './dto/update-kyc-status.dto';
-import { ApiBody, ApiCookieAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Admin KYC')
 @ApiCookieAuth('admin_access_token')
@@ -26,7 +32,18 @@ export class AdminsKycController {
   @ApiOperation({ summary: 'Lấy danh sách KYC theo trạng thái' })
   @ApiOkResponse({
     description: 'Danh sách KYC',
-    schema: { example: { statusCode: 200, data: [{ user_id: 120, status: 'pending', created_at: '2026-03-23T10:00:00.000Z' }] } },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [
+          {
+            user_id: 120,
+            status: 'pending',
+            created_at: '2026-03-23T10:00:00.000Z',
+          },
+        ],
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -39,7 +56,12 @@ export class AdminsKycController {
   @ApiOperation({ summary: 'Lịch sử KYC của một user' })
   @ApiOkResponse({
     description: 'Lịch sử KYC theo user',
-    schema: { example: { statusCode: 200, data: [{ id: 31, status: 'retry', notes: 'Ảnh mờ' }] } },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [{ id: 31, status: 'retry', notes: 'Ảnh mờ' }],
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -68,7 +90,12 @@ export class AdminsKycController {
   @ApiBody({ type: UpdateKycStatusDto })
   @ApiOkResponse({
     description: 'Cập nhật KYC thành công',
-    schema: { example: { statusCode: 200, message: 'Update KYC status successfully' } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Update KYC status successfully',
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -87,4 +114,3 @@ export class AdminsKycController {
     return result;
   }
 }
-

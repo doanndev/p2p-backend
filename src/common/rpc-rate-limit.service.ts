@@ -21,7 +21,8 @@ export class RpcRateLimitService {
     if (this.cachedLimit != null && now - this.cachedLimitAt < this.CACHE_MS) {
       return this.cachedLimit;
     }
-    this.cachedLimit = await this.adminSettingsConfigService.getEffectiveRpcRateLimit();
+    this.cachedLimit =
+      await this.adminSettingsConfigService.getEffectiveRpcRateLimit();
     this.cachedLimitAt = now;
     return this.cachedLimit;
   }
@@ -33,12 +34,16 @@ export class RpcRateLimitService {
     this.rpcSlotQueue = (async () => {
       await prev;
       let now = Date.now();
-      this.lastRpcTimestamps = this.lastRpcTimestamps.filter((t) => now - t < 1000);
+      this.lastRpcTimestamps = this.lastRpcTimestamps.filter(
+        (t) => now - t < 1000,
+      );
       while (this.lastRpcTimestamps.length >= limit) {
         const waitMs = this.lastRpcTimestamps[0] + 1000 - now;
         await new Promise((r) => setTimeout(r, Math.max(1, waitMs)));
         now = Date.now();
-        this.lastRpcTimestamps = this.lastRpcTimestamps.filter((t) => now - t < 1000);
+        this.lastRpcTimestamps = this.lastRpcTimestamps.filter(
+          (t) => now - t < 1000,
+        );
       }
       this.lastRpcTimestamps.push(Date.now());
     })();

@@ -51,4 +51,3 @@ export class KolRegister {
   @JoinColumn({ name: 'kr_user_id' })
   user: User;
 }
-

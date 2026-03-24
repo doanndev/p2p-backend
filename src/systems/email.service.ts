@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { getDepositSuccessEmailHtml } from '../email/deposit-usdt-success.template';
+import { getVerifyEmailCodeHtml } from '../email/verify-email-code.template';
 
 @Injectable()
 export class EmailService {
@@ -24,21 +25,17 @@ export class EmailService {
   }
 
   async sendEmailVerificationCode(to: string, code: string): Promise<void> {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    const verifyUrl = `${frontendUrl}/verify-email`;
+
     const mailOptions = {
-      from: this.configService.get<string>('SMTP_FROM') || this.configService.get<string>('SMTP_USER'),
+      from:
+        this.configService.get<string>('SMTP_FROM') ||
+        this.configService.get<string>('SMTP_USER'),
       to,
       subject: 'Email Verification Code',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #333;">Email Verification</h2>
-          <p>Your email verification code is:</p>
-          <div style="background-color: #f4f4f4; padding: 20px; text-align: center; border-radius: 5px; margin: 20px 0;">
-            <h1 style="color: #007bff; font-size: 32px; margin: 0; letter-spacing: 5px;">${code}</h1>
-          </div>
-          <p>This code will expire in 3 minutes.</p>
-          <p style="color: #666; font-size: 12px;">If you did not request this code, please ignore this email.</p>
-        </div>
-      `,
+      html: getVerifyEmailCodeHtml(code, 3, verifyUrl),
     };
 
     try {
@@ -50,11 +47,14 @@ export class EmailService {
   }
 
   async sendPasswordResetLink(to: string, token: string): Promise<void> {
-    const resetUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    const resetUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
     const resetLink = `${resetUrl}/change-password?token=${token}`;
 
     const mailOptions = {
-      from: this.configService.get<string>('SMTP_FROM') || this.configService.get<string>('SMTP_USER'),
+      from:
+        this.configService.get<string>('SMTP_FROM') ||
+        this.configService.get<string>('SMTP_USER'),
       to,
       subject: 'Password Reset Request',
       html: `
@@ -101,4 +101,3 @@ export class EmailService {
     }
   }
 }
-

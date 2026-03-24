@@ -754,33 +754,33 @@ export class AdminsService implements OnModuleInit {
       });
 
       // Update with provided values if > 0
-      if (videoSettingsDto.turn_default && videoSettingsDto.turn_default > 0) {
-        adminSetting.as_turn_watch_default = videoSettingsDto.turn_default;
+      if (videoSettingsDto.turnDefault && videoSettingsDto.turnDefault > 0) {
+        adminSetting.as_turn_watch_default = videoSettingsDto.turnDefault;
       }
       if (
-        videoSettingsDto.devices_default &&
-        videoSettingsDto.devices_default > 0
+        videoSettingsDto.devicesDefault &&
+        videoSettingsDto.devicesDefault > 0
       ) {
-        adminSetting.as_devices_default = videoSettingsDto.devices_default;
+        adminSetting.as_devices_default = videoSettingsDto.devicesDefault;
       }
-      if (videoSettingsDto.time_gap && videoSettingsDto.time_gap > 0) {
-        adminSetting.as_time_gap = videoSettingsDto.time_gap;
+      if (videoSettingsDto.timeGap && videoSettingsDto.timeGap > 0) {
+        adminSetting.as_time_gap = videoSettingsDto.timeGap;
       }
 
       await this.adminSettingRepository.save(adminSetting);
     } else {
       // Update existing values only if > 0
-      if (videoSettingsDto.turn_default && videoSettingsDto.turn_default > 0) {
-        adminSetting.as_turn_watch_default = videoSettingsDto.turn_default;
+      if (videoSettingsDto.turnDefault && videoSettingsDto.turnDefault > 0) {
+        adminSetting.as_turn_watch_default = videoSettingsDto.turnDefault;
       }
       if (
-        videoSettingsDto.devices_default &&
-        videoSettingsDto.devices_default > 0
+        videoSettingsDto.devicesDefault &&
+        videoSettingsDto.devicesDefault > 0
       ) {
-        adminSetting.as_devices_default = videoSettingsDto.devices_default;
+        adminSetting.as_devices_default = videoSettingsDto.devicesDefault;
       }
-      if (videoSettingsDto.time_gap && videoSettingsDto.time_gap > 0) {
-        adminSetting.as_time_gap = videoSettingsDto.time_gap;
+      if (videoSettingsDto.timeGap && videoSettingsDto.timeGap > 0) {
+        adminSetting.as_time_gap = videoSettingsDto.timeGap;
       }
 
       await this.adminSettingRepository.save(adminSetting);
@@ -791,7 +791,7 @@ export class AdminsService implements OnModuleInit {
       log_admin_id: adminId,
       log_action: AdminLogAction.UPDATE,
       log_module: AdminLogModule.SETTINGS,
-      log_description: `Admin updated video settings: turn_default=${videoSettingsDto.turn_default || 'unchanged'}, devices_default=${videoSettingsDto.devices_default || 'unchanged'}, time_gap=${videoSettingsDto.time_gap || 'unchanged'}`,
+      log_description: `Admin updated video settings: turnDefault=${videoSettingsDto.turnDefault || 'unchanged'}, devicesDefault=${videoSettingsDto.devicesDefault || 'unchanged'}, timeGap=${videoSettingsDto.timeGap || 'unchanged'}`,
       log_ip_address: null,
       log_user_agent: null,
     });
@@ -841,15 +841,15 @@ export class AdminsService implements OnModuleInit {
       });
 
       // Update with provided values if > 0
-      if (withdrawSettingsDto.turn_free && withdrawSettingsDto.turn_free > 0) {
-        adminSetting.as_turn_withdraw_free = withdrawSettingsDto.turn_free;
+      if (withdrawSettingsDto.turnFree && withdrawSettingsDto.turnFree > 0) {
+        adminSetting.as_turn_withdraw_free = withdrawSettingsDto.turnFree;
       }
 
       await this.adminSettingRepository.save(adminSetting);
     } else {
       // Update existing values only if > 0
-      if (withdrawSettingsDto.turn_free && withdrawSettingsDto.turn_free > 0) {
-        adminSetting.as_turn_withdraw_free = withdrawSettingsDto.turn_free;
+      if (withdrawSettingsDto.turnFree && withdrawSettingsDto.turnFree > 0) {
+        adminSetting.as_turn_withdraw_free = withdrawSettingsDto.turnFree;
       }
 
       await this.adminSettingRepository.save(adminSetting);
@@ -860,7 +860,7 @@ export class AdminsService implements OnModuleInit {
       log_admin_id: adminId,
       log_action: AdminLogAction.UPDATE,
       log_module: AdminLogModule.SETTINGS,
-      log_description: `Admin updated withdraw settings: turn_free=${withdrawSettingsDto.turn_free || 'unchanged'}`,
+      log_description: `Admin updated withdraw settings: turnFree=${withdrawSettingsDto.turnFree || 'unchanged'}`,
       log_ip_address: null,
       log_user_agent: null,
     });

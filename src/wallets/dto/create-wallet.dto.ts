@@ -5,6 +5,6 @@ export class CreateWalletDto {
   @ApiProperty({ example: 1, description: 'ID network cần tạo ví' })
   @IsNotEmpty()
   @IsNumber()
-  network_id: number;
+  networkId: number;
 }
 

@@ -7,10 +7,8 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
   // Set global prefix cho tất cả routes
   app.setGlobalPrefix('api/v1');
-
   app.useGlobalFilters(new DatabaseExceptionFilter());
 
   const configService = app.get(ConfigService);
@@ -20,8 +18,7 @@ async function bootstrap() {
     configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
   const frontendUrls = frontendUrlsRaw.split(','); // Tách các URL nếu có nhiều hơn 1 domain
 
-  const port =
-    Number(process.env.PORT) || configService.get<number>('APP_PORT', 8080);
+  const port = 8000;
 
   // Cấu hình CORS hỗ trợ subdomain
   app.enableCors({
@@ -70,19 +67,15 @@ async function bootstrap() {
     .build();
 
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  const swaggerJsonPath = 'docs-json';
   SwaggerModule.setup('docs', app, swaggerDocument, {
-    jsonDocumentUrl: swaggerJsonPath,
     swaggerOptions: {
       persistAuthorization: true,
-      url: `/${swaggerJsonPath}`,
     },
   });
 
-  await app.listen(port);
-  console.log(`\uD83D\uDE80 Ứng dụng đang chạy tại: http://localhost:${port}`);
-  console.log(`📚 Swagger docs: http://localhost:${port}/docs`);
-  console.log(`📄 Swagger JSON: http://localhost:${port}/${swaggerJsonPath}`);
+  await app.listen(port, '0.0.0.0');
+  console.log(`\uD83D\uDE80 Ứng dụng đang chạy tại: http://0.0.0.0:${port}`);
+  console.log(`📚 Swagger docs: http://0.0.0.0:${port}/docs`);
 }
 
 bootstrap();

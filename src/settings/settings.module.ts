@@ -26,4 +26,3 @@ import { AdminSettingTurn } from './entities/admin-setting-turn.entity';
   exports: [SettingsService, AdminSettingsConfigService],
 })
 export class SettingsModule {}
-

@@ -12,6 +12,8 @@ import { WalletsModule } from './wallets/wallets.module';
 import { SystemsModule } from './systems/systems.module';
 import { UsersModule } from './users/users.module';
 import { AdminsModule } from './admins/admins.module';
+import { OrderbookModule } from './orderbook/orderbook.module';
+import { ChatModule } from './chat/chat.module';
 
 
 @Module({
@@ -28,6 +30,8 @@ import { AdminsModule } from './admins/admins.module';
     SettingsModule,
     WalletsModule,
     AdminsModule,
+    OrderbookModule,
+    ChatModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
   providers: [AppService]

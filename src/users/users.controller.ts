@@ -1,4 +1,18 @@
-import { Controller, Post, Get, Body, HttpCode, HttpStatus, Res, Request, UseGuards, UseInterceptors, UploadedFiles, Query, BadRequestException, HttpException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Res,
+  Request,
+  UseGuards,
+  UseInterceptors,
+  UploadedFiles,
+  Query,
+  HttpException,
+} from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { UsersService } from './users.service';
@@ -31,7 +45,6 @@ import {
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-
   @Post('register')
   @ApiOperation({ summary: 'Đăng ký tài khoản người dùng' })
   @ApiBody({ type: RegisterDto })
@@ -50,8 +63,12 @@ export class UsersController {
     },
   })
   @HttpCode(HttpStatus.CREATED)
-  async register(@Body() registerDto: RegisterDto, @Res({ passthrough: true }) res: Response) {
-    const result = await this.usersService.registerAndGenerateTokens(registerDto);
+  async register(
+    @Body() registerDto: RegisterDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result =
+      await this.usersService.registerAndGenerateTokens(registerDto);
 
     // Set httpOnly cookies với domain nếu có
     const accessTokenOptions: any = {
@@ -77,8 +94,16 @@ export class UsersController {
     }
 
     // Set cookies using res.cookie() - Express will handle Set-Cookie headers
-    res.cookie('access_token', result.cookieOptions.access_token.value, accessTokenOptions);
-    res.cookie('refresh_token', result.cookieOptions.refresh_token.value, refreshTokenOptions);
+    res.cookie(
+      'access_token',
+      result.cookieOptions.access_token.value,
+      accessTokenOptions,
+    );
+    res.cookie(
+      'refresh_token',
+      result.cookieOptions.refresh_token.value,
+      refreshTokenOptions,
+    );
 
     return result.response;
   }
@@ -97,7 +122,10 @@ export class UsersController {
     },
   })
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Body() loginDto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const result = await this.usersService.login(loginDto);
 
     // Set httpOnly cookies với domain nếu có
@@ -124,10 +152,18 @@ export class UsersController {
     }
 
     // Set cookies directly - Express will overwrite existing cookies with same name
-    // KHÔNG clear cookies trước vì sẽ tạo thêm 2 Set-Cookie headers (clear), 
+    // KHÔNG clear cookies trước vì sẽ tạo thêm 2 Set-Cookie headers (clear),
     // làm tổng cộng 4 cookies trong 1 header, browser có thể chỉ parse cookie đầu tiên
-    res.cookie('access_token', result.cookieOptions.access_token.value, accessTokenOptions);
-    res.cookie('refresh_token', result.cookieOptions.refresh_token.value, refreshTokenOptions);
+    res.cookie(
+      'access_token',
+      result.cookieOptions.access_token.value,
+      accessTokenOptions,
+    );
+    res.cookie(
+      'refresh_token',
+      result.cookieOptions.refresh_token.value,
+      refreshTokenOptions,
+    );
 
     return result.response;
   }
@@ -136,10 +172,15 @@ export class UsersController {
   @ApiOperation({ summary: 'Làm mới token từ cookie refresh_token' })
   @ApiOkResponse({
     description: 'Làm mới token thành công',
-    schema: { example: { statusCode: 200, message: 'Refresh token successfully' } },
+    schema: {
+      example: { statusCode: 200, message: 'Refresh token successfully' },
+    },
   })
   @HttpCode(HttpStatus.OK)
-  async refreshToken(@Request() req: any, @Res({ passthrough: true }) res: Response) {
+  async refreshToken(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     // Get refresh_token from cookie
     const refreshToken = req.cookies?.refresh_token;
 
@@ -173,8 +214,16 @@ export class UsersController {
     }
 
     // Set cookies using res.cookie() - Express will handle Set-Cookie headers
-    res.cookie('access_token', result.cookieOptions.access_token.value, accessTokenOptions);
-    res.cookie('refresh_token', result.cookieOptions.refresh_token.value, refreshTokenOptions);
+    res.cookie(
+      'access_token',
+      result.cookieOptions.access_token.value,
+      accessTokenOptions,
+    );
+    res.cookie(
+      'refresh_token',
+      result.cookieOptions.refresh_token.value,
+      refreshTokenOptions,
+    );
 
     return result.response;
   }
@@ -183,14 +232,18 @@ export class UsersController {
   @ApiOperation({ summary: 'Gửi mã xác thực email cho tài khoản hiện tại' })
   @ApiOkResponse({
     description: 'Gửi mã thành công',
-    schema: { example: { statusCode: 200, message: 'Verification code sent successfully' } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Verification code sent successfully',
+      },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async generateCodeVerifyEmail(@Request() req: any) {
     const user = req.user; // User from JWT token
     const result = await this.usersService.generateCodeVerifyEmail(user.uid);
-    
     return {
       statusCode: HttpStatus.OK,
       message: result.message,
@@ -206,16 +259,27 @@ export class UsersController {
       example: {
         statusCode: 200,
         message: 'Email verified successfully',
-        user: { id: 120, name: 'john_doe', email: 'john@example.com', active_email: true },
+        user: {
+          id: 120,
+          name: 'john_doe',
+          email: 'john@example.com',
+          active_email: true,
+        },
       },
     },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto, @Request() req: any) {
+  async verifyEmail(
+    @Body() verifyEmailDto: VerifyEmailDto,
+    @Request() req: any,
+  ) {
     const user = req.user; // User from JWT token
-    const verifiedUser = await this.usersService.verifyEmail(user.uid, verifyEmailDto.code);
-    
+    const verifiedUser = await this.usersService.verifyEmail(
+      user.uid,
+      verifyEmailDto.code,
+    );
+
     return {
       statusCode: HttpStatus.OK,
       message: 'Email verified successfully',
@@ -249,7 +313,7 @@ export class UsersController {
   async getCurrentUser(@Request() req: any) {
     const user = req.user; // User from JWT token
     const userInfo = await this.usersService.getCurrentUser(user.uid);
-    
+
     return {
       statusCode: HttpStatus.OK,
       user: userInfo,
@@ -267,7 +331,7 @@ export class UsersController {
   async getKycStatus(@Request() req: any) {
     const user = req.user; // User from JWT token
     const result = await this.usersService.getKycStatus(user.uid);
-    
+
     const response: any = {
       statusCode: HttpStatus.OK,
       status: result.status,
@@ -292,7 +356,7 @@ export class UsersController {
   async checkRegisterKol(@Request() req: any) {
     const user = req.user; // User from JWT token
     const result = await this.usersService.checkRegisterKol(user.uid);
-    
+
     return {
       statusCode: HttpStatus.OK,
       status: result.status,
@@ -306,7 +370,7 @@ export class UsersController {
     schema: {
       type: 'object',
       properties: {
-        id_card_number: { type: 'string', example: '079123456789' },
+        idCardNumber: { type: 'string', example: '079123456789' },
         images: {
           type: 'array',
           items: { type: 'string', format: 'binary' },
@@ -314,12 +378,18 @@ export class UsersController {
           maxItems: 2,
         },
       },
-      required: ['id_card_number', 'images'],
+      required: ['idCardNumber', 'images'],
     },
   })
   @ApiCreatedResponse({
     description: 'Gửi KYC thành công',
-    schema: { example: { statusCode: 201, message: 'Submit KYC successfully', data: { status: 'pending' } } },
+    schema: {
+      example: {
+        statusCode: 201,
+        message: 'Submit KYC successfully',
+        data: { status: 'pending' },
+      },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(FilesInterceptor('images', 2, multerConfig))
@@ -341,7 +411,7 @@ export class UsersController {
     schema: {
       type: 'object',
       properties: {
-        id_card_number: { type: 'string', example: '079123456789' },
+        idCardNumber: { type: 'string', example: '079123456789' },
         images: {
           type: 'array',
           items: { type: 'string', format: 'binary' },
@@ -349,12 +419,18 @@ export class UsersController {
           maxItems: 2,
         },
       },
-      required: ['id_card_number', 'images'],
+      required: ['idCardNumber', 'images'],
     },
   })
   @ApiOkResponse({
     description: 'Gửi lại KYC thành công',
-    schema: { example: { statusCode: 200, message: 'Retry KYC successfully', data: { status: 'pending' } } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Retry KYC successfully',
+        data: { status: 'pending' },
+      },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(FilesInterceptor('images', 2, multerConfig))
@@ -374,7 +450,9 @@ export class UsersController {
   @ApiQuery({ name: 'code', required: true, example: 'REF2026' })
   @ApiOkResponse({
     description: 'Mã hợp lệ',
-    schema: { example: { statusCode: 200, message: 'Code is valid', valid: true } },
+    schema: {
+      example: { statusCode: 200, message: 'Code is valid', valid: true },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -389,7 +467,12 @@ export class UsersController {
   @ApiBody({ type: ResetPasswordDto })
   @ApiOkResponse({
     description: 'Yêu cầu reset thành công',
-    schema: { example: { statusCode: 200, message: 'Reset password code sent to email' } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Reset password code sent to email',
+      },
+    },
   })
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
@@ -402,7 +485,9 @@ export class UsersController {
   @ApiBody({ type: SetNewPasswordDto })
   @ApiOkResponse({
     description: 'Đặt mật khẩu mới thành công',
-    schema: { example: { statusCode: 200, message: 'Set new password successfully' } },
+    schema: {
+      example: { statusCode: 200, message: 'Set new password successfully' },
+    },
   })
   @HttpCode(HttpStatus.OK)
   async setNewPassword(@Body() setNewPasswordDto: SetNewPasswordDto) {
@@ -415,13 +500,21 @@ export class UsersController {
   @ApiBody({ type: ChangePasswordDto })
   @ApiOkResponse({
     description: 'Đổi mật khẩu thành công',
-    schema: { example: { statusCode: 200, message: 'Change password successfully' } },
+    schema: {
+      example: { statusCode: 200, message: 'Change password successfully' },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async changePassword(@Request() req: any, @Body() changePasswordDto: ChangePasswordDto) {
+  async changePassword(
+    @Request() req: any,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
     const user = req.user; // User from JWT token
-    const result = await this.usersService.changePassword(user.uid, changePasswordDto);
+    const result = await this.usersService.changePassword(
+      user.uid,
+      changePasswordDto,
+    );
     return result;
   }
 
@@ -430,13 +523,21 @@ export class UsersController {
   @ApiBody({ type: UpdateProfileDto })
   @ApiOkResponse({
     description: 'Cập nhật profile thành công',
-    schema: { example: { statusCode: 200, message: 'Update profile successfully' } },
+    schema: {
+      example: { statusCode: 200, message: 'Update profile successfully' },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async updateProfile(@Request() req: any, @Body() updateProfileDto: UpdateProfileDto) {
+  async updateProfile(
+    @Request() req: any,
+    @Body() updateProfileDto: UpdateProfileDto,
+  ) {
     const user = req.user; // User from JWT token
-    const result = await this.usersService.updateProfile(user.uid, updateProfileDto);
+    const result = await this.usersService.updateProfile(
+      user.uid,
+      updateProfileDto,
+    );
     return result;
   }
 
@@ -445,13 +546,21 @@ export class UsersController {
   @ApiBody({ type: RegisterKolDto })
   @ApiCreatedResponse({
     description: 'Đăng ký KOL thành công',
-    schema: { example: { statusCode: 201, message: 'Register KOL successfully' } },
+    schema: {
+      example: { statusCode: 201, message: 'Register KOL successfully' },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
-  async registerKol(@Request() req: any, @Body() registerKolDto: RegisterKolDto) {
+  async registerKol(
+    @Request() req: any,
+    @Body() registerKolDto: RegisterKolDto,
+  ) {
     const user = req.user; // User from JWT token
-    const result = await this.usersService.registerKol(user.uid, registerKolDto);
+    const result = await this.usersService.registerKol(
+      user.uid,
+      registerKolDto,
+    );
     return result.response;
   }
 
@@ -460,13 +569,21 @@ export class UsersController {
   @ApiBody({ type: SubmitKolArticleDto })
   @ApiCreatedResponse({
     description: 'Gửi bài viết thành công',
-    schema: { example: { statusCode: 201, message: 'Submit article successfully' } },
+    schema: {
+      example: { statusCode: 201, message: 'Submit article successfully' },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
-  async submitKolArticle(@Request() req: any, @Body() submitKolArticleDto: SubmitKolArticleDto) {
+  async submitKolArticle(
+    @Request() req: any,
+    @Body() submitKolArticleDto: SubmitKolArticleDto,
+  ) {
     const user = req.user; // User from JWT token
-    const result = await this.usersService.submitKolArticle(user.uid, submitKolArticleDto);
+    const result = await this.usersService.submitKolArticle(
+      user.uid,
+      submitKolArticleDto,
+    );
     return result.response;
   }
 
@@ -479,13 +596,22 @@ export class UsersController {
       example: {
         statusCode: 200,
         message: 'Get kol articles successfully',
-        data: [{ id: 9, article_url: 'https://medium.com/@john/article', status: 'approved' }],
+        data: [
+          {
+            id: 9,
+            article_url: 'https://medium.com/@john/article',
+            status: 'approved',
+          },
+        ],
       },
     },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async getUserKolArticles(@Request() req: any, @Query('status') status?: string) {
+  async getUserKolArticles(
+    @Request() req: any,
+    @Query('status') status?: string,
+  ) {
     const user = req.user; // User from JWT token
     const result = await this.usersService.getUserKolArticles(user.uid, status);
     return result;
@@ -534,12 +660,18 @@ export class UsersController {
   @ApiOperation({ summary: 'Lấy tổng số lượng user' })
   @ApiOkResponse({
     description: 'Tổng số lượng user',
-    schema: { example: { statusCode: 200, message: 'Get total users successfully', data: { total_users: 15230 } } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Get total users successfully',
+        data: { total_users: 15230 },
+      },
+    },
   })
   @HttpCode(HttpStatus.OK)
   async getTotalUsers() {
     const total = await this.usersService.getTotalUsers();
-    
+
     return {
       statusCode: HttpStatus.OK,
       message: 'Get total users successfully',
@@ -549,4 +681,3 @@ export class UsersController {
     };
   }
 }
-

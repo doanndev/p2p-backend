@@ -43,4 +43,3 @@ export class KolArticle {
   @JoinColumn({ name: 'ka_user_id' })
   user: User;
 }
-

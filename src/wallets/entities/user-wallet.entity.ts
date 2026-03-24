@@ -45,6 +45,15 @@ export class UserWallet {
   uw_balance: number;
 
   @Column({
+    name: 'uw_lock_balance',
+    type: 'decimal',
+    precision: 18,
+    scale: 8,
+    default: 0,
+  })
+  uw_lock_balance: number;
+
+  @Column({
     name: 'uw_balance_gift',
     type: 'decimal',
     precision: 18,
@@ -72,4 +81,3 @@ export class UserWallet {
   @JoinColumn({ name: 'uw_user_id' })
   user: User;
 }
-

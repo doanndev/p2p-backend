@@ -9,6 +9,6 @@ export class SubmitKolArticleDto {
   @IsString()
   @IsNotEmpty({ message: 'Article URL is required' })
   @IsUrl({}, { message: 'Article URL must be a valid URL' })
-  article_url: string;
+  articleUrl: string;
 }
 

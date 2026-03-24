@@ -9,8 +9,12 @@ import { CloudinaryService } from '../common/services/cloudinary.service';
 @Global()
 @Module({
   imports: [ConfigModule, TypeOrmModule],
-  providers: [EmailService, CacheService, DatabaseInitService, CloudinaryService],
+  providers: [
+    EmailService,
+    CacheService,
+    DatabaseInitService,
+    CloudinaryService,
+  ],
   exports: [EmailService, CacheService, CloudinaryService],
 })
 export class SystemsModule {}
-

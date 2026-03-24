@@ -30,4 +30,3 @@ export class VerifyLog {
   @JoinColumn({ name: 'vl_admin_id' })
   admin: Admin;
 }
-

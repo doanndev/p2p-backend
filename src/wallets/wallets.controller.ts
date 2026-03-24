@@ -205,7 +205,7 @@ export class WalletsController {
     const user = req.user; // User from JWT token
     const result = await this.walletsService.createWallet(
       user.uid,
-      createWalletDto.network_id,
+      createWalletDto.networkId,
     );
     return {
       statusCode: HttpStatus.CREATED,

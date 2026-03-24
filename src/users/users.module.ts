@@ -14,6 +14,7 @@ import { KolRegister } from './entities/kol-register.entity';
 import { KolArticle } from './entities/kol-article.entity';
 import { Notification } from './entities/notification.entity';
 import { UserLog } from './entities/user-log.entity';
+import { BankUser } from './entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { JwtStrategy } from '../common/strategies/jwt.strategy';
@@ -30,6 +31,7 @@ import { SystemsModule } from '../systems/systems.module';
       KolArticle,
       Notification,
       UserLog,
+      BankUser,
       UserWallet,
       Coin,
     ]),

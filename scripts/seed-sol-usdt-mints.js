@@ -1,5 +1,7 @@
 /* eslint-disable no-console */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Client } = require('pg');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 require('dotenv').config();
 
 const DEFAULT_SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -107,13 +109,17 @@ async function upsertCoinNetwork(client, networkId, coinId, mint) {
 
 async function main() {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
-    console.log('Usage: node scripts/seed-sol-usdt-mints.js [--usdt-mint=<mint>] [--sol-mint=<mint>]');
+    console.log(
+      'Usage: node scripts/seed-sol-usdt-mints.js [--usdt-mint=<mint>] [--sol-mint=<mint>]',
+    );
     console.log('You can also set env vars: USDT_MINT, SOL_MINT');
     return;
   }
 
-  const usdtMint = parseArg('usdt-mint') || process.env.USDT_MINT || DEFAULT_USDT_MINT;
-  const solMint = parseArg('sol-mint') || process.env.SOL_MINT || DEFAULT_SOL_MINT;
+  const usdtMint =
+    parseArg('usdt-mint') || process.env.USDT_MINT || DEFAULT_USDT_MINT;
+  const solMint =
+    parseArg('sol-mint') || process.env.SOL_MINT || DEFAULT_SOL_MINT;
 
   const client = new Client({
     host: process.env.DB_HOST || 'localhost',
@@ -128,8 +134,14 @@ async function main() {
 
   try {
     const networkId = await upsertSolNetwork(client);
-    const solCoinId = await upsertCoin(client, { symbol: 'SOL', name: 'Solana' });
-    const usdtCoinId = await upsertCoin(client, { symbol: 'USDT', name: 'Tether USD' });
+    const solCoinId = await upsertCoin(client, {
+      symbol: 'SOL',
+      name: 'Solana',
+    });
+    const usdtCoinId = await upsertCoin(client, {
+      symbol: 'USDT',
+      name: 'Tether USD',
+    });
 
     await upsertCoinNetwork(client, networkId, solCoinId, solMint);
     await upsertCoinNetwork(client, networkId, usdtCoinId, usdtMint);

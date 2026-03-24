@@ -22,7 +22,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
         url: process.env.REDIS_URL || 'redis://localhost:6379',
       });
 
-      this.client.on('error', (err) => {
+      this.client.on('error', () => {
         // Silently handle error, don't log to avoid spam
         this.useRedis = false;
         this.redisConnectionFailed = true;
@@ -30,21 +30,21 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
 
       // Set timeout để tránh hang quá lâu
       const connectPromise = this.client.connect();
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout')), 3000)
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timeout')), 3000),
       );
 
       await Promise.race([connectPromise, timeoutPromise]);
       this.useRedis = true;
       this.redisConnectionFailed = false;
       console.log('Redis connected successfully');
-    } catch (error) {
+    } catch {
       // Disconnect client nếu đã được tạo để ngăn error events tiếp theo
       if (this.client) {
         try {
           // Safely disconnect client
           await this.client.disconnect().catch(() => {});
-        } catch (e) {
+        } catch {
           // Ignore disconnect errors
         }
       }
@@ -77,7 +77,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     if (this.useRedis && !this.redisConnectionFailed) {
       try {
         return await this.client.get(key);
-      } catch (error) {
+      } catch {
         // Silently fallback to memory cache on error
         this.useRedis = false;
         this.redisConnectionFailed = true;
@@ -99,7 +99,11 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return entry.value;
   }
 
-  async set(key: string, value: string, expirationInSeconds?: number): Promise<void> {
+  async set(
+    key: string,
+    value: string,
+    expirationInSeconds?: number,
+  ): Promise<void> {
     if (this.useRedis && !this.redisConnectionFailed) {
       try {
         if (expirationInSeconds) {
@@ -108,7 +112,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
           await this.client.set(key, value);
         }
         return;
-      } catch (error) {
+      } catch {
         // Silently fallback to memory cache on error
         this.useRedis = false;
         this.redisConnectionFailed = true;
@@ -130,7 +134,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.client.del(key);
         return;
-      } catch (error) {
+      } catch {
         // Silently fallback to memory cache on error
         this.useRedis = false;
         this.redisConnectionFailed = true;
@@ -141,4 +145,3 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     this.memoryCache.delete(key);
   }
 }
-

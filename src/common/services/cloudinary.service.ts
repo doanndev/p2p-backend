@@ -91,4 +91,3 @@ export class CloudinaryService {
     return `${prefix}_${timestamp}_${random}`;
   }
 }
-

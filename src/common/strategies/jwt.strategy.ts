@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
@@ -41,17 +45,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     // Check if user is blocked
     if (user.ustatus === UserStatus.BLOCK) {
-      throw new ForbiddenException('Your account has been blocked. Please contact support for assistance.');
+      throw new ForbiddenException(
+        'Your account has been blocked. Please contact support for assistance.',
+      );
     }
 
     // Check email activation - but allow bypass for verify email endpoints
     const shouldBypassEmailCheck = request?._emailVerificationBypass === true;
-    
     if (!shouldBypassEmailCheck && !user.u_active_email) {
-      throw new ForbiddenException('Email is not activated. Please activate your email to continue.');
+      throw new ForbiddenException(
+        'Email is not activated. Please activate your email to continue.',
+      );
     }
 
     return user;
   }
 }
-

@@ -10,6 +10,7 @@ import { UserVerify } from './user-verify.entity';
 import { Notification } from './notification.entity';
 import { UserLog } from './user-log.entity';
 import { KolRegister } from './kol-register.entity';
+import { BankUser } from './bank-user.entity';
 
 export enum UserSex {
   MAN = 'man',
@@ -104,5 +105,7 @@ export class User {
 
   @OneToMany(() => KolRegister, (kolRegister) => kolRegister.user)
   kol_registers: KolRegister[];
-}
 
+  @OneToMany(() => BankUser, (bankUser) => bankUser.user)
+  bank_users: BankUser[];
+}

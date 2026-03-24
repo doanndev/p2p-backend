@@ -14,7 +14,13 @@ import { WithdrawSettingsDto } from './dto/withdraw-settings.dto';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionGuard } from './guards/admin-permission.guard';
 import { AdminPermissionReadSettingsGuard } from './guards/admin-permission-read-settings.guard';
-import { ApiBody, ApiCookieAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Admin Settings')
 @ApiCookieAuth('admin_access_token')
@@ -27,7 +33,12 @@ export class AdminsSettingsController {
   @ApiBody({ type: VideoSettingsDto })
   @ApiOkResponse({
     description: 'Cập nhật video settings thành công',
-    schema: { example: { statusCode: 200, message: 'Update video settings successfully' } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Update video settings successfully',
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionGuard)
   @HttpCode(HttpStatus.OK)
@@ -49,7 +60,12 @@ export class AdminsSettingsController {
   @ApiBody({ type: WithdrawSettingsDto })
   @ApiOkResponse({
     description: 'Cập nhật withdraw settings thành công',
-    schema: { example: { statusCode: 200, message: 'Update withdraw settings successfully' } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Update withdraw settings successfully',
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionGuard)
   @HttpCode(HttpStatus.OK)
@@ -87,4 +103,3 @@ export class AdminsSettingsController {
     return result;
   }
 }
-

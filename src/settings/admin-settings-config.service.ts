@@ -51,7 +51,9 @@ export class AdminSettingsConfigService {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_zerion_key ?? null);
     if (fromDb != null) return fromDb;
-    return validString(this.configService.get<string>('ZERION_API_KEY')) ?? null;
+    return (
+      validString(this.configService.get<string>('ZERION_API_KEY')) ?? null
+    );
   }
 
   /** RPC SOL: as_config_rps_sol hoặc SOLANA_RPC_URL. */
@@ -59,7 +61,9 @@ export class AdminSettingsConfigService {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_rps_sol ?? null);
     if (fromDb != null) return fromDb;
-    return validString(this.configService.get<string>('SOLANA_RPC_URL')) ?? null;
+    return (
+      validString(this.configService.get<string>('SOLANA_RPC_URL')) ?? null
+    );
   }
 
   /** RPC ETH: as_config_rps_eth hoặc RPC_ETH. */
@@ -84,7 +88,9 @@ export class AdminSettingsConfigService {
     if (upper === 'SOL') return this.getEffectiveRpcSol();
     if (upper === 'ETH') return this.getEffectiveRpcEth();
     if (upper === 'BNB' || upper === 'BSC') return this.getEffectiveRpcBnb();
-    return validString(this.configService.get<string>(`RPC_${netSymbol}`)) ?? null;
+    return (
+      validString(this.configService.get<string>(`RPC_${netSymbol}`)) ?? null
+    );
   }
 
   /**
@@ -94,7 +100,9 @@ export class AdminSettingsConfigService {
   async getRpcSolUrlsToTry(): Promise<string[]> {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_rps_sol ?? null);
-    const fromEnv = validString(this.configService.get<string>('SOLANA_RPC_URL') ?? null);
+    const fromEnv = validString(
+      this.configService.get<string>('SOLANA_RPC_URL') ?? null,
+    );
     if (!fromDb && !fromEnv) return [];
     if (!fromDb) return [fromEnv!];
     if (!fromEnv) return [fromDb];
@@ -105,7 +113,9 @@ export class AdminSettingsConfigService {
   async getRpcEthUrlsToTry(): Promise<string[]> {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_rps_eth ?? null);
-    const fromEnv = validString(this.configService.get<string>('RPC_ETH') ?? null);
+    const fromEnv = validString(
+      this.configService.get<string>('RPC_ETH') ?? null,
+    );
     if (!fromDb && !fromEnv) return [];
     if (!fromDb) return [fromEnv!];
     if (!fromEnv) return [fromDb];
@@ -116,7 +126,9 @@ export class AdminSettingsConfigService {
   async getRpcBnbUrlsToTry(): Promise<string[]> {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_rps_bnb ?? null);
-    const fromEnv = validString(this.configService.get<string>('RPC_BNB') ?? null);
+    const fromEnv = validString(
+      this.configService.get<string>('RPC_BNB') ?? null,
+    );
     if (!fromDb && !fromEnv) return [];
     if (!fromDb) return [fromEnv!];
     if (!fromEnv) return [fromDb];

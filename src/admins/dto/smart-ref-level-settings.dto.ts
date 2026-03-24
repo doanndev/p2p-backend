@@ -5,17 +5,17 @@ export class SmartRefLevelSettingsDto {
   @IsNumber()
   @Min(1)
   @Max(7)
-  max_level?: number;
+  maxLevel?: number;
 
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
-  @ValidateIf((o) => o.parcentage !== undefined)
+  @ValidateIf((o) => o.percentage !== undefined)
   @IsNumber({}, { each: true })
-  parcentage?: number[];
+  percentage?: number[];
 
   @IsOptional()
   @IsString()
-  log_ip_address?: string;
+  logIpAddress?: string;
 }
 

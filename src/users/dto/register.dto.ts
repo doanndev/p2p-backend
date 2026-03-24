@@ -14,8 +14,8 @@ export class RegisterDto {
   password: string;
 
   @ApiProperty({ example: 'John Doe', description: 'Tên hiển thị' })
-  display_name: string;
+  displayName: string;
 
   @ApiPropertyOptional({ example: 'REF2026', description: 'Mã giới thiệu' })
-  ref_code?: string;
+  refCode?: string;
 }
