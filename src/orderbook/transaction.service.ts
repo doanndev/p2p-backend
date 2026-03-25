@@ -19,6 +19,7 @@ import {
 } from './entities/transaction.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { ChatRoom, ChatRoomStatus } from '../chat/entities/chat-room.entity';
 
 @Injectable()
 export class TransactionService {
@@ -56,7 +57,9 @@ export class TransactionService {
         throw new BadRequestException('Order book is not available');
       }
       if (orderBook.ob_user_id === userId) {
-        throw new BadRequestException('You cannot trade with your own order book');
+        throw new BadRequestException(
+          'You cannot trade with your own order book',
+        );
       }
 
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
@@ -65,20 +68,27 @@ export class TransactionService {
       }
 
       const buyerId =
-        orderBook.ob_option === OrderBookOption.SELL ? userId : orderBook.ob_user_id;
+        orderBook.ob_option === OrderBookOption.SELL
+          ? userId
+          : orderBook.ob_user_id;
       const sellerId =
-        orderBook.ob_option === OrderBookOption.SELL ? orderBook.ob_user_id : userId;
+        orderBook.ob_option === OrderBookOption.SELL
+          ? orderBook.ob_user_id
+          : userId;
 
       if (orderBook.ob_option === OrderBookOption.BUY) {
         const sellerWallet = await manager.findOne(UserWallet, {
           where: { uw_user_id: sellerId, uw_wallet_coins: orderBook.ob_coin },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!sellerWallet) throw new NotFoundException('Seller wallet not found');
+        if (!sellerWallet)
+          throw new NotFoundException('Seller wallet not found');
 
         const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
         if (sellerAvailableBalance < dto.amount) {
-          throw new BadRequestException('Seller does not have enough available balance');
+          throw new BadRequestException(
+            'Seller does not have enough available balance',
+          );
         }
 
         sellerWallet.uw_balance = sellerAvailableBalance - dto.amount;
@@ -122,7 +132,46 @@ export class TransactionService {
         trans_message: null,
       });
 
-      return manager.save(Transaction, transaction);
+      const saved = await manager.save(Transaction, transaction);
+
+      // Create chat room for this transaction (pending 30 minutes window).
+      const existingRoom = await manager.findOne(ChatRoom, {
+        where: { room_transaction_id: saved.trans_id },
+      });
+      if (!existingRoom) {
+        const room = manager.create(ChatRoom, {
+          room_transaction_id: saved.trans_id,
+          room_buyer_id: saved.trans_user_buy,
+          room_seller_id: saved.trans_user_sell,
+          room_status: ChatRoomStatus.ACTIVE,
+          room_created_at: new Date(),
+          room_closed_at: null,
+        });
+        await manager.save(ChatRoom, room);
+      }
+
+      return {
+        id: saved.trans_id,
+        reference_code: saved.transs_reference_code,
+        user_buy: saved.trans_user_buy,
+        user_sell: saved.trans_user_sell,
+        coin: saved.trans_coin,
+        national: saved.trans_national,
+        order_book: saved.trans_order_book,
+        option: saved.trans_option,
+        type: saved.trans_type,
+        coin_symbol: saved.trans_coin_symbol,
+        national_symbol: saved.trans_national_symbol,
+        amount: saved.trans_amount,
+        price: saved.trans_price,
+        price_usd: saved.trans_price_usd,
+        total_price: saved.trans_total_price,
+        total_usd: saved.trans_total_usd,
+        dispute_status: saved.trans_dispute_status,
+        time_bank: saved.trans_time_bank,
+        status: saved.trans_status,
+        message: saved.trans_message,
+      };
     });
   }
 
@@ -135,30 +184,114 @@ export class TransactionService {
       where[0].trans_status = status;
       where[1].trans_status = status;
     }
-    return this.transactionRepository.find({ where, order: { trans_id: 'DESC' } });
+    const rows = await this.transactionRepository.find({
+      where,
+      order: { trans_id: 'DESC' },
+    });
+    return rows.map((t) => ({
+      id: t.trans_id,
+      reference_code: t.transs_reference_code,
+      user_buy: t.trans_user_buy,
+      user_sell: t.trans_user_sell,
+      coin: t.trans_coin,
+      national: t.trans_national,
+      order_book: t.trans_order_book,
+      option: t.trans_option,
+      type: t.trans_type,
+      coin_symbol: t.trans_coin_symbol,
+      national_symbol: t.trans_national_symbol,
+      amount: t.trans_amount,
+      price: t.trans_price,
+      price_usd: t.trans_price_usd,
+      total_price: t.trans_total_price,
+      total_usd: t.trans_total_usd,
+      dispute_status: t.trans_dispute_status,
+      time_bank: t.trans_time_bank,
+      status: t.trans_status,
+      message: t.trans_message,
+    }));
   }
 
   async getTransactionDetail(userId: number, id: number) {
-    const transaction = await this.transactionRepository.findOne({ where: { trans_id: id } });
+    const transaction = await this.transactionRepository.findOne({
+      where: { trans_id: id },
+    });
     if (!transaction) throw new NotFoundException('Transaction not found');
-    if (transaction.trans_user_buy !== userId && transaction.trans_user_sell !== userId) {
-      throw new ForbiddenException('You do not have permission to view this transaction');
+    if (
+      transaction.trans_user_buy !== userId &&
+      transaction.trans_user_sell !== userId
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to view this transaction',
+      );
     }
-    return transaction;
+    return {
+      id: transaction.trans_id,
+      reference_code: transaction.transs_reference_code,
+      user_buy: transaction.trans_user_buy,
+      user_sell: transaction.trans_user_sell,
+      coin: transaction.trans_coin,
+      national: transaction.trans_national,
+      order_book: transaction.trans_order_book,
+      option: transaction.trans_option,
+      type: transaction.trans_type,
+      coin_symbol: transaction.trans_coin_symbol,
+      national_symbol: transaction.trans_national_symbol,
+      amount: transaction.trans_amount,
+      price: transaction.trans_price,
+      price_usd: transaction.trans_price_usd,
+      total_price: transaction.trans_total_price,
+      total_usd: transaction.trans_total_usd,
+      dispute_status: transaction.trans_dispute_status,
+      time_bank: transaction.trans_time_bank,
+      status: transaction.trans_status,
+      message: transaction.trans_message,
+    };
   }
 
   async confirmPayment(userId: number, id: number) {
-    const transaction = await this.transactionRepository.findOne({ where: { trans_id: id } });
+    const transaction = await this.transactionRepository.findOne({
+      where: { trans_id: id },
+    });
     if (!transaction) throw new NotFoundException('Transaction not found');
-    if (transaction.trans_user_buy !== userId && transaction.trans_user_sell !== userId) {
-      throw new ForbiddenException('You are not a participant in this transaction');
+    if (
+      transaction.trans_user_buy !== userId &&
+      transaction.trans_user_sell !== userId
+    ) {
+      throw new ForbiddenException(
+        'You are not a participant in this transaction',
+      );
     }
     if (transaction.trans_status !== TransactionStatus.PENDDING) {
-      throw new BadRequestException('Only pending transaction can be confirmed');
+      throw new BadRequestException(
+        'Only pending transaction can be confirmed',
+      );
     }
     transaction.trans_status = TransactionStatus.PAYMENT_CONFIRMED;
     transaction.trans_time_bank = new Date();
-    return this.transactionRepository.save(transaction);
+    const saved = await this.transactionRepository.save(transaction);
+    return {
+      id: saved.trans_id,
+      reference_code: saved.transs_reference_code,
+      user_buy: saved.trans_user_buy,
+      user_sell: saved.trans_user_sell,
+      coin: saved.trans_coin,
+      national: saved.trans_national,
+      order_book: saved.trans_order_book,
+      option: saved.trans_option,
+      type: saved.trans_type,
+      coin_symbol: saved.trans_coin_symbol,
+      national_symbol: saved.trans_national_symbol,
+      amount: saved.trans_amount,
+      price: saved.trans_price,
+      price_usd: saved.trans_price_usd,
+      total_price: saved.trans_total_price,
+      total_usd: saved.trans_total_usd,
+      dispute_status: saved.trans_dispute_status,
+      time_bank: saved.trans_time_bank,
+      status: saved.trans_status,
+      message: saved.trans_message,
+    };
   }
 
   async confirmReceived(userId: number, id: number) {
@@ -168,11 +301,18 @@ export class TransactionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!transaction) throw new NotFoundException('Transaction not found');
-      if (transaction.trans_user_buy !== userId && transaction.trans_user_sell !== userId) {
-        throw new ForbiddenException('You are not a participant in this transaction');
+      if (
+        transaction.trans_user_buy !== userId &&
+        transaction.trans_user_sell !== userId
+      ) {
+        throw new ForbiddenException(
+          'You are not a participant in this transaction',
+        );
       }
       if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
-        throw new BadRequestException('Only payment_confirmed transaction can be executed');
+        throw new BadRequestException(
+          'Only payment_confirmed transaction can be executed',
+        );
       }
 
       const amount = this.toNumber(transaction.trans_amount);
@@ -200,14 +340,46 @@ export class TransactionService {
       }
 
       sellerWallet.uw_lock_balance = sellerLock - amount;
-      buyerWallet.uw_lock_balance = this.toNumber(buyerWallet.uw_lock_balance) + amount;
+      buyerWallet.uw_lock_balance =
+        this.toNumber(buyerWallet.uw_lock_balance) + amount;
 
       await manager.save(UserWallet, sellerWallet);
       await manager.save(UserWallet, buyerWallet);
 
       transaction.trans_status = TransactionStatus.EXECUTED;
-      await manager.save(Transaction, transaction);
-      return transaction;
+      const saved = await manager.save(Transaction, transaction);
+
+      // Close chat room when completed
+      await manager
+        .createQueryBuilder()
+        .update(ChatRoom)
+        .set({ room_status: ChatRoomStatus.CLOSED, room_closed_at: new Date() })
+        .where('room_transaction_id = :txId', { txId: saved.trans_id })
+        .andWhere('room_status = :status', { status: ChatRoomStatus.ACTIVE })
+        .execute();
+
+      return {
+        id: saved.trans_id,
+        reference_code: saved.transs_reference_code,
+        user_buy: saved.trans_user_buy,
+        user_sell: saved.trans_user_sell,
+        coin: saved.trans_coin,
+        national: saved.trans_national,
+        order_book: saved.trans_order_book,
+        option: saved.trans_option,
+        type: saved.trans_type,
+        coin_symbol: saved.trans_coin_symbol,
+        national_symbol: saved.trans_national_symbol,
+        amount: saved.trans_amount,
+        price: saved.trans_price,
+        price_usd: saved.trans_price_usd,
+        total_price: saved.trans_total_price,
+        total_usd: saved.trans_total_usd,
+        dispute_status: saved.trans_dispute_status,
+        time_bank: saved.trans_time_bank,
+        status: saved.trans_status,
+        message: saved.trans_message,
+      };
     });
   }
 
@@ -218,11 +390,18 @@ export class TransactionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!transaction) throw new NotFoundException('Transaction not found');
-      if (transaction.trans_user_buy !== userId && transaction.trans_user_sell !== userId) {
-        throw new ForbiddenException('You are not a participant in this transaction');
+      if (
+        transaction.trans_user_buy !== userId &&
+        transaction.trans_user_sell !== userId
+      ) {
+        throw new ForbiddenException(
+          'You are not a participant in this transaction',
+        );
       }
       if (transaction.trans_status !== TransactionStatus.PENDDING) {
-        throw new BadRequestException('Only pending transaction can be cancelled');
+        throw new BadRequestException(
+          'Only pending transaction can be cancelled',
+        );
       }
 
       const orderBook = await manager.findOne(OrderBook, {
@@ -230,7 +409,9 @@ export class TransactionService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!orderBook) {
-        throw new NotFoundException('Order book not found for this transaction');
+        throw new NotFoundException(
+          'Order book not found for this transaction',
+        );
       }
 
       const amount = this.toNumber(transaction.trans_amount);
@@ -249,21 +430,56 @@ export class TransactionService {
           },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!sellerWallet) throw new NotFoundException('Seller wallet not found');
+        if (!sellerWallet)
+          throw new NotFoundException('Seller wallet not found');
 
         const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
         if (lockBalance < amount) {
-          throw new BadRequestException('Seller lock balance is not enough to unlock');
+          throw new BadRequestException(
+            'Seller lock balance is not enough to unlock',
+          );
         }
 
         sellerWallet.uw_lock_balance = lockBalance - amount;
-        sellerWallet.uw_balance = this.toNumber(sellerWallet.uw_balance) + amount;
+        sellerWallet.uw_balance =
+          this.toNumber(sellerWallet.uw_balance) + amount;
         await manager.save(UserWallet, sellerWallet);
       }
 
       transaction.trans_status = TransactionStatus.CANCELLED;
-      await manager.save(Transaction, transaction);
-      return transaction;
+      const saved = await manager.save(Transaction, transaction);
+
+      // Close chat room when cancelled
+      await manager
+        .createQueryBuilder()
+        .update(ChatRoom)
+        .set({ room_status: ChatRoomStatus.CLOSED, room_closed_at: new Date() })
+        .where('room_transaction_id = :txId', { txId: saved.trans_id })
+        .andWhere('room_status = :status', { status: ChatRoomStatus.ACTIVE })
+        .execute();
+
+      return {
+        id: saved.trans_id,
+        reference_code: saved.transs_reference_code,
+        user_buy: saved.trans_user_buy,
+        user_sell: saved.trans_user_sell,
+        coin: saved.trans_coin,
+        national: saved.trans_national,
+        order_book: saved.trans_order_book,
+        option: saved.trans_option,
+        type: saved.trans_type,
+        coin_symbol: saved.trans_coin_symbol,
+        national_symbol: saved.trans_national_symbol,
+        amount: saved.trans_amount,
+        price: saved.trans_price,
+        price_usd: saved.trans_price_usd,
+        total_price: saved.trans_total_price,
+        total_usd: saved.trans_total_usd,
+        dispute_status: saved.trans_dispute_status,
+        time_bank: saved.trans_time_bank,
+        status: saved.trans_status,
+        message: saved.trans_message,
+      };
     });
   }
 }

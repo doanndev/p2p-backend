@@ -45,4 +45,3 @@ import { SettingsModule } from '../settings/settings.module';
   exports: [WalletsService, WalletsSchedulerService],
 })
 export class WalletsModule {}
-

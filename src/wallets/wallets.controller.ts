@@ -97,11 +97,16 @@ export class WalletsController {
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async getWalletByNetwork(@Query('id') networkId: string, @Request() req: any) {
+  async getWalletByNetwork(
+    @Query('id') networkId: string,
+    @Request() req: any,
+  ) {
     const user = req.user; // User from JWT token
-    
+
     if (!networkId || isNaN(Number(networkId))) {
-      throw new BadRequestException('Network ID is required and must be a number');
+      throw new BadRequestException(
+        'Network ID is required and must be a number',
+      );
     }
 
     const wallet = await this.walletsService.getWalletByNetwork(
@@ -114,7 +119,9 @@ export class WalletsController {
     }
 
     // Generate QR code from public key
-    const qrCode = await this.walletsService.generateQRCode(wallet.uwn_public_key);
+    const qrCode = await this.walletsService.generateQRCode(
+      wallet.uwn_public_key,
+    );
 
     // Transform response: bỏ uwn_user_id, created_at, updated_at và bỏ tiền tố uwn_
     const transformedWallet = {
@@ -155,7 +162,7 @@ export class WalletsController {
   @HttpCode(HttpStatus.OK)
   async getBalance(@Query('coin_id') coinId: string, @Request() req: any) {
     const user = req.user; // User from JWT token
-    
+
     if (!coinId || isNaN(Number(coinId))) {
       throw new BadRequestException('Coin ID is required and must be a number');
     }
@@ -195,13 +202,20 @@ export class WalletsController {
       example: {
         statusCode: 201,
         message: 'Create wallet successfully',
-        data: { id: 91, network_id: 1, public_key: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e' },
+        data: {
+          id: 91,
+          network_id: 1,
+          public_key: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+        },
       },
     },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
-  async createWallet(@Body() createWalletDto: CreateWalletDto, @Request() req: any) {
+  async createWallet(
+    @Body() createWalletDto: CreateWalletDto,
+    @Request() req: any,
+  ) {
     const user = req.user; // User from JWT token
     const result = await this.walletsService.createWallet(
       user.uid,
@@ -222,7 +236,13 @@ export class WalletsController {
       example: {
         statusCode: 200,
         message: 'Get my wallets successfully',
-        data: [{ id: 91, network_id: 1, public_key: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e' }],
+        data: [
+          {
+            id: 91,
+            network_id: 1,
+            public_key: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+          },
+        ],
       },
     },
   })
@@ -256,21 +276,27 @@ export class WalletsController {
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async checkWalletNetwork(@Query('network') network: string, @Request() req: any) {
+  async checkWalletNetwork(
+    @Query('network') network: string,
+    @Request() req: any,
+  ) {
     const user = req.user; // User from JWT token
-    
+
     if (!network) {
       throw new BadRequestException('Network parameter is required');
     }
 
-    const address = await this.walletsService.checkWalletNetwork(user.uid, network);
-    
+    const address = await this.walletsService.checkWalletNetwork(
+      user.uid,
+      network,
+    );
+
     // Generate QR code from address if exists
     let qrCode: string | null = null;
     if (address) {
       qrCode = await this.walletsService.generateQRCode(address);
     }
-    
+
     return {
       statusCode: HttpStatus.OK,
       message: 'Check wallet network successfully',
@@ -316,7 +342,15 @@ export class WalletsController {
       example: {
         statusCode: 200,
         message: 'Get transfer rewards history successfully',
-        data: [{ id: 17, from: 'reward', to: 'main', amount: 8.25, status: 'success' }],
+        data: [
+          {
+            id: 17,
+            from: 'reward',
+            to: 'main',
+            amount: 8.25,
+            status: 'success',
+          },
+        ],
       },
     },
   })
@@ -445,4 +479,3 @@ export class WalletsController {
     };
   }
 }
-

@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const bip39 = require('bip39');
 
 const mnemonic = bip39.generateMnemonic(256); // 24 words

@@ -78,4 +78,3 @@ export class WalletTransfer {
   @JoinColumn({ name: 'wt_user_id' })
   user: User;
 }
-

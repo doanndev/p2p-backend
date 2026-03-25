@@ -19,6 +19,9 @@ import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { JwtStrategy } from '../common/strategies/jwt.strategy';
 import { SystemsModule } from '../systems/systems.module';
+import { BankUsersController } from './bank-users.controller';
+import { BankUsersService } from './bank-users.service';
+import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entity';
 
 @Module({
   imports: [
@@ -34,6 +37,7 @@ import { SystemsModule } from '../systems/systems.module';
       BankUser,
       UserWallet,
       Coin,
+      SettingBankOrder,
     ]),
     PassportModule,
     ConfigModule,
@@ -49,8 +53,8 @@ import { SystemsModule } from '../systems/systems.module';
       inject: [ConfigService],
     }),
   ],
-  controllers: [UsersController],
-  providers: [UsersService, StorageService, JwtStrategy],
+  controllers: [UsersController, BankUsersController],
+  providers: [UsersService, StorageService, JwtStrategy, BankUsersService],
   exports: [UsersService],
 })
 export class UsersModule {}

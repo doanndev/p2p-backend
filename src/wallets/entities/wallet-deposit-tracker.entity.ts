@@ -50,4 +50,3 @@ export class WalletDepositTracker {
   @JoinColumn({ name: 'wdt_network_id' })
   network: Network;
 }
-

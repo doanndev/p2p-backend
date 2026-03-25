@@ -100,4 +100,3 @@ export class WalletHistory {
   @JoinColumn({ name: 'wh_user' })
   user: User | null;
 }
-

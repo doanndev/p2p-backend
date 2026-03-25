@@ -6,7 +6,14 @@ import { DatabaseExceptionFilter } from './exceptions/database-exception.filter'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const nestLoggerLevels =
+    process.env.LOG_LEVEL === 'debug'
+      ? (['error', 'warn', 'log', 'debug'] as const)
+      : (['error', 'warn', 'log'] as const);
+
+  const app = await NestFactory.create(AppModule, {
+    logger: [...nestLoggerLevels],
+  });
   // Set global prefix cho tất cả routes
   app.setGlobalPrefix('api/v1');
   app.useGlobalFilters(new DatabaseExceptionFilter());

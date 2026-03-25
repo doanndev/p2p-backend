@@ -17,7 +17,9 @@ import { Network } from '../../settings/entities/network.entity';
 @Index('idx_expires_at', ['awt_expires_at'])
 @Index('idx_network_id', ['awt_network_id'])
 @Index('idx_user_id', ['awt_user_id'])
-@Index('uq_awt_address_network', ['awt_address', 'awt_network_id'], { unique: true })
+@Index('uq_awt_address_network', ['awt_address', 'awt_network_id'], {
+  unique: true,
+})
 export class ActiveWalletTracker {
   @PrimaryGeneratedColumn({ name: 'awt_id', type: 'integer' })
   awt_id: number;
@@ -26,7 +28,11 @@ export class ActiveWalletTracker {
   uwn_id: number;
 
   /** Lưu UTC; dùng timestamptz để DB lưu đúng instant, tránh lệch với created_at (UTC). */
-  @Column({ name: 'awt_last_accessed_at', type: 'timestamptz', nullable: false })
+  @Column({
+    name: 'awt_last_accessed_at',
+    type: 'timestamptz',
+    nullable: false,
+  })
   awt_last_accessed_at: Date;
 
   @Column({ name: 'awt_expires_at', type: 'timestamptz', nullable: false })
@@ -38,7 +44,12 @@ export class ActiveWalletTracker {
   @Column({ name: 'awt_user_id', type: 'integer', nullable: false })
   awt_user_id: number;
 
-  @Column({ name: 'awt_address', type: 'varchar', length: 255, nullable: false })
+  @Column({
+    name: 'awt_address',
+    type: 'varchar',
+    length: 255,
+    nullable: false,
+  })
   awt_address: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp', nullable: false })
@@ -65,4 +76,3 @@ export class ActiveWalletTracker {
   @JoinColumn({ name: 'awt_network_id' })
   network: Network;
 }
-

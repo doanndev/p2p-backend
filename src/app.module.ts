@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
-import { appConfig } from './config/app.config';  // Import file config
+import { appConfig } from './config/app.config'; // Import file config
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RpcRateLimitModule } from './common/rpc-rate-limit.module';
@@ -15,14 +15,14 @@ import { AdminsModule } from './admins/admins.module';
 import { OrderbookModule } from './orderbook/orderbook.module';
 import { ChatModule } from './chat/chat.module';
 
-
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     RpcRateLimitModule,
     TypeOrmModule.forRootAsync({
-      useFactory: (configService: ConfigService) => databaseConfig(configService),
+      useFactory: (configService: ConfigService) =>
+        databaseConfig(configService),
       inject: [ConfigService],
     }),
     SystemsModule,
@@ -34,10 +34,10 @@ import { ChatModule } from './chat/chat.module';
     ChatModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
-  providers: [AppService]
+  providers: [AppService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    appConfig(consumer);  // Sử dụng cấu hình từ app.config.ts
+    appConfig(consumer); // Sử dụng cấu hình từ app.config.ts
   }
 }

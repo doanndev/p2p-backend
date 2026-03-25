@@ -47,7 +47,11 @@ export class WalletsFileStorageService {
   /**
    * Lấy đường dẫn file cho một địa chỉ ví và network
    */
-  private getFilePath(address: string, network: string, compressed = false): string {
+  private getFilePath(
+    address: string,
+    network: string,
+    compressed = false,
+  ): string {
     // Tạo tên file từ address và network (sanitize để tránh ký tự đặc biệt)
     const sanitizedAddress = address.replace(/[^a-zA-Z0-9]/g, '_');
     const extension = compressed ? '.json.gz' : '.json';
@@ -67,7 +71,7 @@ export class WalletsFileStorageService {
    */
   private async acquireLock(filePath: string): Promise<() => Promise<void>> {
     const lockPath = this.getLockFilePath(filePath);
-    
+
     // Nếu đã có lock đang chờ, đợi nó hoàn thành
     if (this.fileLocks.has(lockPath)) {
       await this.fileLocks.get(lockPath);
@@ -93,10 +97,13 @@ export class WalletsFileStorageService {
         realpath: false,
       });
 
-      this.fileLocks.set(lockPath, lockPromise.then(() => {}));
+      this.fileLocks.set(
+        lockPath,
+        lockPromise.then(() => {}),
+      );
 
       const release = await lockPromise;
-      
+
       return async () => {
         try {
           await release();
@@ -135,10 +142,12 @@ export class WalletsFileStorageService {
    */
   private async readFile(filePath: string): Promise<string> {
     const compressedPath = `${filePath}.gz`;
-    
+
     try {
       // Thử đọc file compressed trước
-      const compressedData = await fs.readFile(compressedPath).catch(() => null);
+      const compressedData = await fs
+        .readFile(compressedPath)
+        .catch(() => null);
       if (compressedData) {
         const decompressed = await gunzip(compressedData);
         return decompressed.toString('utf-8');
@@ -173,16 +182,16 @@ export class WalletsFileStorageService {
     if (shouldCompress) {
       const compressed = await gzip(Buffer.from(data, 'utf-8'));
       const compressedPath = `${filePath}.gz`;
-      
+
       // Xóa file cũ nếu có
       await fs.unlink(filePath).catch(() => {});
-      
+
       // Ghi file compressed
       await fs.writeFile(compressedPath, compressed);
     } else {
       // Xóa file compressed cũ nếu có
       await fs.unlink(`${filePath}.gz`).catch(() => {});
-      
+
       // Ghi file uncompressed
       await fs.writeFile(filePath, data, 'utf-8');
     }
@@ -223,9 +232,12 @@ export class WalletsFileStorageService {
           ...tx,
           timestamp: new Date(tx.timestamp),
         }));
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (error) {
         // File không tồn tại hoặc lỗi đọc, bắt đầu từ đầu
-        this.logger.debug(`No existing file for ${address} on ${network}, creating new`);
+        this.logger.debug(
+          `No existing file for ${address} on ${network}, creating new`,
+        );
       }
 
       // 2. Merge transactions: chỉ thêm transactions mới (dựa trên hash)
@@ -263,7 +275,8 @@ export class WalletsFileStorageService {
       };
 
       // 5. Quyết định có nén không (nếu >= 100 transactions)
-      const shouldCompress = mergedTransactions.length >= this.COMPRESS_THRESHOLD;
+      const shouldCompress =
+        mergedTransactions.length >= this.COMPRESS_THRESHOLD;
 
       // 6. Ghi file (async, không blocking)
       const jsonData = JSON.stringify(fileData, null, 2);
@@ -289,15 +302,13 @@ export class WalletsFileStorageService {
   async loadTransactions(
     address: string,
     network: string,
-  ): Promise<
-    Array<{
-      hash: string;
-      amount: number;
-      timestamp: Date;
-      from?: string;
-      to: string;
-    }> | null
-  > {
+  ): Promise<Array<{
+    hash: string;
+    amount: number;
+    timestamp: Date;
+    from?: string;
+    to: string;
+  }> | null> {
     const filePath = this.getFilePath(address, network);
     const release = await this.acquireLock(filePath);
 
@@ -377,12 +388,9 @@ export class WalletsFileStorageService {
     for (let i = 0; i < entries.length; i += batchSize) {
       const batch = entries.slice(i, i + batchSize);
       await Promise.all(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         batch.map(([_, data]) =>
-          this.saveTransactions(
-            data.address,
-            data.network,
-            data.transactions,
-          ),
+          this.saveTransactions(data.address, data.network, data.transactions),
         ),
       );
     }

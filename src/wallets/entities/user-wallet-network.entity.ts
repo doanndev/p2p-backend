@@ -39,4 +39,3 @@ export class UserWalletNetwork {
   @JoinColumn({ name: 'uwn_user_id' })
   user: User;
 }
-

@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBody,
+  ApiCreatedResponse,
   ApiCookieAuth,
   ApiOkResponse,
   ApiOperation,
@@ -26,6 +27,47 @@ import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
+import { AttachBankToOrderbookDto } from './dto/attach-bank-to-orderbook.dto';
+
+const ORDERBOOK_RESPONSE_EXAMPLE = {
+  id: 101,
+  user_id: 12,
+  coin: 1,
+  national: 2,
+  adv_code: 'ADV-1711223344556-AB12CD',
+  option: 'sell',
+  coin_symbol: 'USDT',
+  national_symbol: 'VND',
+  amount: '100.00000000',
+  amount_remaining: '80.00000000',
+  price: '25000.00000000',
+  national_min: '500000.00000000',
+  national_max: '2000000.00000000',
+  status: 'pending',
+};
+
+const TRANSACTION_RESPONSE_EXAMPLE = {
+  id: 5001,
+  reference_code: 'TX-1711223344556-XY98ZT',
+  user_buy: 22,
+  user_sell: 12,
+  coin: 1,
+  national: 2,
+  order_book: 101,
+  option: 'buy',
+  type: 'banking',
+  coin_symbol: 'USDT',
+  national_symbol: 'VND',
+  amount: '20.00000000',
+  price: '25000.00000000',
+  price_usd: '25000.00000000',
+  total_price: '500000.00000000',
+  total_usd: '500000.00000000',
+  dispute_status: false,
+  time_bank: '2026-03-25T08:30:00.000Z',
+  status: 'pendding',
+  message: null,
+};
 
 @ApiTags('Orderbook')
 @ApiCookieAuth('access_token')
@@ -41,70 +83,100 @@ export class OrderbookController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo order book' })
   @ApiBody({ type: CreateOrderbookDto })
-  async createOrderBook(@Request() req: any, @Body() dto: CreateOrderbookDto) {
-    const data = await this.orderbookService.createOrderBook(req.user.uid, dto);
-    return {
-      statusCode: HttpStatus.CREATED,
-      message: 'Create order book successfully',
-      data,
-    };
+  @ApiCreatedResponse({
+    description: 'Tạo order book thành công',
+    schema: { example: ORDERBOOK_RESPONSE_EXAMPLE },
+  })
+  createOrderBook(@Request() req: any, @Body() dto: CreateOrderbookDto) {
+    return this.orderbookService.createOrderBook(req.user.uid, dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách order book' })
-  async getOrderBooks() {
-    const data = await this.orderbookService.getOrderBooks();
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Get order books successfully',
-      data,
-    };
+  @ApiOkResponse({
+    description: 'Danh sách order book đang pending',
+    schema: { example: [ORDERBOOK_RESPONSE_EXAMPLE] },
+  })
+  getOrderBooks() {
+    return this.orderbookService.getOrderBooks();
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết order book' })
-  async getOrderBookDetail(@Param('id') id: string) {
-    const data = await this.orderbookService.getOrderBookDetail(Number(id));
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Get order book detail successfully',
-      data,
-    };
+  @ApiOkResponse({
+    description: 'Chi tiết order book',
+    schema: { example: ORDERBOOK_RESPONSE_EXAMPLE },
+  })
+  getOrderBookDetail(@Param('id') id: string) {
+    return this.orderbookService.getOrderBookDetail(Number(id));
+  }
+
+  @Post(':id/bank-user')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Gắn bank user cho orderbook (upsert setting_bank_order)',
+  })
+  @ApiBody({ type: AttachBankToOrderbookDto })
+  @ApiOkResponse({
+    description: 'Gắn bank thành công',
+    schema: {
+      example: {
+        message: 'Bank attached to orderbook successfully',
+        orderbookId: 101,
+        bankUser: {
+          id: 1,
+          userId: 12,
+          bankName: 'Vietcombank',
+          bankBranch: 'Hà Nội',
+          bankAccountName: 'NGUYEN VAN A',
+          bankAccountNumber: '0123456789',
+        },
+      },
+    },
+  })
+  attachBankToOrderbook(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: AttachBankToOrderbookDto,
+  ) {
+    return this.orderbookService.attachBankToOrderBook(
+      req.user.uid,
+      Number(id),
+      dto.bankUserId,
+    );
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Cập nhật order book' })
   @ApiBody({ type: UpdateOrderbookDto })
-  async updateOrderBook(
+  @ApiOkResponse({
+    description: 'Cập nhật order book thành công',
+    schema: {
+      example: {
+        ...ORDERBOOK_RESPONSE_EXAMPLE,
+        price: '25500.00000000',
+      },
+    },
+  })
+  updateOrderBook(
     @Request() req: any,
     @Param('id') id: string,
     @Body() dto: UpdateOrderbookDto,
   ) {
-    const data = await this.orderbookService.updateOrderBook(
-      req.user.uid,
-      Number(id),
-      dto,
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Update order book successfully',
-      data,
-    };
+    return this.orderbookService.updateOrderBook(req.user.uid, Number(id), dto);
   }
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Soft delete order book và unlock số dư còn lại' })
-  async deleteOrderBook(@Request() req: any, @Param('id') id: string) {
-    const data = await this.orderbookService.deleteOrderBook(
-      req.user.uid,
-      Number(id),
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: data.message,
-    };
+  @ApiOkResponse({
+    description: 'Xóa order book thành công',
+    schema: { example: { message: 'Order book deleted successfully' } },
+  })
+  deleteOrderBook(@Request() req: any, @Param('id') id: string) {
+    return this.orderbookService.deleteOrderBook(req.user.uid, Number(id));
   }
 
   @Post('transactions')
@@ -112,53 +184,37 @@ export class OrderbookController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo transaction cho order book' })
   @ApiBody({ type: CreateTransactionDto })
-  async createTransaction(
-    @Request() req: any,
-    @Body() dto: CreateTransactionDto,
-  ) {
-    const data = await this.transactionService.createTransaction(
-      req.user.uid,
-      dto,
-    );
-    return {
-      statusCode: HttpStatus.CREATED,
-      message: 'Create transaction successfully',
-      data,
-    };
+  @ApiCreatedResponse({
+    description: 'Tạo transaction thành công',
+    schema: { example: TRANSACTION_RESPONSE_EXAMPLE },
+  })
+  createTransaction(@Request() req: any, @Body() dto: CreateTransactionDto) {
+    return this.transactionService.createTransaction(req.user.uid, dto);
   }
 
   @Get('transactions/list')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy danh sách transaction theo user hiện tại' })
-  @ApiOkResponse({ description: 'Có thể filter theo status' })
-  async getTransactions(
-    @Request() req: any,
-    @Query() query: QueryTransactionsDto,
-  ) {
-    const data = await this.transactionService.getTransactions(
-      req.user.uid,
-      query.status,
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Get transactions successfully',
-      data,
-    };
+  @ApiOkResponse({
+    description: 'Danh sách transaction (có thể filter theo status)',
+    schema: { example: [TRANSACTION_RESPONSE_EXAMPLE] },
+  })
+  getTransactions(@Request() req: any, @Query() query: QueryTransactionsDto) {
+    return this.transactionService.getTransactions(req.user.uid, query.status);
   }
 
   @Get('transactions/:id')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy chi tiết transaction' })
-  async getTransactionDetail(@Request() req: any, @Param('id') id: string) {
-    const data = await this.transactionService.getTransactionDetail(
+  @ApiOkResponse({
+    description: 'Chi tiết transaction',
+    schema: { example: TRANSACTION_RESPONSE_EXAMPLE },
+  })
+  getTransactionDetail(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.getTransactionDetail(
       req.user.uid,
       Number(id),
     );
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Get transaction detail successfully',
-      data,
-    };
   }
 
   @Post('transactions/:id/confirm-payment')
@@ -166,16 +222,18 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Xác nhận đã chuyển tiền (pending -> payment_confirmed)',
   })
-  async confirmPayment(@Request() req: any, @Param('id') id: string) {
-    const data = await this.transactionService.confirmPayment(
-      req.user.uid,
-      Number(id),
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Confirm payment successfully',
-      data,
-    };
+  @ApiOkResponse({
+    description: 'Transaction đã chuyển sang payment_confirmed',
+    schema: {
+      example: {
+        ...TRANSACTION_RESPONSE_EXAMPLE,
+        status: 'payment_confirmed',
+        time_bank: '2026-03-25T08:45:00.000Z',
+      },
+    },
+  })
+  confirmPayment(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.confirmPayment(req.user.uid, Number(id));
   }
 
   @Post('transactions/:id/confirm-received')
@@ -184,30 +242,32 @@ export class OrderbookController {
     summary:
       'Xác nhận đã nhận tiền (payment_confirmed -> executed) và chuyển lock_balance',
   })
-  async confirmReceived(@Request() req: any, @Param('id') id: string) {
-    const data = await this.transactionService.confirmReceived(
-      req.user.uid,
-      Number(id),
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Confirm received successfully',
-      data,
-    };
+  @ApiOkResponse({
+    description: 'Transaction đã executed',
+    schema: {
+      example: {
+        ...TRANSACTION_RESPONSE_EXAMPLE,
+        status: 'executed',
+      },
+    },
+  })
+  confirmReceived(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.confirmReceived(req.user.uid, Number(id));
   }
 
   @Post('transactions/:id/cancel')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Huỷ transaction khi đang pending' })
-  async cancelTransaction(@Request() req: any, @Param('id') id: string) {
-    const data = await this.transactionService.cancelTransaction(
-      req.user.uid,
-      Number(id),
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Cancel transaction successfully',
-      data,
-    };
+  @ApiOkResponse({
+    description: 'Transaction đã bị huỷ',
+    schema: {
+      example: {
+        ...TRANSACTION_RESPONSE_EXAMPLE,
+        status: 'cancelled',
+      },
+    },
+  })
+  cancelTransaction(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.cancelTransaction(req.user.uid, Number(id));
   }
 }

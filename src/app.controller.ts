@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Controller, Get, Redirect } from '@nestjs/common';
 import { AppService } from './app.service';
 

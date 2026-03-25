@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,14 +8,25 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { JsonRpcProvider, formatUnits, Network as EthersNetwork } from 'ethers';
 import { ActiveWalletTracker } from './entities/active-wallet-tracker.entity';
-import { WalletHistory, WalletHistoryOption, WalletHistoryStatus } from './entities/wallet-history.entity';
-import { WalletTransfer, WalletTransferFrom, WalletTransferStatus } from './entities/wallet-transfer.entity';
+import {
+  WalletHistory,
+  WalletHistoryOption,
+  WalletHistoryStatus,
+} from './entities/wallet-history.entity';
+import {
+  WalletTransfer,
+  WalletTransferFrom,
+  WalletTransferStatus,
+} from './entities/wallet-transfer.entity';
 import { WalletDepositTracker } from './entities/wallet-deposit-tracker.entity';
 import { UserWallet } from './entities/user-wallet.entity';
 import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { Network } from '../settings/entities/network.entity';
 import { Coin } from '../settings/entities/coin.entity';
-import { CoinNetwork, CoinNetworkStatus } from '../settings/entities/coin-network.entity';
+import {
+  CoinNetwork,
+  CoinNetworkStatus,
+} from '../settings/entities/coin-network.entity';
 import { CacheService } from '../systems/cache.service';
 import { WalletsFileStorageService } from './wallets-file-storage.service';
 import { User } from '../users/entities/user.entity';
@@ -33,7 +45,7 @@ interface OnchainTransaction {
 @Injectable()
 export class WalletsSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(WalletsSchedulerService.name);
-  
+
   // Rate limiter cho Zerion API: tối đa 7 requests/1s
   private zerionApiQueue: Array<() => Promise<any>> = [];
   private zerionApiProcessing = false;
@@ -68,6 +80,37 @@ export class WalletsSchedulerService implements OnModuleInit {
     private emailService: EmailService,
     private adminSettingsConfigService: AdminSettingsConfigService,
   ) {}
+
+  /** Log địa chỉ dài gọn cho debug (không che toàn bộ — đủ để đối chiếu explorer). */
+  private debugShortAddr(addr: string, head = 8, tail = 6): string {
+    const s = (addr || '').trim();
+    if (!s) return '(empty)';
+    if (s.length <= head + tail + 3) return s;
+    return `${s.slice(0, head)}...${s.slice(-tail)}`;
+  }
+
+  private debugRpcHost(rpcUrl: string): string {
+    try {
+      return new URL(rpcUrl).hostname;
+    } catch {
+      return '(bad-url)';
+    }
+  }
+
+  /**
+   * Solscan (public/pro) chỉ index mainnet-beta. RPC devnet/testnet/local → không gọi Solscan.
+   */
+  private async isSolanaConfiguredClusterNonMainnet(): Promise<boolean> {
+    const urls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+    if (!urls.length) return false;
+    const u = urls[0].toLowerCase();
+    return (
+      u.includes('devnet') ||
+      u.includes('testnet') ||
+      u.includes('localhost') ||
+      u.includes('127.0.0.1')
+    );
+  }
 
   /**
    * Helper method để tạo JsonRpcProvider an toàn với error handling
@@ -105,7 +148,9 @@ export class WalletsSchedulerService implements OnModuleInit {
 
     // Kiểm tra URL format cơ bản
     if (!rpcUrl.startsWith('http://') && !rpcUrl.startsWith('https://')) {
-      this.logger.warn(`RPC URL must start with http:// or https://: ${rpcUrl}`);
+      this.logger.warn(
+        `RPC URL must start with http:// or https://: ${rpcUrl}`,
+      );
       return null;
     }
 
@@ -113,17 +158,21 @@ export class WalletsSchedulerService implements OnModuleInit {
       // Sử dụng static network để tránh auto-detect (nguyên nhân gây retry liên tục)
       // ethers v6: truyền network object vào constructor và sử dụng staticNetwork option
       let provider: JsonRpcProvider;
-      
+
       if (networkSymbol === 'ETH') {
         // Ethereum Mainnet: chainId = 1
         // Sử dụng staticNetwork với Network object để tắt hoàn toàn auto-detect
         const ethNetwork = EthersNetwork.from('mainnet');
-        provider = new JsonRpcProvider(rpcUrl, ethNetwork, { staticNetwork: ethNetwork });
+        provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
+          staticNetwork: ethNetwork,
+        });
       } else if (networkSymbol === 'BNB' || networkSymbol === 'BSC') {
         // BSC Mainnet: chainId = 56
         // Tạo custom network cho BSC
         const bscNetwork = new EthersNetwork('bsc', 56);
-        provider = new JsonRpcProvider(rpcUrl, bscNetwork, { staticNetwork: bscNetwork });
+        provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
+          staticNetwork: bscNetwork,
+        });
       } else {
         // Không biết network, vẫn phải auto-detect (nhưng sẽ test ngay)
         provider = new JsonRpcProvider(rpcUrl);
@@ -137,16 +186,20 @@ export class WalletsSchedulerService implements OnModuleInit {
           throw new Error(`RPC connection failed: ${err.message}`);
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timeout after 5s')), timeout),
+          setTimeout(
+            () => reject(new Error('Connection timeout after 5s')),
+            timeout,
+          ),
         ),
       ]);
 
       await connectionTest;
-      
+
       // Nếu đến đây, connection thành công
       return provider;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       // Chỉ log warning, không log error để tránh spam log
       this.logger.warn(
         `Cannot connect to RPC for ${networkSymbol || 'unknown'} at ${rpcUrl}: ${errorMessage}`,
@@ -160,7 +213,9 @@ export class WalletsSchedulerService implements OnModuleInit {
    * Chạy trong background để không ảnh hưởng đến thời gian start server
    */
   async onModuleInit() {
-    this.logger.log('WalletsSchedulerService initialized, starting initial deposit listener in background...');
+    this.logger.log(
+      'WalletsSchedulerService initialized, starting initial deposit listener in background...',
+    );
     // Chạy trong background (không await) để không block server startup
     this.handleDepositListener().catch((error) => {
       this.logger.error(
@@ -187,14 +242,25 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       this.logger.log(`Found ${activeTrackers.length} active wallet trackers`);
 
+      if (activeTrackers.length === 0) {
+        this.logger.log(
+          'Deposit listener: không có bản ghi active_wallet_tracker nào thỏa awt_expires_at > now (UTC). ' +
+            'Scheduler sẽ không gọi RPC / không in [deposit-sync], [balance-check], [tx-cache] — ' +
+            'các log đó chỉ xuất hiện khi có ít nhất 1 tracker (tạo khi user mở flow nạp ví trong WalletsService). ' +
+            'Để xem chi tiết khi đã có tracker: LOG_LEVEL=debug.',
+        );
+        this.logger.log('Deposit listener cron job completed');
+        return;
+      }
+
       // 2. Nhóm theo network và deduplicate theo address để tránh xử lý trùng lặp
       const trackersByNetwork = new Map<number, ActiveWalletTracker[]>();
       const seenAddresses = new Map<string, ActiveWalletTracker>(); // Track addresses đã xử lý
-      
+
       for (const tracker of activeTrackers) {
         const networkId = tracker.awt_network_id;
         const addressKey = `${networkId}_${tracker.awt_address}`;
-        
+
         // Nếu đã có tracker cho address này trong network này, giữ tracker có expires_at mới nhất
         if (seenAddresses.has(addressKey)) {
           const existingTracker = seenAddresses.get(addressKey)!;
@@ -203,9 +269,9 @@ export class WalletsSchedulerService implements OnModuleInit {
           }
           continue; // Bỏ qua duplicate
         }
-        
+
         seenAddresses.set(addressKey, tracker);
-        
+
         if (!trackersByNetwork.has(networkId)) {
           trackersByNetwork.set(networkId, []);
         }
@@ -224,33 +290,39 @@ export class WalletsSchedulerService implements OnModuleInit {
           continue;
         }
 
-        this.logger.log(`Processing ${trackers.length} trackers for network ${network.net_symbol}`);
+        this.logger.log(
+          `Processing ${trackers.length} trackers for network ${network.net_symbol}`,
+        );
 
         // Xử lý song song nhưng giới hạn số lượng để tránh quá tải
         // Với SOL, xử lý tuần tự để tránh rate limit
         const batchSize = network.net_symbol === 'SOL' ? 1 : 10;
         for (let i = 0; i < trackers.length; i += batchSize) {
           const batch = trackers.slice(i, i + batchSize);
-          
+
           if (network.net_symbol === 'SOL') {
             // Xử lý tuần tự cho SOL để tránh rate limit
             for (const tracker of batch) {
               await this.processWalletTracker(tracker, network);
               processedUserIds.add(tracker.awt_user_id);
-              
+
               // Thêm delay giữa các wallets để tránh rate limit
               if (i + batch.length < trackers.length) {
-                await new Promise(resolve => setTimeout(resolve, 1000)); // 1s delay
+                await new Promise((resolve) => setTimeout(resolve, 1000)); // 1s delay
               }
             }
           } else {
             // Xử lý song song cho ETH/BNB
             await Promise.all(
-              batch.map((tracker) => this.processWalletTracker(tracker, network)),
+              batch.map((tracker) =>
+                this.processWalletTracker(tracker, network),
+              ),
             );
-            
+
             // Track users đã được xử lý
-            batch.forEach((tracker) => processedUserIds.add(tracker.awt_user_id));
+            batch.forEach((tracker) =>
+              processedUserIds.add(tracker.awt_user_id),
+            );
           }
         }
       }
@@ -261,21 +333,35 @@ export class WalletsSchedulerService implements OnModuleInit {
       });
 
       if (usdtCoin) {
+        let uwBalanceRowsUpdated = 0;
+        let uwBalanceUnchanged = 0;
         for (const userId of processedUserIds) {
           try {
-            await this.updateUserBalance(userId, usdtCoin.coin_id);
+            const changed = await this.updateUserBalance(
+              userId,
+              usdtCoin.coin_id,
+            );
+            if (changed) uwBalanceRowsUpdated++;
+            else uwBalanceUnchanged++;
           } catch (error) {
             this.logger.error(
               `Error updating balance for user ${userId}: ${error.message}`,
             );
           }
         }
-        this.logger.log(`Updated balance for ${processedUserIds.size} users`);
+        this.logger.log(
+          `uw_balance pass: ${processedUserIds.size} user(s) — ` +
+            `DB updated=${uwBalanceRowsUpdated}, skipped=${uwBalanceUnchanged} (đã khớp uw_balance vs công thức hoặc shouldUpdate=false). ` +
+            `Chi tiết: LOG_LEVEL=debug, prefix [uw-balance].`,
+        );
       }
 
       this.logger.log('Deposit listener cron job completed');
     } catch (error) {
-      this.logger.error(`Error in deposit listener: ${error.message}`, error.stack);
+      this.logger.error(
+        `Error in deposit listener: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
@@ -315,8 +401,15 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       const usdtMintOrContract = usdtCoinNetwork.cn_coin_mint;
 
+      this.logger.debug(
+        `[deposit-sync] start awt_id=${tracker.awt_id} user_id=${tracker.awt_user_id} ` +
+          `uwn_id=${tracker.uwn_id} network=${network.net_symbol} net_id=${network.net_id} ` +
+          `address=${tracker.awt_address} usdt_ref=${this.debugShortAddr(usdtMintOrContract, 6, 6)} ` +
+          `(job chỉ đồng bộ USDT SPL/ERC20; chuyển native SOL không tạo bản ghi nạp USDT)`,
+      );
+
       // 2. Lấy transaction từ cache hoặc file (chỉ USDT)
-      let cachedTransactions = await this.getCachedTransactions(
+      const cachedTransactions = await this.getCachedTransactions(
         tracker.awt_address,
         network,
         usdtMintOrContract,
@@ -328,6 +421,11 @@ export class WalletsSchedulerService implements OnModuleInit {
         cachedTransactions,
         usdtCoin.coin_id,
         network,
+      );
+
+      this.logger.debug(
+        `[deposit-sync] conflictCheck awt_id=${tracker.awt_id} hasConflict=${conflictCheck.hasConflict} ` +
+          `missingInCacheHashes=${conflictCheck.missingInCache.length} cachedTxCount=${cachedTransactions.length}`,
       );
 
       // 3.5. Kiểm tra số dư USDT từ RPC và so sánh với wallet_histories
@@ -344,15 +442,18 @@ export class WalletsSchedulerService implements OnModuleInit {
       if (balanceCheck.balanceMatch) {
         this.logger.log(
           `Balance match for ${tracker.awt_address} on ${network.net_symbol}: ` +
-          `onchain=${balanceCheck.onchainBalance}, db=${balanceCheck.dbBalance}. Skipping onchain fetch.`,
+            `onchain=${balanceCheck.onchainBalance}, db=${balanceCheck.dbBalance}. Skipping onchain fetch.`,
         );
         // Vẫn cần sync transactions từ cache để đảm bảo database đầy đủ
         finalTransactions = cachedTransactions;
       } else {
+        const diff = balanceCheck.onchainBalance - balanceCheck.dbBalance;
         // Số dư không khớp, tiếp tục fetch onchain
         this.logger.warn(
-          `Balance mismatch for ${tracker.awt_address} on ${network.net_symbol}: ` +
-          `onchain=${balanceCheck.onchainBalance}, db=${balanceCheck.dbBalance}. Fetching onchain data.`,
+          `[balance-mismatch] awt_id=${tracker.awt_id} user=${tracker.awt_user_id} ` +
+            `network=${network.net_symbol} address=${tracker.awt_address} ` +
+            `onchainUSDT=${balanceCheck.onchainBalance} dbDepositNet=${balanceCheck.dbBalance} ` +
+            `diff(onchain-db)=${diff} → fetch onchain (native SOL không ảnh hưởng số USDT on-chain)`,
         );
 
         if (conflictCheck.hasConflict) {
@@ -364,6 +465,9 @@ export class WalletsSchedulerService implements OnModuleInit {
             tracker.awt_address,
             network,
             usdtMintOrContract,
+          );
+          this.logger.debug(
+            `[deposit-sync] after full fetch awt_id=${tracker.awt_id} finalTxCount=${finalTransactions.length}`,
           );
         } else {
           // 4b. Không có xung đột: Lắng nghe 100 block mới nhất (chỉ USDT)
@@ -383,8 +487,18 @@ export class WalletsSchedulerService implements OnModuleInit {
           );
 
           finalTransactions = [...cachedTransactions, ...uniqueNewTransactions];
+          this.logger.debug(
+            `[deposit-sync] after recent+merge awt_id=${tracker.awt_id} ` +
+              `cached=${cachedTransactions.length} fetchedNew=${newTransactions.length} ` +
+              `uniqueNew=${uniqueNewTransactions.length} merged=${finalTransactions.length}`,
+          );
         }
       }
+
+      this.logger.debug(
+        `[deposit-sync] pre-save awt_id=${tracker.awt_id} finalTxCount=${finalTransactions.length} ` +
+          `balanceMatch=${balanceCheck.balanceMatch}`,
+      );
 
       // 5. Lưu vào cache (30 ngày) và file (vĩnh viễn)
       await this.saveTransactionsToCacheAndFile(
@@ -430,7 +544,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         ...tx,
         timestamp: new Date(tx.timestamp),
       }));
-      
+
       // Filter chỉ USDT nếu có usdtMintOrContract (để loại bỏ native coin từ cache cũ)
       if (usdtMintOrContract) {
         transactions = this.filterUSDTTransactions(
@@ -439,7 +553,11 @@ export class WalletsSchedulerService implements OnModuleInit {
           usdtMintOrContract,
         );
       }
-      
+
+      this.logger.debug(
+        `[tx-cache] HIT redis key=${cacheKey} count=${transactions.length} ` +
+          `addr=${this.debugShortAddr(address)}`,
+      );
       return transactions;
     }
 
@@ -466,10 +584,17 @@ export class WalletsSchedulerService implements OnModuleInit {
         JSON.stringify(filteredTransactions),
         cacheDuration,
       );
+      this.logger.debug(
+        `[tx-cache] MISS redis, HIT file symbol=${network.net_symbol} count=${filteredTransactions.length} ` +
+          `addr=${this.debugShortAddr(address)} (đã hydrate redis)`,
+      );
       return filteredTransactions;
     }
 
     // 3. Nếu không có cả cache và file, trả về mảng rỗng
+    this.logger.debug(
+      `[tx-cache] EMPTY redis+file key=${cacheKey} addr=${this.debugShortAddr(address)}`,
+    );
     return [];
   }
 
@@ -485,13 +610,13 @@ export class WalletsSchedulerService implements OnModuleInit {
     // Vì các transactions trong cache/file đã được lấy từ onchain với filter USDT,
     // nên thường không cần filter lại. Nhưng để đảm bảo an toàn với dữ liệu cũ,
     // chúng ta có thể kiểm tra lại nếu cần.
-    
+
     // Hiện tại, vì tất cả transactions đã được filter USDT khi lấy từ onchain,
     // nên chỉ cần return transactions. Nhưng để đảm bảo với dữ liệu cũ, có thể thêm validation.
-    
+
     // TODO: Nếu cần, có thể thêm validation để đảm bảo transactions đều là USDT
     // (ví dụ: check amount format, hash pattern, etc.)
-    
+
     return transactions;
   }
 
@@ -501,7 +626,7 @@ export class WalletsSchedulerService implements OnModuleInit {
    * - Cache thiếu transaction_hash có trong wallet_histories (chấp nhận được)
    * - Cache có transaction_hash không có trong wallet_histories nhưng amount/timestamp khác (xung đột)
    * - Cache có transaction_hash không có trong wallet_histories (chấp nhận được, sẽ sync)
-   * 
+   *
    * Tối ưu: Chỉ kiểm tra transactions của network cụ thể (theo wh_node) để tránh lấy quá nhiều dữ liệu
    */
   private async checkCacheConflict(
@@ -527,7 +652,9 @@ export class WalletsSchedulerService implements OnModuleInit {
 
     const cachedHashes = new Set(cachedTransactions.map((tx) => tx.hash));
     const dbHashes = new Set(
-      dbTransactions.map((tx) => tx.wh_hash).filter((h) => h !== null) as string[],
+      dbTransactions
+        .map((tx) => tx.wh_hash)
+        .filter((h) => h !== null) as string[],
     );
 
     // Tìm transaction có trong database nhưng không có trong cache
@@ -550,23 +677,23 @@ export class WalletsSchedulerService implements OnModuleInit {
         // (block time = thời gian giao dịch xảy ra, created_at = thời gian record được tạo)
         const amountDiff = Math.abs(cachedAmount - dbAmount);
         const timestampDiff = Math.abs(cachedTimestamp - dbTimestamp);
-        
+
         // Chỉ coi là conflict nếu amount khác nhau
         if (amountDiff > 0.00000001) {
           hasConflict = true;
           this.logger.warn(
             `Conflict detected: Transaction ${cachedTx.hash} has different amount. ` +
-            `Amount: cache=${cachedAmount}, db=${dbAmount}, diff=${amountDiff.toFixed(8)}. ` +
-            `Timestamp: cache=${new Date(cachedTimestamp).toISOString()}, db=${new Date(dbTimestamp).toISOString()}, diff=${timestampDiff}ms (ignored)`,
+              `Amount: cache=${cachedAmount}, db=${dbAmount}, diff=${amountDiff.toFixed(8)}. ` +
+              `Timestamp: cache=${new Date(cachedTimestamp).toISOString()}, db=${new Date(dbTimestamp).toISOString()}, diff=${timestampDiff}ms (ignored)`,
           );
           break;
         }
-        
+
         // Log thông tin timestamp nếu khác nhau (nhưng không coi là conflict)
         if (timestampDiff > 1000) {
           this.logger.debug(
             `Transaction ${cachedTx.hash} has different timestamp (not a conflict): ` +
-            `cache=${new Date(cachedTimestamp).toISOString()}, db=${new Date(dbTimestamp).toISOString()}, diff=${timestampDiff}ms`,
+              `cache=${new Date(cachedTimestamp).toISOString()}, db=${new Date(dbTimestamp).toISOString()}, diff=${timestampDiff}ms`,
           );
         }
       }
@@ -617,35 +744,50 @@ export class WalletsSchedulerService implements OnModuleInit {
   ): Promise<OnchainTransaction[]> {
     try {
       if (network.net_symbol === 'SOL') {
-        // Chỉ thử Block Explorer API nếu có API key (không trống và không phải empty string)
+        const nonMainnetCluster =
+          await this.isSolanaConfiguredClusterNonMainnet();
+        if (nonMainnetCluster) {
+          this.logger.debug(
+            `[sol-tx-fetch] Skip Solscan — RPC Solana đang trỏ devnet/testnet/local; ` +
+              `Solscan không có dữ liệu cluster này, dùng RPC.`,
+          );
+        }
+
         const apiKey = this.configService.get<string>('SOLSCAN_API_KEY');
-        if (apiKey && apiKey.trim().length > 0) {
+        if (!nonMainnetCluster && apiKey && apiKey.trim().length > 0) {
           try {
-            const apiTransactions = await this.getSolanaTransactionsFromExplorer(
-              address,
-              usdtMintOrContract,
-              500, // Limit 500 transactions for full history
-            );
-            
-            if (apiTransactions && apiTransactions.length >= 0) {
-              // Trả về kết quả từ API (kể cả empty array)
+            const apiTransactions =
+              await this.getSolanaTransactionsFromExplorer(
+                address,
+                usdtMintOrContract,
+                500, // Limit 500 transactions for full history
+              );
+
+            if (apiTransactions && apiTransactions.length > 0) {
               this.logger.log(
                 `Fetched ${apiTransactions.length} transactions from Solana Block Explorer API for ${address}`,
               );
               return apiTransactions;
             }
+
+            this.logger.warn(
+              `Solscan returned 0 USDT SPL transfers for ${address}; falling back to RPC ` +
+                `(trước đây code return [] sớm vì length>=0 — gây lệch khi ví trên devnet hoặc Solscan chưa index).`,
+            );
           } catch (error) {
-            // Xử lý tất cả các lỗi từ Block Explorer API (bao gồm invalid API key)
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             this.logger.warn(
               `Solana Block Explorer API failed for ${address}, falling back to RPC scan. Error: ${errorMessage}`,
             );
-            // Tiếp tục fallback về RPC scan
           }
         }
 
-        // Sử dụng RPC (fallback hoặc primary nếu không có API key)
-        return await this.getSolanaTransactions(address, 500, usdtMintOrContract);
+        return await this.getSolanaTransactions(
+          address,
+          500,
+          usdtMintOrContract,
+        );
       } else if (network.net_symbol === 'ETH' || network.net_symbol === 'BNB') {
         // Sử dụng Zerion API thay vì Block Explorer API và RPC
         try {
@@ -661,7 +803,8 @@ export class WalletsSchedulerService implements OnModuleInit {
             return zerionTransactions;
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
           this.logger.error(
             `Zerion API failed for ${address} on ${network.net_symbol}: ${errorMessage}`,
           );
@@ -690,36 +833,49 @@ export class WalletsSchedulerService implements OnModuleInit {
   ): Promise<OnchainTransaction[]> {
     try {
       if (network.net_symbol === 'SOL') {
-        // Chỉ thử Block Explorer API nếu có API key (không trống và không phải empty string)
+        const nonMainnetCluster =
+          await this.isSolanaConfiguredClusterNonMainnet();
+        if (nonMainnetCluster) {
+          this.logger.debug(
+            `[sol-tx-fetch] Skip Solscan (recent) — non-mainnet RPC; dùng RPC.`,
+          );
+        }
+
         const apiKey = this.configService.get<string>('SOLSCAN_API_KEY');
-        if (apiKey && apiKey.trim().length > 0) {
+        if (!nonMainnetCluster && apiKey && apiKey.trim().length > 0) {
           try {
-            const apiTransactions = await this.getSolanaTransactionsFromExplorer(
-              address,
-              usdtMintOrContract,
-              100, // Limit 100 transactions
-            );
-            
-            if (apiTransactions && apiTransactions.length >= 0) {
-              // Trả về kết quả từ API (kể cả empty array)
+            const apiTransactions =
+              await this.getSolanaTransactionsFromExplorer(
+                address,
+                usdtMintOrContract,
+                100, // Limit 100 transactions
+              );
+
+            if (apiTransactions && apiTransactions.length > 0) {
               this.logger.log(
                 `Fetched ${apiTransactions.length} recent transactions from Solana Block Explorer API for ${address}`,
               );
               return apiTransactions;
             }
+
+            this.logger.warn(
+              `Solscan returned 0 recent USDT SPL transfers for ${address}; falling back to RPC.`,
+            );
           } catch (error) {
-            // Xử lý tất cả các lỗi từ Block Explorer API (bao gồm invalid API key)
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             this.logger.warn(
               `Solana Block Explorer API failed for recent transactions of ${address}, falling back to RPC. Error: ${errorMessage}`,
             );
-            // Tiếp tục fallback về RPC
           }
         }
 
-        // Sử dụng RPC (fallback hoặc primary nếu không có API key)
         try {
-          return await this.getSolanaTransactions(address, 100, usdtMintOrContract);
+          return await this.getSolanaTransactions(
+            address,
+            100,
+            usdtMintOrContract,
+          );
         } catch (solError: any) {
           this.logger.error(
             `Error fetching Solana transactions via RPC for ${address} on ${network.net_symbol}: ${solError.message}`,
@@ -743,7 +899,8 @@ export class WalletsSchedulerService implements OnModuleInit {
             return zerionTransactions;
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
           this.logger.error(
             `Zerion API failed for ${address} on ${network.net_symbol}: ${errorMessage}`,
           );
@@ -770,33 +927,33 @@ export class WalletsSchedulerService implements OnModuleInit {
     baseDelay: number = 3000, // Tăng base delay
   ): Promise<T> {
     let lastError: Error | null = null;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         return await fn();
       } catch (error: any) {
         lastError = error;
-        const isNetworkError = 
+        const isNetworkError =
           error?.message?.includes('fetch failed') ||
           error?.message?.includes('ECONNREFUSED') ||
           error?.message?.includes('ETIMEDOUT') ||
           error?.message?.includes('ENOTFOUND') ||
           error?.code === 'ECONNREFUSED' ||
           error?.code === 'ETIMEDOUT';
-        
+
         if (isNetworkError && attempt < maxRetries - 1) {
           const delay = baseDelay * Math.pow(2, attempt);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
-        
+
         // Nếu không phải network error hoặc đã hết retry, throw error
         if (attempt === maxRetries - 1 || !isNetworkError) {
           throw error;
         }
       }
     }
-    
+
     throw lastError || new Error(`Unknown error in retry for ${operation}`);
   }
 
@@ -815,13 +972,16 @@ export class WalletsSchedulerService implements OnModuleInit {
     limit: number = 100,
     usdtMintAddress?: string,
   ): Promise<OnchainTransaction[]> {
-    const primaryUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+    const primaryUrls =
+      await this.adminSettingsConfigService.getRpcSolUrlsToTry();
     if (!primaryUrls.length) {
       throw new Error('SOLANA_RPC_URL not configured (admin_settings or .env)');
     }
 
     if (!usdtMintAddress) {
-      this.logger.warn('USDT mint address not provided, skipping Solana transactions');
+      this.logger.warn(
+        'USDT mint address not provided, skipping Solana transactions',
+      );
       return [];
     }
 
@@ -829,7 +989,9 @@ export class WalletsSchedulerService implements OnModuleInit {
       'https://api.mainnet-beta.solana.com',
       'https://solana-api.projectserum.com',
     ];
-    const primarySet = new Set(primaryUrls.map(WalletsSchedulerService.normalizeRpcUrl));
+    const primarySet = new Set(
+      primaryUrls.map(WalletsSchedulerService.normalizeRpcUrl),
+    );
     const extraFallbacks = fallbackRpcUrls.filter(
       (f) => !primarySet.has(WalletsSchedulerService.normalizeRpcUrl(f)),
     );
@@ -850,7 +1012,7 @@ export class WalletsSchedulerService implements OnModuleInit {
             // Thêm timeout cho fetch requests
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-            
+
             try {
               const response = await fetch(url, {
                 ...options,
@@ -880,9 +1042,10 @@ export class WalletsSchedulerService implements OnModuleInit {
         let signatures: any[] = [];
         try {
           signatures = await this.retrySolanaRpcCall(
-            () => connection.getSignaturesForAddress(tokenAccountAddress, {
-              limit: limit,
-            }),
+            () =>
+              connection.getSignaturesForAddress(tokenAccountAddress, {
+                limit: limit,
+              }),
             `getSignaturesForAddress(tokenAccount: ${tokenAccountAddress.toBase58()}) [${isPrimary ? 'primary' : 'fallback'} RPC]`,
             3, // Giảm retry cho mỗi RPC endpoint (sẽ thử nhiều endpoints)
             2000, // Base delay
@@ -891,9 +1054,10 @@ export class WalletsSchedulerService implements OnModuleInit {
           // Fallback: Thử lấy từ wallet address
           try {
             signatures = await this.retrySolanaRpcCall(
-              () => connection.getSignaturesForAddress(publicKey, {
-                limit: limit * 2,
-              }),
+              () =>
+                connection.getSignaturesForAddress(publicKey, {
+                  limit: limit * 2,
+                }),
               `getSignaturesForAddress(wallet: ${address}) [${isPrimary ? 'primary' : 'fallback'} RPC]`,
               3,
               2000,
@@ -917,18 +1081,19 @@ export class WalletsSchedulerService implements OnModuleInit {
         // Process signatures với delay để tránh rate limit
         for (let i = 0; i < signatures.length; i++) {
           const signatureInfo = signatures[i];
-          
+
           // Thêm delay giữa các requests (trừ request đầu tiên)
           if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 500)); // Tăng delay lên 500ms
+            await new Promise((resolve) => setTimeout(resolve, 500)); // Tăng delay lên 500ms
           }
 
           try {
             const tx = await this.retrySolanaRpcCall(
-              () => connection.getTransaction(signatureInfo.signature, {
-                commitment: 'confirmed',
-                maxSupportedTransactionVersion: 0,
-              }),
+              () =>
+                connection.getTransaction(signatureInfo.signature, {
+                  commitment: 'confirmed',
+                  maxSupportedTransactionVersion: 0,
+                }),
               `getTransaction(${signatureInfo.signature})`,
               3, // Tăng số lần retry
               2000, // Tăng base delay
@@ -941,29 +1106,31 @@ export class WalletsSchedulerService implements OnModuleInit {
             const postTokenBalances = tx.meta.postTokenBalances || [];
 
             // Tìm balance của USDT mint (có thể có nhiều token accounts trong transaction)
-            const accountKeys = tx.transaction.message.getAccountKeys ? 
-              tx.transaction.message.getAccountKeys().staticAccountKeys : 
-              (tx.transaction.message as any).accountKeys || [];
+            const accountKeys = tx.transaction.message.getAccountKeys
+              ? tx.transaction.message.getAccountKeys().staticAccountKeys
+              : (tx.transaction.message as any).accountKeys || [];
             const tokenAccountIndex = accountKeys.findIndex(
               (key) => key.toBase58() === tokenAccountAddress.toBase58(),
             );
 
             // Tìm preBalance và postBalance của USDT mint
-            let preBalance = tokenAccountIndex >= 0
-              ? preTokenBalances.find(
-                  (b) =>
-                    b.accountIndex === tokenAccountIndex &&
-                    b.mint === usdtMintAddress,
-                )
-              : null;
+            let preBalance =
+              tokenAccountIndex >= 0
+                ? preTokenBalances.find(
+                    (b) =>
+                      b.accountIndex === tokenAccountIndex &&
+                      b.mint === usdtMintAddress,
+                  )
+                : null;
 
-            let postBalance = tokenAccountIndex >= 0
-              ? postTokenBalances.find(
-                  (b) =>
-                    b.accountIndex === tokenAccountIndex &&
-                    b.mint === usdtMintAddress,
-                )
-              : null;
+            let postBalance =
+              tokenAccountIndex >= 0
+                ? postTokenBalances.find(
+                    (b) =>
+                      b.accountIndex === tokenAccountIndex &&
+                      b.mint === usdtMintAddress,
+                  )
+                : null;
 
             // Nếu không tìm thấy theo accountIndex, thử tìm theo mint address
             // (có thể token account mới được tạo hoặc không có trong accountKeys)
@@ -978,19 +1145,23 @@ export class WalletsSchedulerService implements OnModuleInit {
 
               // Verify rằng đây là token account của wallet này
               for (const postBal of usdtPostBalances) {
-                if (postBal.accountIndex >= 0 && postBal.accountIndex < accountKeys.length) {
+                if (
+                  postBal.accountIndex >= 0 &&
+                  postBal.accountIndex < accountKeys.length
+                ) {
                   const accountAtIndex = accountKeys[postBal.accountIndex];
-                  
+
                   // Verify: account tại index này phải là token account của wallet này
                   if (
-                    accountAtIndex.toBase58() === tokenAccountAddress.toBase58() ||
+                    accountAtIndex.toBase58() ===
+                      tokenAccountAddress.toBase58() ||
                     accountAtIndex.toBase58() === address
                   ) {
                     // Tìm preBalance tương ứng
                     const matchingPreBalance = usdtPreBalances.find(
                       (b) => b.accountIndex === postBal.accountIndex,
                     );
-                    
+
                     if (!matchingPreBalance) {
                       // Chỉ có postBalance (token account mới được tạo)
                       postBalance = postBal;
@@ -1008,18 +1179,22 @@ export class WalletsSchedulerService implements OnModuleInit {
 
             // Xử lý deposit transaction
             if (postBalance) {
-              const postAmount = parseFloat(postBalance.uiTokenAmount.uiAmountString || '0');
-              const preAmount = preBalance 
+              const postAmount = parseFloat(
+                postBalance.uiTokenAmount.uiAmountString || '0',
+              );
+              const preAmount = preBalance
                 ? parseFloat(preBalance.uiTokenAmount.uiAmountString || '0')
                 : 0;
               const amountChange = postAmount - preAmount;
 
               if (amountChange > 0) {
                 // Chỉ lấy transaction nạp tiền (balance tăng)
-                const blockTime = signatureInfo.blockTime 
+                const blockTime = signatureInfo.blockTime
                   ? new Date(signatureInfo.blockTime * 1000)
-                  : (tx.blockTime ? new Date(tx.blockTime * 1000) : new Date());
-                
+                  : tx.blockTime
+                    ? new Date(tx.blockTime * 1000)
+                    : new Date();
+
                 transactions.push({
                   hash: signatureInfo.signature,
                   amount: amountChange,
@@ -1049,9 +1224,7 @@ export class WalletsSchedulerService implements OnModuleInit {
     }
 
     // Nếu đến đây, tất cả RPCs đều fail
-    this.logger.error(
-      `All RPC endpoints exhausted for wallet ${address}`,
-    );
+    this.logger.error(`All RPC endpoints exhausted for wallet ${address}`);
     return [];
   }
 
@@ -1068,7 +1241,9 @@ export class WalletsSchedulerService implements OnModuleInit {
   ): Promise<OnchainTransaction[]> {
     try {
       if (!usdtMintAddress) {
-        this.logger.warn('USDT mint address not provided, skipping Solana Block Explorer API');
+        this.logger.warn(
+          'USDT mint address not provided, skipping Solana Block Explorer API',
+        );
         return [];
       }
 
@@ -1077,7 +1252,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       const apiUrl = apiKey
         ? 'https://pro-api.solscan.io/account/splTransfers'
         : 'https://public-api.solscan.io/account/splTransfers';
-      
+
       const params = {
         account: address,
         limit: limit,
@@ -1085,7 +1260,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       };
 
       const headers: any = {
-        'Accept': 'application/json',
+        Accept: 'application/json',
       };
 
       // Thêm API key vào header nếu có
@@ -1143,16 +1318,16 @@ export class WalletsSchedulerService implements OnModuleInit {
           // API trả về error response
           const status = error.response.status;
           const data = error.response.data;
-          
+
           if (status === 429) {
             throw new Error('Solscan API rate limit exceeded');
           }
-          
+
           if (status === 404) {
             // Không tìm thấy transactions là trường hợp bình thường
             return [];
           }
-          
+
           throw new Error(
             `Solscan API error (${status}): ${JSON.stringify(data)}`,
           );
@@ -1161,7 +1336,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           throw new Error('Solscan API request timeout or network error');
         }
       }
-      
+
       // Các lỗi khác
       throw error;
     }
@@ -1184,21 +1359,27 @@ export class WalletsSchedulerService implements OnModuleInit {
     maxTransactions?: number,
     usdtContractAddress?: string,
   ): Promise<OnchainTransaction[]> {
-    const rpcUrls = await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
-      network.net_symbol,
-    );
+    const rpcUrls =
+      await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
+        network.net_symbol,
+      );
     if (!rpcUrls.length) {
       throw new Error(`RPC endpoint not configured for ${network.net_symbol}`);
     }
 
     if (!usdtContractAddress) {
-      this.logger.warn('USDT contract address not provided, skipping EVM transactions');
+      this.logger.warn(
+        'USDT contract address not provided, skipping EVM transactions',
+      );
       return [];
     }
 
     let provider = null;
     for (const rpcUrl of rpcUrls) {
-      provider = await this.createSafeJsonRpcProvider(rpcUrl, network.net_symbol);
+      provider = await this.createSafeJsonRpcProvider(
+        rpcUrl,
+        network.net_symbol,
+      );
       if (provider) break;
     }
     if (!provider) {
@@ -1211,7 +1392,8 @@ export class WalletsSchedulerService implements OnModuleInit {
     const transactions: OnchainTransaction[] = [];
 
     // ERC20 Transfer event signature: Transfer(address,address,uint256)
-    const transferEventSignature = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const transferEventSignature =
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
     const usdtContractLower = usdtContractAddress.toLowerCase();
 
     try {
@@ -1242,9 +1424,15 @@ export class WalletsSchedulerService implements OnModuleInit {
               try {
                 const tx = await provider.getTransaction(txHash);
                 const receipt = await provider.getTransactionReceipt(txHash);
-                
+
                 // Chỉ xử lý transaction thành công và có logs (ERC20 transfers)
-                if (!tx || !receipt || receipt.status !== 1 || !receipt.logs || receipt.logs.length === 0) {
+                if (
+                  !tx ||
+                  !receipt ||
+                  receipt.status !== 1 ||
+                  !receipt.logs ||
+                  receipt.logs.length === 0
+                ) {
                   return null;
                 }
 
@@ -1256,14 +1444,17 @@ export class WalletsSchedulerService implements OnModuleInit {
                   }
 
                   // Kiểm tra xem có phải Transfer event không (topic[0] = Transfer signature)
-                  if (log.topics[0] !== transferEventSignature || log.topics.length !== 3) {
+                  if (
+                    log.topics[0] !== transferEventSignature ||
+                    log.topics.length !== 3
+                  ) {
                     continue;
                   }
 
                   // Parse Transfer event: Transfer(address from, address to, uint256 value)
                   // topic[1] = from (padded), topic[2] = to (padded), data = value
                   const toAddress = '0x' + log.topics[2].slice(-40); // Lấy 20 bytes cuối (address)
-                  
+
                   // Kiểm tra xem có phải transfer vào address này không
                   if (toAddress.toLowerCase() !== address.toLowerCase()) {
                     continue;
@@ -1330,14 +1521,19 @@ export class WalletsSchedulerService implements OnModuleInit {
       }
 
       if (!usdtContractAddress) {
-        this.logger.warn('USDT contract address not provided, skipping Zerion API');
+        this.logger.warn(
+          'USDT contract address not provided, skipping Zerion API',
+        );
         return [];
       }
 
       // Zerion API key: admin_settings (as_config_zerion_key) hoặc .env ZERION_API_KEY
-      const apiKey = await this.adminSettingsConfigService.getEffectiveZerionKey();
+      const apiKey =
+        await this.adminSettingsConfigService.getEffectiveZerionKey();
       if (!apiKey || apiKey.trim().length === 0) {
-        throw new Error('ZERION_API_KEY is not configured (admin_settings or .env)');
+        throw new Error(
+          'ZERION_API_KEY is not configured (admin_settings or .env)',
+        );
       }
 
       // Transform API key for Basic Auth (base64 encode)
@@ -1345,7 +1541,8 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       // Xác định chain ID cho Zerion API
       // ETH = ethereum, BSC = binance-smart-chain
-      const chainId = network.net_symbol === 'ETH' ? 'ethereum' : 'binance-smart-chain';
+      const chainId =
+        network.net_symbol === 'ETH' ? 'ethereum' : 'binance-smart-chain';
 
       // Zerion API endpoint để lấy transactions (cần trailing slash)
       const apiUrl = `https://api.zerion.io/v1/wallets/${address}/transactions/`;
@@ -1366,7 +1563,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           },
           timeout: 30000,
         });
-        
+
         // Update last request time sau khi request thành công
         this.zerionApiLastRequestTime = Date.now();
       } catch (axiosError: any) {
@@ -1384,7 +1581,11 @@ export class WalletsSchedulerService implements OnModuleInit {
       // Parse response từ Zerion API
       // Response structure: { data: [{ type: "transactions", attributes: {...}, relationships: { chain: {...} } }] }
       // Response là đa chuỗi, cần filter theo chain và USDT contract
-      if (response.data && response.data.data && Array.isArray(response.data.data)) {
+      if (
+        response.data &&
+        response.data.data &&
+        Array.isArray(response.data.data)
+      ) {
         const allTransactions = response.data.data;
 
         this.logger.debug(
@@ -1400,7 +1601,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           }
 
           const attributes = tx.attributes || {};
-          
+
           // Kiểm tra transfers trong attributes
           if (attributes.transfers && Array.isArray(attributes.transfers)) {
             for (const transfer of attributes.transfers) {
@@ -1425,12 +1626,17 @@ export class WalletsSchedulerService implements OnModuleInit {
                   (impl: any) =>
                     impl.chain_id === chainId &&
                     impl.address &&
-                    impl.address.toLowerCase() === usdtContractAddress.toLowerCase(),
+                    impl.address.toLowerCase() ===
+                      usdtContractAddress.toLowerCase(),
                 );
 
-                if (usdtImplementation && transfer.quantity && transfer.quantity.float > 0) {
+                if (
+                  usdtImplementation &&
+                  transfer.quantity &&
+                  transfer.quantity.float > 0
+                ) {
                   const amount = transfer.quantity.float; // Đã được format sẵn
-                  
+
                   transactions.push({
                     hash: attributes.hash || '',
                     amount: amount,
@@ -1464,7 +1670,8 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       return transactions;
     } catch (error: any) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       // Log chi tiết hơn để debug
       if (error.response) {
         this.logger.error(
@@ -1507,13 +1714,17 @@ export class WalletsSchedulerService implements OnModuleInit {
       if (network.net_symbol === 'ETH') {
         chainId = 1; // Ethereum Mainnet
         apiKey =
-          this.configService.get<string>('ETHERSCAN_API_KEY') || 'YourApiKeyToken';
+          this.configService.get<string>('ETHERSCAN_API_KEY') ||
+          'YourApiKeyToken';
       } else if (network.net_symbol === 'BNB') {
         chainId = 56; // BSC Mainnet
         apiKey =
-          this.configService.get<string>('BSCSCAN_API_KEY') || 'YourApiKeyToken';
+          this.configService.get<string>('BSCSCAN_API_KEY') ||
+          'YourApiKeyToken';
       } else {
-        throw new Error(`Block Explorer API not supported for ${network.net_symbol}`);
+        throw new Error(
+          `Block Explorer API not supported for ${network.net_symbol}`,
+        );
       }
 
       const transactions: OnchainTransaction[] = [];
@@ -1522,7 +1733,9 @@ export class WalletsSchedulerService implements OnModuleInit {
       let hasMore = true;
 
       if (!usdtContractAddress) {
-        this.logger.warn('USDT contract address not provided, skipping Block Explorer API');
+        this.logger.warn(
+          'USDT contract address not provided, skipping Block Explorer API',
+        );
         return [];
       }
 
@@ -1551,27 +1764,37 @@ export class WalletsSchedulerService implements OnModuleInit {
         // Xử lý các trường hợp lỗi từ API
         if (response.data.status === '0') {
           const errorMessage = response.data.message || 'Unknown error';
-          
+
           // Kiểm tra các lỗi phổ biến
-          if (errorMessage.includes('Invalid API Key') || 
-              errorMessage.includes('api key') ||
-              errorMessage.toLowerCase().includes('invalid')) {
-            throw new Error(`Invalid API Key for ${network.net_symbol}: ${errorMessage}`);
+          if (
+            errorMessage.includes('Invalid API Key') ||
+            errorMessage.includes('api key') ||
+            errorMessage.toLowerCase().includes('invalid')
+          ) {
+            throw new Error(
+              `Invalid API Key for ${network.net_symbol}: ${errorMessage}`,
+            );
           }
-          
-          if (errorMessage.includes('rate limit') || 
-              errorMessage.includes('Max rate limit')) {
-            throw new Error(`Rate limit exceeded for ${network.net_symbol}: ${errorMessage}`);
+
+          if (
+            errorMessage.includes('rate limit') ||
+            errorMessage.includes('Max rate limit')
+          ) {
+            throw new Error(
+              `Rate limit exceeded for ${network.net_symbol}: ${errorMessage}`,
+            );
           }
-          
+
           if (errorMessage === 'No transactions found') {
             // Không có transaction là trường hợp bình thường, không phải lỗi
             hasMore = false;
             continue;
           }
-          
+
           // Các lỗi khác
-          throw new Error(`Block Explorer API error for ${network.net_symbol}: ${errorMessage}`);
+          throw new Error(
+            `Block Explorer API error for ${network.net_symbol}: ${errorMessage}`,
+          );
         }
 
         if (response.data.status === '1' && response.data.result) {
@@ -1586,7 +1809,8 @@ export class WalletsSchedulerService implements OnModuleInit {
               tx.to &&
               tx.to.toLowerCase() === address.toLowerCase() &&
               tx.contractAddress &&
-              tx.contractAddress.toLowerCase() === usdtContractAddress.toLowerCase() &&
+              tx.contractAddress.toLowerCase() ===
+                usdtContractAddress.toLowerCase() &&
               parseInt(tx.value) > 0 &&
               tx.txreceipt_status === '1' // Transaction thành công
             ) {
@@ -1622,7 +1846,9 @@ export class WalletsSchedulerService implements OnModuleInit {
             );
           }
         } else {
-          throw new Error(`Unexpected API response: ${JSON.stringify(response.data)}`);
+          throw new Error(
+            `Unexpected API response: ${JSON.stringify(response.data)}`,
+          );
         }
 
         // Rate limit: Đợi 200ms giữa các request để tránh vượt quá 5 calls/second
@@ -1650,7 +1876,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           throw new Error(`Block Explorer API request error: ${error.message}`);
         }
       }
-      
+
       // Re-throw các lỗi đã được xử lý ở trên
       throw error;
     }
@@ -1690,7 +1916,9 @@ export class WalletsSchedulerService implements OnModuleInit {
     );
 
     // Cập nhật các record có wh_node = null nhưng hash trùng với transaction mới
-    const newTransactionHashes = new Set(missingTransactions.map((tx) => tx.hash));
+    const newTransactionHashes = new Set(
+      missingTransactions.map((tx) => tx.hash),
+    );
     if (newTransactionHashes.size > 0) {
       const recordsWithNullNode = await this.walletHistoryRepository.find({
         where: {
@@ -1708,12 +1936,14 @@ export class WalletsSchedulerService implements OnModuleInit {
       });
 
       if (recordsWithNullNode.length > 0) {
-        const userWalletNetwork = await this.useWalletNetworkRepository.findOne({
-          where: {
-            uwn_user_id: tracker.awt_user_id,
-            uwn_network_id: network.net_id,
+        const userWalletNetwork = await this.useWalletNetworkRepository.findOne(
+          {
+            where: {
+              uwn_user_id: tracker.awt_user_id,
+              uwn_network_id: network.net_id,
+            },
           },
-        });
+        );
 
         if (userWalletNetwork) {
           await this.walletHistoryRepository.update(
@@ -1729,7 +1959,11 @@ export class WalletsSchedulerService implements OnModuleInit {
             `Updated wh_wallet_netword_id and wh_node for ${recordsWithNullNode.length} records with null wh_node (${network.net_symbol}) for user ${tracker.awt_user_id}`,
           );
           // Loại bỏ các hash đã được cập nhật khỏi missingTransactions
-          const updatedHashes = new Set(recordsWithNullNode.map((tx) => tx.wh_hash).filter((h) => h !== null));
+          const updatedHashes = new Set(
+            recordsWithNullNode
+              .map((tx) => tx.wh_hash)
+              .filter((h) => h !== null),
+          );
           missingTransactions = missingTransactions.filter(
             (tx) => !updatedHashes.has(tx.hash),
           );
@@ -1812,7 +2046,9 @@ export class WalletsSchedulerService implements OnModuleInit {
             );
           } else if (existingDepositTracker.wdt_withdraw === true) {
             existingDepositTracker.wdt_withdraw = false;
-            await this.walletDepositTrackerRepository.save(existingDepositTracker);
+            await this.walletDepositTrackerRepository.save(
+              existingDepositTracker,
+            );
             this.logger.log(
               `Reset wallet_deposit_tracker wdt_withdraw=false for user ${tracker.awt_user_id}, network ${network.net_symbol}, address ${depositAddress} (new deposit detected)`,
             );
@@ -1886,7 +2122,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       const usdtMintOrContract = usdtCoinNetwork.cn_coin_mint;
 
       // 2. Lấy transaction từ cache hoặc file (chỉ USDT)
-      let cachedTransactions = await this.getCachedTransactions(
+      const cachedTransactions = await this.getCachedTransactions(
         tracker.awt_address,
         network,
         usdtMintOrContract,
@@ -1922,9 +2158,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         );
 
         // Merge với cache (loại bỏ duplicate)
-        const existingHashes = new Set(
-          cachedTransactions.map((tx) => tx.hash),
-        );
+        const existingHashes = new Set(cachedTransactions.map((tx) => tx.hash));
         const uniqueNewTransactions = newTransactions.filter(
           (tx) => !existingHashes.has(tx.hash),
         );
@@ -2041,8 +2275,9 @@ export class WalletsSchedulerService implements OnModuleInit {
       }
 
       // Tính balance mới
-      let newBalance = totalDeposit + totalReward - totalStaking - totalWithdraw;
-      
+      let newBalance =
+        totalDeposit + totalReward - totalStaking - totalWithdraw;
+
       // Đảm bảo balance không âm: nếu <= 0 thì set = 0
       if (newBalance <= 0) {
         newBalance = 0;
@@ -2105,7 +2340,14 @@ export class WalletsSchedulerService implements OnModuleInit {
         );
         return true;
       }
-      // Nếu không cần update, bỏ qua
+
+      this.logger.debug(
+        `[uw-balance] skip DB write userId=${userId} coinId=${coinId} ` +
+          `uw_balance(stored)=${oldBalance} computedNew=${newBalance} ` +
+          `deposit(SUCCESS)=${totalDeposit} reward=${totalReward} staking=${totalStaking} withdraw(pending+success+checked)=${totalWithdraw} ` +
+          `shouldUpdate=false (thường là |computedNew-stored|<=tolerance; hoặc nhánh staking edge). ` +
+          `Lưu ý: API số dư dùng toàn coin (mọi network), không chỉ SOL.`,
+      );
       return false;
     } catch (error) {
       this.logger.error(
@@ -2121,9 +2363,9 @@ export class WalletsSchedulerService implements OnModuleInit {
    * uw_balance = tổng nạp thành công - tổng staking (running/pending-claim) - tổng rút (pending/success/checked)
    * Chỉ cập nhật database nếu balance mới khác với balance cũ (uw_balance + staking)
    */
-  async updateUserBalance(userId: number, coinId: number): Promise<void> {
-    // Sử dụng hàm chung để cập nhật balance
-    await this.updateUserBalanceIfChanged(userId, coinId);
+  /** @returns true nếu đã ghi `user_wallets.uw_balance`, false nếu bỏ qua (đã khớp hoặc shouldUpdate=false). */
+  async updateUserBalance(userId: number, coinId: number): Promise<boolean> {
+    return this.updateUserBalanceIfChanged(userId, coinId);
   }
 
   /**
@@ -2135,7 +2377,11 @@ export class WalletsSchedulerService implements OnModuleInit {
     network: Network,
     coinId: number,
     usdtMintOrContract: string,
-  ): Promise<{ balanceMatch: boolean; onchainBalance: number; dbBalance: number }> {
+  ): Promise<{
+    balanceMatch: boolean;
+    onchainBalance: number;
+    dbBalance: number;
+  }> {
     try {
       // 1. Lấy số dư USDT từ RPC
       const onchainBalance = await this.getUSDTBalanceFromRPC(
@@ -2153,7 +2399,14 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       // 3. So sánh (cho phép sai số nhỏ do làm tròn)
       const tolerance = 0.00000001;
-      const balanceMatch = Math.abs(onchainBalance - dbBalance) <= tolerance;
+      const diff = onchainBalance - dbBalance;
+      const balanceMatch = Math.abs(diff) <= tolerance;
+
+      this.logger.debug(
+        `[balance-check] user_id=${tracker.awt_user_id} network=${network.net_symbol} ` +
+          `addr=${tracker.awt_address} mint/contract=${this.debugShortAddr(usdtMintOrContract, 6, 6)} ` +
+          `onchainUSDT=${onchainBalance} dbDepositNet=${dbBalance} diff=${diff} tolerance=${tolerance} match=${balanceMatch}`,
+      );
 
       return {
         balanceMatch,
@@ -2162,8 +2415,13 @@ export class WalletsSchedulerService implements OnModuleInit {
       };
     } catch (error) {
       // Nếu lỗi khi lấy số dư từ RPC, coi như không khớp để tiếp tục fetch onchain
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(
-        `Error checking wallet balance for ${tracker.awt_address} on ${network.net_symbol}: ${error.message}`,
+        `Error checking wallet balance for ${tracker.awt_address} on ${network.net_symbol}: ${errMsg}`,
+      );
+      this.logger.debug(
+        `[balance-check] exception detail user_id=${tracker.awt_user_id} addr=${tracker.awt_address}: ${errStack || errMsg}`,
       );
       return {
         balanceMatch: false,
@@ -2183,7 +2441,8 @@ export class WalletsSchedulerService implements OnModuleInit {
   ): Promise<number> {
     try {
       if (network.net_symbol === 'SOL') {
-        const primaryUrls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
+        const primaryUrls =
+          await this.adminSettingsConfigService.getRpcSolUrlsToTry();
         if (!primaryUrls.length) {
           throw new Error('SOLANA_RPC_URL is not configured');
         }
@@ -2191,7 +2450,9 @@ export class WalletsSchedulerService implements OnModuleInit {
           'https://api.mainnet-beta.solana.com',
           'https://solana-api.projectserum.com',
         ];
-        const primarySet = new Set(primaryUrls.map(WalletsSchedulerService.normalizeRpcUrl));
+        const primarySet = new Set(
+          primaryUrls.map(WalletsSchedulerService.normalizeRpcUrl),
+        );
         const extraFallbacks = fallbackRpcUrls.filter(
           (f) => !primarySet.has(WalletsSchedulerService.normalizeRpcUrl(f)),
         );
@@ -2212,7 +2473,7 @@ export class WalletsSchedulerService implements OnModuleInit {
                 // Thêm timeout cho fetch requests
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-                
+
                 try {
                   const response = await fetch(url, {
                     ...options,
@@ -2240,27 +2501,42 @@ export class WalletsSchedulerService implements OnModuleInit {
             );
 
             try {
-              const tokenAccountInfo = await connection.getTokenAccountBalance(
-                tokenAccount,
-              );
+              const tokenAccountInfo =
+                await connection.getTokenAccountBalance(tokenAccount);
               // USDT trên Solana có 6 decimals
-              const balance = parseFloat(tokenAccountInfo.value.uiAmountString || '0');
-              
+              const balance = parseFloat(
+                tokenAccountInfo.value.uiAmountString || '0',
+              );
+
+              this.logger.debug(
+                `[rpc-usdt-balance] SOL rpcHost=${this.debugRpcHost(rpcUrl)} primary=${isPrimary} ` +
+                  `wallet=${this.debugShortAddr(address)} ATA=${tokenAccount.toBase58()} ` +
+                  `uiAmountString=${tokenAccountInfo.value.uiAmountString ?? 'n/a'} parsed=${balance}`,
+              );
+
               if (!isPrimary) {
                 this.logger.log(
                   `Successfully got USDT balance using fallback RPC for ${address} on SOL`,
                 );
               }
-              
+
               return balance;
             } catch (error: any) {
               // Token account không tồn tại = balance = 0
-              if (error?.message?.includes('InvalidAccountData') || 
-                  error?.message?.includes('could not find account') ||
-                  error?.message?.includes('Invalid public key')) {
+              if (
+                error?.message?.includes('InvalidAccountData') ||
+                error?.message?.includes('could not find account') ||
+                error?.message?.includes('Invalid public key')
+              ) {
+                this.logger.debug(
+                  `[rpc-usdt-balance] SOL: không đọc được ATA USDT (coi balance=0). ` +
+                    `rpcHost=${this.debugRpcHost(rpcUrl)} wallet=${address} ATA=${tokenAccount.toBase58()} ` +
+                    `mint=${usdtMintOrContract} err=${error?.message}. ` +
+                    `Gợi ý: chỉ gửi native SOL thì số dư USDT SPL on-chain vẫn 0; cần gửi USDT SPL vào ví này.`,
+                );
                 return 0;
               }
-              
+
               // Nếu không phải lỗi "account not found", throw để thử RPC tiếp theo
               if (isPrimary) {
                 this.logger.warn(
@@ -2280,24 +2556,30 @@ export class WalletsSchedulerService implements OnModuleInit {
             continue;
           }
         }
-        
+
         // Không bao giờ đến đây, nhưng TypeScript cần return
         throw new Error('Failed to get USDT balance from all RPC endpoints');
       } else if (network.net_symbol === 'ETH' || network.net_symbol === 'BNB') {
-        const rpcUrls = await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
-          network.net_symbol,
-        );
+        const rpcUrls =
+          await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
+            network.net_symbol,
+          );
         if (!rpcUrls.length) {
           throw new Error(`RPC_${network.net_symbol} is not configured`);
         }
 
         let provider = null;
         for (const rpcUrl of rpcUrls) {
-          provider = await this.createSafeJsonRpcProvider(rpcUrl, network.net_symbol);
+          provider = await this.createSafeJsonRpcProvider(
+            rpcUrl,
+            network.net_symbol,
+          );
           if (provider) break;
         }
         if (!provider) {
-          throw new Error(`Failed to create RPC provider for ${network.net_symbol}`);
+          throw new Error(
+            `Failed to create RPC provider for ${network.net_symbol}`,
+          );
         }
 
         // ERC20 balanceOf ABI
@@ -2307,28 +2589,34 @@ export class WalletsSchedulerService implements OnModuleInit {
         ];
 
         const { Contract, getAddress } = await import('ethers');
-        
+
         // Normalize addresses để tránh lỗi checksum
         // getAddress() yêu cầu address phải có checksum đúng hoặc lowercase
         // Nếu address có checksum sai, convert về lowercase trước rồi normalize
         let normalizedContractAddress: string;
         let normalizedWalletAddress: string;
-        
+
         try {
           // Thử normalize trực tiếp
           normalizedContractAddress = getAddress(usdtMintOrContract);
         } catch (error) {
           // Nếu fail, convert về lowercase rồi normalize
-          normalizedContractAddress = getAddress(usdtMintOrContract.toLowerCase());
+          normalizedContractAddress = getAddress(
+            usdtMintOrContract.toLowerCase(),
+          );
         }
-        
+
         try {
           normalizedWalletAddress = getAddress(address);
         } catch (error) {
           normalizedWalletAddress = getAddress(address.toLowerCase());
         }
-        
-        const tokenContract = new Contract(normalizedContractAddress, erc20Abi, provider);
+
+        const tokenContract = new Contract(
+          normalizedContractAddress,
+          erc20Abi,
+          provider,
+        );
 
         // Lấy decimals
         let decimals = 18; // Default
@@ -2341,7 +2629,13 @@ export class WalletsSchedulerService implements OnModuleInit {
 
         // Lấy balance
         const balance = await tokenContract.balanceOf(normalizedWalletAddress);
-        return parseFloat(formatUnits(balance, decimals));
+        const asFloat = parseFloat(formatUnits(balance, decimals));
+        this.logger.debug(
+          `[rpc-usdt-balance] ${network.net_symbol} wallet=${this.debugShortAddr(normalizedWalletAddress)} ` +
+            `contract=${this.debugShortAddr(normalizedContractAddress)} decimals=${decimals} ` +
+            `raw=${balance.toString()} parsed=${asFloat}`,
+        );
+        return asFloat;
       } else {
         throw new Error(`Unsupported network: ${network.net_symbol}`);
       }
@@ -2396,8 +2690,15 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       const totalAdminDeposit = parseFloat(adminDepositResult?.total || '0');
 
+      const net = totalDeposit - totalAdminDeposit;
+      this.logger.debug(
+        `[deposit-balance-db] userId=${userId} coinId=${coinId} wh_node=${network.net_symbol} ` +
+          `SUM(DEPOSIT,SUCCESS)=${totalDeposit} SUM(ADMIN_DEPOSIT,SUCCESS)=${totalAdminDeposit} netDb=${net} ` +
+          `(đối chiếu với số dư USDT on-chain theo từng network)`,
+      );
+
       // Trả về deposit - admin-deposit
-      return totalDeposit - totalAdminDeposit;
+      return net;
     } catch (error) {
       this.logger.error(
         `Error calculating deposit balance for user ${userId} on ${network.net_symbol}: ${error.message}`,
@@ -2412,18 +2713,17 @@ export class WalletsSchedulerService implements OnModuleInit {
   private async waitForZerionApiRateLimit(): Promise<void> {
     const now = Date.now();
     const timeSinceLastRequest = now - this.zerionApiLastRequestTime;
-    
+
     // Nếu chưa đủ thời gian giữa các requests, đợi thêm
     if (timeSinceLastRequest < this.ZERION_API_MIN_INTERVAL_MS) {
       const waitTime = this.ZERION_API_MIN_INTERVAL_MS - timeSinceLastRequest;
       this.logger.debug(
         `Zerion API rate limit: waiting ${waitTime}ms before next request`,
       );
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
-    
+
     // Update last request time
     this.zerionApiLastRequestTime = Date.now();
   }
 }
-

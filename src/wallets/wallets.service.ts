@@ -1,4 +1,5 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -6,20 +7,60 @@ import * as bip39 from 'bip39';
 import * as bip32 from 'bip32';
 import * as tinysecp from 'tiny-secp256k1';
 import { derivePath } from 'ed25519-hd-key';
-import { Keypair, Connection, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddress, createTransferInstruction, TOKEN_PROGRAM_ID, getMint, getAccount, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { HDNodeWallet, Mnemonic, JsonRpcProvider, parseUnits, Contract, Interface, Wallet, Network as EthersNetwork, getAddress } from 'ethers';
+import {
+  Keypair,
+  Connection,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from '@solana/web3.js';
+import {
+  getAssociatedTokenAddress,
+  createTransferInstruction,
+  TOKEN_PROGRAM_ID,
+  getMint,
+  getAccount,
+  createAssociatedTokenAccountInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
+import {
+  HDNodeWallet,
+  Mnemonic,
+  JsonRpcProvider,
+  parseUnits,
+  Contract,
+  Interface,
+  Wallet,
+  Network as EthersNetwork,
+  getAddress,
+} from 'ethers';
 import * as QRCode from 'qrcode';
 import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { UserWallet } from './entities/user-wallet.entity';
-import { WalletHistory, WalletHistoryType, WalletHistoryOption, WalletHistoryStatus } from './entities/wallet-history.entity';
-import { WalletTransfer, WalletTransferFrom, WalletTransferTo, WalletTransferStatus } from './entities/wallet-transfer.entity';
+import {
+  WalletHistory,
+  WalletHistoryType,
+  WalletHistoryOption,
+  WalletHistoryStatus,
+} from './entities/wallet-history.entity';
+import {
+  WalletTransfer,
+  WalletTransferFrom,
+  WalletTransferTo,
+  WalletTransferStatus,
+} from './entities/wallet-transfer.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
 import { ActiveWalletTracker } from './entities/active-wallet-tracker.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { Network } from '../settings/entities/network.entity';
-import { CoinNetwork, CoinNetworkStatus } from '../settings/entities/coin-network.entity';
-import { AdminSetting, FundType } from '../settings/entities/admin-setting.entity';
+import {
+  CoinNetwork,
+  CoinNetworkStatus,
+} from '../settings/entities/coin-network.entity';
+import {
+  AdminSetting,
+  FundType,
+} from '../settings/entities/admin-setting.entity';
 import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { RpcRateLimitService } from '../common/rpc-rate-limit.service';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
@@ -30,6 +71,15 @@ const WITHDRAW_ERROR_MESSAGE =
 
 @Injectable()
 export class WalletsService {
+  private readonly logger = new Logger(WalletsService.name);
+
+  private debugShortAddr(addr: string, head = 8, tail = 6): string {
+    const s = (addr || '').trim();
+    if (!s) return '(empty)';
+    if (s.length <= head + tail + 3) return s;
+    return `${s.slice(0, head)}...${s.slice(-tail)}`;
+  }
+
   constructor(
     @InjectRepository(UserWalletNetwork)
     private useWalletNetworkRepository: Repository<UserWalletNetwork>,
@@ -73,7 +123,10 @@ export class WalletsService {
     });
   }
 
-  async getWalletByNetwork(userId: number, networkId: number): Promise<UserWalletNetwork | null> {
+  async getWalletByNetwork(
+    userId: number,
+    networkId: number,
+  ): Promise<UserWalletNetwork | null> {
     const wallet = await this.useWalletNetworkRepository.findOne({
       where: {
         uwn_user_id: userId,
@@ -83,13 +136,21 @@ export class WalletsService {
 
     // Nếu có wallet và có public_key, tracking wallet
     if (wallet && wallet.uwn_public_key) {
-      await this.trackingWallet(userId, networkId, wallet.uwn_public_key, wallet.uwn_id);
+      await this.trackingWallet(
+        userId,
+        networkId,
+        wallet.uwn_public_key,
+        wallet.uwn_id,
+      );
     }
 
     return wallet;
   }
 
-  async getBalanceByCoin(userId: number, coinId: number): Promise<UserWallet | null> {
+  async getBalanceByCoin(
+    userId: number,
+    coinId: number,
+  ): Promise<UserWallet | null> {
     const wallet = await this.userWalletRepository.findOne({
       where: {
         uw_user_id: userId,
@@ -155,18 +216,22 @@ export class WalletsService {
     const expiresAt = new Date(nowUTC.getTime() + 1 * 60 * 60 * 1000); // +1 giờ
 
     // 1. Tìm theo địa chỉ + mạng (cùng ví cùng mạng = một tracker)
-    const existingByAddressAndNetwork = await this.activeWalletTrackerRepository.findOne({
-      where: {
-        awt_address: normalizedAddress,
-        awt_network_id: networkId,
-      },
-    });
+    const existingByAddressAndNetwork =
+      await this.activeWalletTrackerRepository.findOne({
+        where: {
+          awt_address: normalizedAddress,
+          awt_network_id: networkId,
+        },
+      });
     if (existingByAddressAndNetwork) {
       existingByAddressAndNetwork.awt_last_accessed_at = nowUTC;
       existingByAddressAndNetwork.awt_expires_at = expiresAt;
       existingByAddressAndNetwork.awt_user_id = userId;
-      existingByAddressAndNetwork.uwn_id = uwnId ?? existingByAddressAndNetwork.uwn_id;
-      await this.activeWalletTrackerRepository.save(existingByAddressAndNetwork);
+      existingByAddressAndNetwork.uwn_id =
+        uwnId ?? existingByAddressAndNetwork.uwn_id;
+      await this.activeWalletTrackerRepository.save(
+        existingByAddressAndNetwork,
+      );
       return;
     }
 
@@ -236,7 +301,10 @@ export class WalletsService {
    * @param networkParam - Network ID (number) or Network Symbol (string)
    * @returns Public key (address) of the wallet or null if not found
    */
-  async checkWalletNetwork(userId: number, networkParam: string): Promise<string | null> {
+  async checkWalletNetwork(
+    userId: number,
+    networkParam: string,
+  ): Promise<string | null> {
     // 1. Tìm network theo net_id hoặc net_symbol
     const networkId = parseInt(networkParam, 10);
     let network: Network | null = null;
@@ -270,7 +338,12 @@ export class WalletsService {
 
     // 4. Nếu có public_key và wallet, tracking wallet
     if (publicKey && wallet) {
-      await this.trackingWallet(userId, network.net_id, publicKey, wallet.uwn_id);
+      await this.trackingWallet(
+        userId,
+        network.net_id,
+        publicKey,
+        wallet.uwn_id,
+      );
     }
 
     return publicKey;
@@ -298,7 +371,11 @@ export class WalletsService {
    * b = Math.floor(uid / 1000) % 100
    * c = uid % 1000
    */
-  private calculatePathComponents(userId: number): { a: number; b: number; c: number } {
+  private calculatePathComponents(userId: number): {
+    a: number;
+    b: number;
+    c: number;
+  } {
     const a = Math.floor(userId / 100000) % 100;
     const b = Math.floor(userId / 1000) % 100;
     const c = userId % 1000;
@@ -310,33 +387,40 @@ export class WalletsService {
    * Path format: m/44'/60'/0'/{a}'/{b}'/{c}'/{d}'
    * where {d} is the last 3 digits of uwn_id
    */
-  private generateEthAddress(mnemonic: string, a: number, b: number, c: number, d?: number): string {
+  private generateEthAddress(
+    mnemonic: string,
+    a: number,
+    b: number,
+    c: number,
+    d?: number,
+  ): string {
     // Sử dụng bip32 để tạo HD wallet từ seed (giống như SOL sử dụng ed25519-hd-key)
     const seed = bip39.mnemonicToSeedSync(mnemonic);
     const bip32Factory = bip32.BIP32Factory(tinysecp);
     const root = bip32Factory.fromSeed(seed);
-    
+
     // Xây dựng full path giống như SOL (derive toàn bộ path một lần)
     // Path format: m/44'/60'/0'/${a}'/${b}'/${c}'/${d}' (all hardened)
-    const path = d !== undefined 
-      ? `m/44'/60'/0'/${a}'/${b}'/${c}'/${d}'`
-      : `m/44'/60'/0'/${a}'/${b}'/${c}'`;
-    
+    const path =
+      d !== undefined
+        ? `m/44'/60'/0'/${a}'/${b}'/${c}'/${d}'`
+        : `m/44'/60'/0'/${a}'/${b}'/${c}'`;
+
     // Derive toàn bộ path một lần từ root node
     const derivedNode = root.derivePath(path);
-    
+
     // Chuyển đổi private key từ bip32 sang Wallet để lấy address
     if (!derivedNode.privateKey) {
       throw new BadRequestException('Failed to derive private key');
     }
-    
+
     // Lấy private key từ bip32 node
     const privateKeyBuffer = derivedNode.privateKey;
     const privateKey = `0x${Buffer.from(privateKeyBuffer).toString('hex')}`;
-    
+
     // Tạo wallet từ private key để lấy address
     const wallet = new Wallet(privateKey);
-    
+
     return wallet.address;
   }
 
@@ -345,12 +429,19 @@ export class WalletsService {
    * Path format: m/44'/501'/0'/{a}'/{b}'/{c}'/{d}'
    * where {d} is the last 3 digits of uwn_id
    */
-  private generateSolAddress(mnemonic: string, a: number, b: number, c: number, d?: number): string {
+  private generateSolAddress(
+    mnemonic: string,
+    a: number,
+    b: number,
+    c: number,
+    d?: number,
+  ): string {
     const seed = bip39.mnemonicToSeedSync(mnemonic);
     // If d is provided, use full path with d, otherwise use old format without d
-    const path = d !== undefined
-      ? `m/44'/501'/0'/${a}'/${b}'/${c}'/${d}'`
-      : `m/44'/501'/0'/${a}'/${b}'/${c}'`;
+    const path =
+      d !== undefined
+        ? `m/44'/501'/0'/${a}'/${b}'/${c}'/${d}'`
+        : `m/44'/501'/0'/${a}'/${b}'/${c}'`;
     const derivedSeed = derivePath(path, seed.toString('hex'));
     const keypair = Keypair.fromSeed(derivedSeed.key);
     return keypair.publicKey.toBase58();
@@ -399,15 +490,20 @@ export class WalletsService {
       });
 
       if (otherNetwork) {
-        const existingOtherWallet = await this.useWalletNetworkRepository.findOne({
-          where: {
-            uwn_user_id: userId,
-            uwn_network_id: otherNetwork.net_id,
-          },
-        });
+        const existingOtherWallet =
+          await this.useWalletNetworkRepository.findOne({
+            where: {
+              uwn_user_id: userId,
+              uwn_network_id: otherNetwork.net_id,
+            },
+          });
 
         // Nếu đã có ví của mạng lưới còn lại, sử dụng lại cùng public key và end_path
-        if (existingOtherWallet && existingOtherWallet.uwn_public_key && existingOtherWallet.uwn_end_path != null) {
+        if (
+          existingOtherWallet &&
+          existingOtherWallet.uwn_public_key &&
+          existingOtherWallet.uwn_end_path != null
+        ) {
           const newWallet = this.useWalletNetworkRepository.create({
             uwn_user_id: userId,
             uwn_network_id: networkId,
@@ -415,10 +511,12 @@ export class WalletsService {
             uwn_end_path: existingOtherWallet.uwn_end_path, // Sử dụng lại cùng end_path
           });
 
-          const savedWallet = await this.useWalletNetworkRepository.save(newWallet);
+          const savedWallet =
+            await this.useWalletNetworkRepository.save(newWallet);
 
           return {
-            message: 'Wallet created successfully (reused from existing EVM wallet)',
+            message:
+              'Wallet created successfully (reused from existing EVM wallet)',
             wallet: savedWallet,
           };
         }
@@ -464,7 +562,8 @@ export class WalletsService {
     });
 
     // 7. Lưu wallet tạm để lấy uwn_id
-    const savedTempWallet = await this.useWalletNetworkRepository.save(tempWallet);
+    const savedTempWallet =
+      await this.useWalletNetworkRepository.save(tempWallet);
 
     // 8. Lấy 3 ký tự cuối của uwn_id làm d
     const d = this.getLastThreeDigits(savedTempWallet.uwn_id);
@@ -487,7 +586,8 @@ export class WalletsService {
     // 10. Cập nhật public key và uwn_end_path với giá trị mới
     savedTempWallet.uwn_public_key = finalPublicKey;
     savedTempWallet.uwn_end_path = d; // Lưu 3 số cuối của uwn_id
-    const savedWallet = await this.useWalletNetworkRepository.save(savedTempWallet);
+    const savedWallet =
+      await this.useWalletNetworkRepository.save(savedTempWallet);
 
     return {
       message: 'Wallet created successfully',
@@ -499,10 +599,16 @@ export class WalletsService {
    * Generate exchange wallet (ví sàn) with fixed path
    * Path: m/44'/60'/0'/0'/0'/382' (ETH/BNB) or m/44'/501'/0'/0'/0'/382' (SOL)
    */
-  private getExchangeWallet(mnemonic: string, networkSymbol: string): HDNodeWallet | Keypair {
+  private getExchangeWallet(
+    mnemonic: string,
+    networkSymbol: string,
+  ): HDNodeWallet | Keypair {
     if (networkSymbol === 'SOL') {
       const seed = bip39.mnemonicToSeedSync(mnemonic);
-      const derivedSeed = derivePath(`m/44'/501'/0'/0'/0'/382'`, seed.toString('hex'));
+      const derivedSeed = derivePath(
+        `m/44'/501'/0'/0'/0'/382'`,
+        seed.toString('hex'),
+      );
       return Keypair.fromSeed(derivedSeed.key);
     } else {
       // ETH/BNB và các mạng EVM khác
@@ -510,15 +616,15 @@ export class WalletsService {
       const seed = bip39.mnemonicToSeedSync(mnemonic);
       const bip32Factory = bip32.BIP32Factory(tinysecp);
       const root = bip32Factory.fromSeed(seed);
-      
+
       // Derive path: m/44'/60'/0'/0'/0'/382'
       const derivedNode = root.derivePath(`m/44'/60'/0'/0'/0'/382'`);
-      
+
       // Chuyển đổi private key từ bip32 sang Wallet để lấy HDNodeWallet
       const privateKeyBuffer = derivedNode.privateKey;
       const privateKey = `0x${Buffer.from(privateKeyBuffer).toString('hex')}`;
       const wallet = new Wallet(privateKey);
-      
+
       // Tạo HDNodeWallet từ private key để có thể sử dụng connect()
       // Note: Wallet trong ethers v6 không phải HDNodeWallet, nhưng có thể dùng trực tiếp
       // Hoặc tạo HDNodeWallet từ extended key
@@ -530,10 +636,14 @@ export class WalletsService {
    * Send transaction from exchange wallet to destination address
    */
   /** Thử lần lượt SOL RPC (DB rồi env nếu khác); khi lỗi/rate limit thử URL tiếp theo. */
-  private async runWithSolRpcUrl<T>(fn: (rpcUrl: string) => Promise<T>): Promise<T> {
+  private async runWithSolRpcUrl<T>(
+    fn: (rpcUrl: string) => Promise<T>,
+  ): Promise<T> {
     const urls = await this.adminSettingsConfigService.getRpcSolUrlsToTry();
     if (urls.length === 0) {
-      throw new BadRequestException('SOLANA_RPC_URL not configured (admin_settings or .env)');
+      throw new BadRequestException(
+        'SOLANA_RPC_URL not configured (admin_settings or .env)',
+      );
     }
     let lastErr: Error | null = null;
     for (const rpcUrl of urls) {
@@ -588,149 +698,188 @@ export class WalletsService {
           wsEndpoint: wssUrl || undefined,
         });
         const keypair = exchangeWallet as Keypair;
-      const mintPublicKey = new PublicKey(coinNetwork.cn_coin_mint);
-      const toPublicKey = new PublicKey(toAddress);
+        const mintPublicKey = new PublicKey(coinNetwork.cn_coin_mint);
+        const toPublicKey = new PublicKey(toAddress);
 
-      // Kiểm tra xem coin có phải native SOL không
-      if (coin.coin_symbol === 'SOL') {
-        // Native SOL transfer
-        const transaction = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: keypair.publicKey,
-            toPubkey: toPublicKey,
-            lamports: amount * 1e9, // Convert to lamports (1 SOL = 1e9 lamports)
-          }),
-        );
-
-        const signature = await this.rpcRateLimitService.withRpcLimit(() =>
-          connection.sendTransaction(transaction, [keypair]),
-        );
-        await this.rpcRateLimitService.withRpcLimit(() =>
-          connection.confirmTransaction(signature, 'confirmed'),
-        );
-        return signature;
-      } else {
-        // SPL Token transfer (USDT, USDC, etc.)
-        // Lấy mint info để biết decimals
-        const mintInfo = await this.rpcRateLimitService.withRpcLimit(() =>
-          getMint(connection, mintPublicKey),
-        );
-        const decimals = mintInfo.decimals;
-
-        // Lấy associated token address của sender và receiver
-        const fromTokenAccount = await getAssociatedTokenAddress(
-          mintPublicKey,
-          keypair.publicKey,
-        );
-        const toTokenAccount = await getAssociatedTokenAddress(
-          mintPublicKey,
-          toPublicKey,
-        );
-
-        // Kiểm tra token account của sender có tồn tại và có balance không
-        let fromTokenAccountInfo;
-        try {
-          fromTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(() =>
-            getAccount(connection, fromTokenAccount),
+        // Kiểm tra xem coin có phải native SOL không
+        if (coin.coin_symbol === 'SOL') {
+          // Native SOL transfer
+          const transaction = new Transaction().add(
+            SystemProgram.transfer({
+              fromPubkey: keypair.publicKey,
+              toPubkey: toPublicKey,
+              lamports: amount * 1e9, // Convert to lamports (1 SOL = 1e9 lamports)
+            }),
           );
-        } catch (error) {
-          throw new BadRequestException(
-            `Sender token account does not exist or has no balance. Token account: ${fromTokenAccount.toBase58()}`,
+
+          const signature = await this.rpcRateLimitService.withRpcLimit(() =>
+            connection.sendTransaction(transaction, [keypair]),
           );
-        }
-
-        // Kiểm tra balance của sender
-        const transferAmount = BigInt(Math.floor(amount * Math.pow(10, decimals)));
-        if (fromTokenAccountInfo.amount < transferAmount) {
-          throw new BadRequestException(
-            `Insufficient token balance. Available: ${Number(fromTokenAccountInfo.amount) / Math.pow(10, decimals)}, Required: ${amount}`,
+          await this.rpcRateLimitService.withRpcLimit(() =>
+            connection.confirmTransaction(signature, 'confirmed'),
           );
-        }
-
-        // Kiểm tra token account của receiver có tồn tại không
-        let toTokenAccountInfo;
-        try {
-          toTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(() =>
-            getAccount(connection, toTokenAccount),
+          return signature;
+        } else {
+          // SPL Token transfer (USDT, USDC, etc.)
+          // Lấy mint info để biết decimals
+          const mintInfo = await this.rpcRateLimitService.withRpcLimit(() =>
+            getMint(connection, mintPublicKey),
           );
-        } catch (error) {
-          // Token account của receiver chưa tồn tại, cần tạo
-          toTokenAccountInfo = null;
-        }
+          const decimals = mintInfo.decimals;
 
-        // Tạo transaction
-        const transaction = new Transaction();
-
-        // Nếu token account của receiver chưa tồn tại, thêm instruction để tạo
-        if (!toTokenAccountInfo) {
-          transaction.add(
-            createAssociatedTokenAccountInstruction(
-              keypair.publicKey, // payer
-              toTokenAccount, // associatedTokenAddress
-              toPublicKey, // owner
-              mintPublicKey, // mint
-              TOKEN_PROGRAM_ID,
-              ASSOCIATED_TOKEN_PROGRAM_ID,
-            ),
-          );
-        }
-
-        // Thêm instruction transfer
-        transaction.add(
-          createTransferInstruction(
-            fromTokenAccount,
-            toTokenAccount,
+          // Lấy associated token address của sender và receiver
+          const fromTokenAccount = await getAssociatedTokenAddress(
+            mintPublicKey,
             keypair.publicKey,
-            transferAmount,
-            [],
-            TOKEN_PROGRAM_ID,
-          ),
-        );
-
-        // Lấy recent blockhash
-        const { blockhash } = await this.rpcRateLimitService.withRpcLimit(() =>
-          connection.getLatestBlockhash('confirmed'),
-        );
-        transaction.recentBlockhash = blockhash;
-        transaction.feePayer = keypair.publicKey;
-
-        // Simulate transaction trước khi gửi để kiểm tra lỗi
-        try {
-          const simulation = await this.rpcRateLimitService.withRpcLimit(() =>
-            connection.simulateTransaction(transaction),
           );
-          if (simulation.value.err) {
-            const errorMessage = simulation.value.err.toString();
-            const logs = simulation.value.logs || [];
+          const toTokenAccount = await getAssociatedTokenAddress(
+            mintPublicKey,
+            toPublicKey,
+          );
+
+          this.logger.debug(
+            `[withdraw-sol-spl] rpcUrl=${rpcUrl} mint=${mintPublicKey.toBase58()} decimals=${decimals} ` +
+              `fromWallet=${keypair.publicKey.toBase58()} fromATA=${fromTokenAccount.toBase58()} ` +
+              `toWallet=${toPublicKey.toBase58()} toATA=${toTokenAccount.toBase58()} amount=${amount}`,
+          );
+
+          // Kiểm tra token account của sender có tồn tại và có balance không
+          let fromTokenAccountInfo;
+          try {
+            fromTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(
+              () => getAccount(connection, fromTokenAccount),
+            );
+            this.logger.debug(
+              `[withdraw-sol-spl] sender ATA ok amountRaw=${fromTokenAccountInfo.amount.toString()}`,
+            );
+          } catch (error) {
+            const errMsg =
+              error instanceof Error ? error.message : String(error);
+            this.logger.error(
+              `[withdraw-sol-spl] sender ATA missing/invalid fromATA=${fromTokenAccount.toBase58()} err=${errMsg}`,
+            );
             throw new BadRequestException(
-              `Transaction simulation failed. Message: ${errorMessage}. Logs: ${logs.join('\n')}`,
+              `Sender token account does not exist or has no balance. Token account: ${fromTokenAccount.toBase58()}`,
             );
           }
-        } catch (simError) {
-          // Nếu là BadRequestException từ simulation, throw lại
-          if (simError instanceof BadRequestException) {
-            throw simError;
-          }
-          // Nếu là lỗi khác (network issue, etc.), vẫn thử gửi transaction thật
-          console.warn('Transaction simulation error (non-critical), proceeding with actual transaction:', simError.message);
-        }
 
-        const signature = await this.rpcRateLimitService.withRpcLimit(() =>
-          connection.sendTransaction(transaction, [keypair]),
-        );
-        await this.rpcRateLimitService.withRpcLimit(() =>
-          connection.confirmTransaction(signature, 'confirmed'),
-        );
-        return signature;
-      }
+          // Kiểm tra balance của sender
+          const transferAmount = BigInt(
+            Math.floor(amount * Math.pow(10, decimals)),
+          );
+          if (fromTokenAccountInfo.amount < transferAmount) {
+            throw new BadRequestException(
+              `Insufficient token balance. Available: ${Number(fromTokenAccountInfo.amount) / Math.pow(10, decimals)}, Required: ${amount}`,
+            );
+          }
+
+          // Kiểm tra token account của receiver có tồn tại không
+          let toTokenAccountInfo;
+          try {
+            toTokenAccountInfo = await this.rpcRateLimitService.withRpcLimit(
+              () => getAccount(connection, toTokenAccount),
+            );
+            this.logger.debug(
+              `[withdraw-sol-spl] receiver ATA exists toATA=${toTokenAccount.toBase58()}`,
+            );
+          } catch (error) {
+            // Token account của receiver chưa tồn tại, cần tạo
+            toTokenAccountInfo = null;
+            const errMsg =
+              error instanceof Error ? error.message : String(error);
+            this.logger.debug(
+              `[withdraw-sol-spl] receiver ATA not found, will create ATA. toATA=${toTokenAccount.toBase58()} err=${errMsg}`,
+            );
+          }
+
+          // Tạo transaction
+          const transaction = new Transaction();
+
+          // Nếu token account của receiver chưa tồn tại, thêm instruction để tạo
+          if (!toTokenAccountInfo) {
+            transaction.add(
+              createAssociatedTokenAccountInstruction(
+                keypair.publicKey, // payer
+                toTokenAccount, // associatedTokenAddress
+                toPublicKey, // owner
+                mintPublicKey, // mint
+                TOKEN_PROGRAM_ID,
+                ASSOCIATED_TOKEN_PROGRAM_ID,
+              ),
+            );
+          }
+
+          // Thêm instruction transfer
+          transaction.add(
+            createTransferInstruction(
+              fromTokenAccount,
+              toTokenAccount,
+              keypair.publicKey,
+              transferAmount,
+              [],
+              TOKEN_PROGRAM_ID,
+            ),
+          );
+
+          // Lấy recent blockhash
+          const { blockhash } = await this.rpcRateLimitService.withRpcLimit(
+            () => connection.getLatestBlockhash('confirmed'),
+          );
+          transaction.recentBlockhash = blockhash;
+          transaction.feePayer = keypair.publicKey;
+
+          // Simulate transaction trước khi gửi để kiểm tra lỗi
+          try {
+            const simulation = await this.rpcRateLimitService.withRpcLimit(() =>
+              connection.simulateTransaction(transaction),
+            );
+            if (simulation.value.err) {
+              const errorMessage = simulation.value.err.toString();
+              const logs = simulation.value.logs || [];
+              this.logger.error(
+                `[withdraw-sol-spl] simulation failed err=${errorMessage}`,
+              );
+              if (logs.length) {
+                this.logger.debug(
+                  `[withdraw-sol-spl] simulation logs:\n${logs.join('\n')}`,
+                );
+              }
+              throw new BadRequestException(
+                `Transaction simulation failed. Message: ${errorMessage}. Logs: ${logs.join('\n')}`,
+              );
+            }
+          } catch (simError) {
+            // Nếu là BadRequestException từ simulation, throw lại
+            if (simError instanceof BadRequestException) {
+              throw simError;
+            }
+            // Nếu là lỗi khác (network issue, etc.), vẫn thử gửi transaction thật
+            const errMsg =
+              simError instanceof Error ? simError.message : String(simError);
+            this.logger.warn(
+              `[withdraw-sol-spl] simulation error (non-critical), proceeding with actual transaction: ${errMsg}`,
+            );
+          }
+
+          const signature = await this.rpcRateLimitService.withRpcLimit(() =>
+            connection.sendTransaction(transaction, [keypair]),
+          );
+          await this.rpcRateLimitService.withRpcLimit(() =>
+            connection.confirmTransaction(signature, 'confirmed'),
+          );
+          return signature;
+        }
       });
     } else {
       // EVM: thử lần lượt RPC từ DB rồi env (nếu khác), khi lỗi/rate limit thử URL tiếp theo
-      const rpcUrls = await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
-        network.net_symbol,
-      );
+      const rpcUrls =
+        await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
+          network.net_symbol,
+        );
       if (!rpcUrls.length) {
-        throw new BadRequestException(`RPC endpoint not configured for network ${network.net_symbol}`);
+        throw new BadRequestException(
+          `RPC endpoint not configured for network ${network.net_symbol}`,
+        );
       }
 
       // Kiểm tra coin_network để lấy contract address và decimals
@@ -756,10 +905,17 @@ export class WalletsService {
           let provider: JsonRpcProvider;
           if (network.net_symbol === 'ETH') {
             const ethNetwork = EthersNetwork.from('mainnet');
-            provider = new JsonRpcProvider(rpcUrl, ethNetwork, { staticNetwork: ethNetwork });
-          } else if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
+            provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
+              staticNetwork: ethNetwork,
+            });
+          } else if (
+            network.net_symbol === 'BNB' ||
+            network.net_symbol === 'BSC'
+          ) {
             const bscNetwork = new EthersNetwork('bsc', 56);
-            provider = new JsonRpcProvider(rpcUrl, bscNetwork, { staticNetwork: bscNetwork });
+            provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
+              staticNetwork: bscNetwork,
+            });
           } else {
             provider = new JsonRpcProvider(rpcUrl);
           }
@@ -767,106 +923,114 @@ export class WalletsService {
           const connectedWallet = wallet.connect(provider);
           const normalizedToAddressEvm = this.normalizeEvmAddress(toAddress);
 
-      // Kiểm tra xem coin có phải native token không (ETH hoặc BNB)
-      const isNativeToken = coin.coin_symbol === network.net_symbol || 
-                           (network.net_symbol === 'ETH' && coin.coin_symbol === 'ETH') ||
-                           (network.net_symbol === 'BNB' && coin.coin_symbol === 'BNB');
+          // Kiểm tra xem coin có phải native token không (ETH hoặc BNB)
+          const isNativeToken =
+            coin.coin_symbol === network.net_symbol ||
+            (network.net_symbol === 'ETH' && coin.coin_symbol === 'ETH') ||
+            (network.net_symbol === 'BNB' && coin.coin_symbol === 'BNB');
 
-      if (isNativeToken) {
-        // Native token transfer (ETH hoặc BNB)
-        // Kiểm tra balance của sender trước khi transfer
-        const transferAmount = parseUnits(amount.toString(), 18);
-        const senderBalance = await this.rpcRateLimitService.withRpcLimit(() =>
-          provider.getBalance(connectedWallet.address),
-        );
-
-        // Ước tính gas fee (có thể lấy từ feeData)
-        const feeData = await this.rpcRateLimitService.withRpcLimit(() =>
-          provider.getFeeData(),
-        );
-        const estimatedGasLimit = 21000; // Gas limit cho native token transfer
-        const estimatedGasFee = feeData.gasPrice ? feeData.gasPrice * BigInt(estimatedGasLimit) : BigInt(0);
-        
-        // Kiểm tra balance có đủ cho cả transfer amount và gas fee không
-        if (senderBalance < transferAmount + estimatedGasFee) {
-          const availableBalance = Number(senderBalance - estimatedGasFee) / Math.pow(10, 18);
-          throw new BadRequestException(
-            `Insufficient balance. Available: ${availableBalance.toFixed(8)} ${coin.coin_symbol}, Required: ${amount} ${coin.coin_symbol} (plus gas fee)`,
-          );
-        }
-        
-        const tx = await this.rpcRateLimitService.withRpcLimit(() =>
-          connectedWallet.sendTransaction({
-            to: normalizedToAddressEvm,
-            value: transferAmount,
-            gasPrice: feeData.gasPrice,
-          }),
-        );
-
-        const receipt = (await this.rpcRateLimitService.withRpcLimit(() =>
-          tx.wait(),
-        )) as { hash: string } | null;
-        if (!receipt) throw new BadRequestException('Transaction failed');
-        return receipt.hash;
-      } else {
-        // ERC20 Token transfer (USDT, USDC, etc.)
-        // Chuẩn hóa địa chỉ checksum (tránh lỗi "bad address checksum" trên BNB/ETH)
-        const normalizedContractAddress =
-          this.normalizeEvmAddress(coinNetwork.cn_coin_mint);
-
-        const erc20Abi = [
-          'function transfer(address to, uint256 amount) returns (bool)',
-          'function decimals() view returns (uint8)',
-          'function balanceOf(address account) view returns (uint256)',
-        ];
-
-        const tokenContract = new Contract(
-          normalizedContractAddress,
-          erc20Abi,
-          connectedWallet,
-        );
-
-        let decimals = 18;
-        try {
-          decimals = await this.rpcRateLimitService.withRpcLimit(() =>
-            tokenContract.decimals(),
-          );
-        } catch (error) {
-          console.warn(
-            `Could not get decimals for token ${normalizedContractAddress}, using default 18`,
-          );
-        }
-
-        const transferAmount = parseUnits(amount.toString(), decimals);
-        try {
-          const senderBalance = await this.rpcRateLimitService.withRpcLimit(() =>
-            tokenContract.balanceOf(connectedWallet.address),
-          );
-          if (senderBalance < transferAmount) {
-            const availableBalance = Number(senderBalance) / Math.pow(10, decimals);
-            throw new BadRequestException(
-              `Insufficient token balance. Available: ${availableBalance}, Required: ${amount}`,
+          if (isNativeToken) {
+            // Native token transfer (ETH hoặc BNB)
+            // Kiểm tra balance của sender trước khi transfer
+            const transferAmount = parseUnits(amount.toString(), 18);
+            const senderBalance = await this.rpcRateLimitService.withRpcLimit(
+              () => provider.getBalance(connectedWallet.address),
             );
-          }
-        } catch (error) {
-          if (error instanceof BadRequestException) {
-            throw error;
-          }
-          console.warn(
-            `Could not check token balance, proceeding with transfer: ${error.message}`,
-          );
-        }
 
-        const tx = await this.rpcRateLimitService.withRpcLimit(() =>
-          tokenContract.transfer(normalizedToAddressEvm, transferAmount),
-        );
+            // Ước tính gas fee (có thể lấy từ feeData)
+            const feeData = await this.rpcRateLimitService.withRpcLimit(() =>
+              provider.getFeeData(),
+            );
+            const estimatedGasLimit = 21000; // Gas limit cho native token transfer
+            const estimatedGasFee = feeData.gasPrice
+              ? feeData.gasPrice * BigInt(estimatedGasLimit)
+              : BigInt(0);
 
-        const receipt = (await this.rpcRateLimitService.withRpcLimit(() =>
-          tx.wait(),
-        )) as { hash: string } | null;
-        if (!receipt) throw new BadRequestException('Transaction failed');
-        return receipt.hash;
-      }
+            // Kiểm tra balance có đủ cho cả transfer amount và gas fee không
+            if (senderBalance < transferAmount + estimatedGasFee) {
+              const availableBalance =
+                Number(senderBalance - estimatedGasFee) / Math.pow(10, 18);
+              throw new BadRequestException(
+                `Insufficient balance. Available: ${availableBalance.toFixed(8)} ${coin.coin_symbol}, Required: ${amount} ${coin.coin_symbol} (plus gas fee)`,
+              );
+            }
+
+            const tx = await this.rpcRateLimitService.withRpcLimit(() =>
+              connectedWallet.sendTransaction({
+                to: normalizedToAddressEvm,
+                value: transferAmount,
+                gasPrice: feeData.gasPrice,
+              }),
+            );
+
+            const receipt = (await this.rpcRateLimitService.withRpcLimit(() =>
+              tx.wait(),
+            )) as { hash: string } | null;
+            if (!receipt) throw new BadRequestException('Transaction failed');
+            return receipt.hash;
+          } else {
+            // ERC20 Token transfer (USDT, USDC, etc.)
+            // Chuẩn hóa địa chỉ checksum (tránh lỗi "bad address checksum" trên BNB/ETH)
+            const normalizedContractAddress = this.normalizeEvmAddress(
+              coinNetwork.cn_coin_mint,
+            );
+
+            const erc20Abi = [
+              'function transfer(address to, uint256 amount) returns (bool)',
+              'function decimals() view returns (uint8)',
+              'function balanceOf(address account) view returns (uint256)',
+            ];
+
+            const tokenContract = new Contract(
+              normalizedContractAddress,
+              erc20Abi,
+              connectedWallet,
+            );
+
+            let decimals = 18;
+            try {
+              decimals = await this.rpcRateLimitService.withRpcLimit(() =>
+                tokenContract.decimals(),
+              );
+            } catch (error) {
+              this.logger.warn(
+                `Could not get decimals for token ${normalizedContractAddress}, using default 18`,
+              );
+            }
+
+            const transferAmount = parseUnits(amount.toString(), decimals);
+            try {
+              const senderBalance = await this.rpcRateLimitService.withRpcLimit(
+                () => tokenContract.balanceOf(connectedWallet.address),
+              );
+              if (senderBalance < transferAmount) {
+                const availableBalance =
+                  Number(senderBalance) / Math.pow(10, decimals);
+                throw new BadRequestException(
+                  `Insufficient token balance. Available: ${availableBalance}, Required: ${amount}`,
+                );
+              }
+            } catch (error) {
+              if (error instanceof BadRequestException) {
+                throw error;
+              }
+              const errMsg =
+                error instanceof Error ? error.message : String(error);
+              this.logger.warn(
+                `Could not check token balance, proceeding with transfer: ${errMsg}`,
+              );
+            }
+
+            const tx = await this.rpcRateLimitService.withRpcLimit(() =>
+              tokenContract.transfer(normalizedToAddressEvm, transferAmount),
+            );
+
+            const receipt = (await this.rpcRateLimitService.withRpcLimit(() =>
+              tx.wait(),
+            )) as { hash: string } | null;
+            if (!receipt) throw new BadRequestException('Transaction failed');
+            return receipt.hash;
+          }
         } catch (e) {
           lastEvmErr = e instanceof Error ? e : new Error(String(e));
           continue;
@@ -889,7 +1053,11 @@ export class WalletsService {
     const adminSetting = adminSettings.length > 0 ? adminSettings[0] : null;
 
     // Nếu không tồn tại hoặc as_fund_amount <= 0 thì bỏ qua
-    if (!adminSetting || !adminSetting.as_fund_amount || adminSetting.as_fund_amount <= 0) {
+    if (
+      !adminSetting ||
+      !adminSetting.as_fund_amount ||
+      adminSetting.as_fund_amount <= 0
+    ) {
       return null; // Không giới hạn
     }
 
@@ -898,7 +1066,10 @@ export class WalletsService {
       .createQueryBuilder('wh')
       .select('COALESCE(SUM(wh.wh_amount), 0)', 'total')
       .where('wh.wh_option IN (:...depositOptions)', {
-        depositOptions: [WalletHistoryOption.DEPOSIT, WalletHistoryOption.ADMIN_DEPOSIT],
+        depositOptions: [
+          WalletHistoryOption.DEPOSIT,
+          WalletHistoryOption.ADMIN_DEPOSIT,
+        ],
       })
       .andWhere('wh.wh_status = :status', {
         status: WalletHistoryStatus.SUCCESS,
@@ -1008,11 +1179,15 @@ export class WalletsService {
   private async checkAndSyncBalance(
     userId: number,
     coinId: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     network: Network,
   ): Promise<void> {
     try {
       // 1. Tính toán expected balance (từ TẤT CẢ networks)
-      const expectedBalance = await this.calculateExpectedBalance(userId, coinId);
+      const expectedBalance = await this.calculateExpectedBalance(
+        userId,
+        coinId,
+      );
 
       // 2. Lấy balance hiện tại từ database
       const userWallet = await this.userWalletRepository.findOne({
@@ -1168,7 +1343,10 @@ export class WalletsService {
         }
 
         // Sau khi sync tất cả networks, sử dụng hàm chung để cập nhật balance
-        await this.walletsSchedulerService.updateUserBalanceIfChanged(userId, coinId);
+        await this.walletsSchedulerService.updateUserBalanceIfChanged(
+          userId,
+          coinId,
+        );
       }
       // Nếu không cần sync từ đầu, bỏ qua
     } catch (error) {
@@ -1243,7 +1421,8 @@ export class WalletsService {
     const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
 
     // 5. Tính expected balance
-    const expectedBalance = totalDeposit + totalReward - totalStaking - totalWithdraw;
+    const expectedBalance =
+      totalDeposit + totalReward - totalStaking - totalWithdraw;
     // Đảm bảo balance không âm: nếu <= 0 thì return 0
     return expectedBalance <= 0 ? 0 : expectedBalance;
   }
@@ -1299,8 +1478,10 @@ export class WalletsService {
     const updatedCoins: number[] = [];
     for (const userWallet of userWallets) {
       const oldBalance = parseFloat(userWallet.uw_balance.toString());
-      const currentBalanceReward = parseFloat(userWallet.uw_balance_reward?.toString() || '0');
-      
+      const currentBalanceReward = parseFloat(
+        userWallet.uw_balance_reward?.toString() || '0',
+      );
+
       // Đồng bộ uw_balance_reward với newBalanceReward nếu có sự khác biệt
       // Điều này đảm bảo tính nhất quán giữa giá trị trong database và giá trị tính toán
       if (Math.abs(currentBalanceReward - newBalanceReward) > 0.00000001) {
@@ -1308,7 +1489,7 @@ export class WalletsService {
         // Điều này đảm bảo số tiền transfer chính xác
         userWallet.uw_balance_reward = newBalanceReward;
       }
-      
+
       const newBalance = oldBalance + newBalanceReward;
 
       userWallet.uw_balance = newBalance as any;
@@ -1352,7 +1533,9 @@ export class WalletsService {
     const queryBuilder = this.walletTransferRepository
       .createQueryBuilder('wt')
       .where('wt.wt_user_id = :userId', { userId })
-      .andWhere('wt.wt_from = :fromType', { fromType: WalletTransferFrom.REWARD })
+      .andWhere('wt.wt_from = :fromType', {
+        fromType: WalletTransferFrom.REWARD,
+      })
       .andWhere('wt.wt_to = :toType', { toType: WalletTransferTo.MAIN })
       .orderBy('wt.created_at', 'DESC'); // Sắp xếp theo thời gian mới nhất
 
@@ -1374,6 +1557,11 @@ export class WalletsService {
     // Normalize address: trim whitespace để tránh lỗi do người dùng nhập nhầm
     address = address.trim();
 
+    this.logger.debug(
+      `[withdraw] start userId=${userId} networkParam=${networkParam} coinParam=${coinParam} ` +
+        `to=${address} amount=${amount}`,
+    );
+
     // 0. Kiểm tra user đã xác minh danh tính và status = active
     const user = await this.userRepository.findOne({
       where: { uid: userId },
@@ -1389,7 +1577,9 @@ export class WalletsService {
     }
 
     if (user.ustatus !== UserStatus.ACTIVE) {
-      throw new BadRequestException('System is overloaded! Please try again later');
+      throw new BadRequestException(
+        'System is overloaded! Please try again later',
+      );
     }
 
     // 1. Tìm network theo net_id hoặc net_symbol
@@ -1412,6 +1602,10 @@ export class WalletsService {
       throw new BadRequestException('Network not found');
     }
 
+    this.logger.debug(
+      `[withdraw] resolved network=${network.net_symbol} net_id=${network.net_id}`,
+    );
+
     // 1.5. Kiểm tra và chặn rút tiền về ví của chính user
     // Lấy tất cả ví của user từ bảng use_wallet_networks
     const userWallets = await this.useWalletNetworkRepository.find({
@@ -1433,7 +1627,7 @@ export class WalletsService {
       // Với EVM chains (ETH, BNB): so sánh case-insensitive (lowercase)
       // Với Solana: so sánh case-sensitive
       let isMatch = false;
-      
+
       if (network.net_symbol === 'SOL') {
         // Solana: so sánh case-sensitive
         isMatch = address === normalizedPublicKey;
@@ -1443,7 +1637,9 @@ export class WalletsService {
       }
 
       if (isMatch) {
-        throw new BadRequestException('Cannot withdraw to your own wallet address');
+        throw new BadRequestException(
+          'Cannot withdraw to your own wallet address',
+        );
       }
     }
 
@@ -1467,6 +1663,10 @@ export class WalletsService {
       throw new BadRequestException('Coin not found');
     }
 
+    this.logger.debug(
+      `[withdraw] resolved coin=${coin.coin_symbol} coin_id=${coin.coin_id}`,
+    );
+
     // 2.3. Kiểm tra coin có tồn tại trên network này không
     const coinNetwork = await this.coinNetworkRepository.findOne({
       where: {
@@ -1481,6 +1681,10 @@ export class WalletsService {
         `Coin ${coin.coin_symbol} is not available on network ${network.net_symbol}`,
       );
     }
+
+    this.logger.debug(
+      `[withdraw] coinNetwork active mint/contract=${this.debugShortAddr(coinNetwork.cn_coin_mint, 10, 8)}`,
+    );
 
     // 2.5. Kiểm tra và đồng bộ balance trước khi kiểm tra amount
     await this.checkAndSyncBalance(userId, coin.coin_id, network);
@@ -1501,7 +1705,7 @@ export class WalletsService {
     const freeWithdrawInfo = await this.checkFreeWithdraw(userId);
     const WITHDRAW_FEE = 1; // Phí rút tiền: 1 USDT (hoặc 1 đơn vị của coin đang rút)
     let onchainAmount = amount; // Số tiền sẽ rút onchain
-    let isFreeWithdraw = freeWithdrawInfo.isFree;
+    const isFreeWithdraw = freeWithdrawInfo.isFree;
 
     // Nếu không phải free withdraw, trừ phí 1 USDT
     if (!isFreeWithdraw) {
@@ -1600,9 +1804,19 @@ export class WalletsService {
         is_free_withdraw: isFreeWithdraw,
       };
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `[withdraw] onchain transfer failed userId=${userId} network=${network.net_symbol} coin=${coin.coin_symbol} ` +
+          `to=${address} amount=${amount} onchainAmount=${onchainAmount} historyId=${savedHistory.wh_id} ` +
+          `err=${errMsg}`,
+      );
+      if (errStack) {
+        this.logger.debug(`[withdraw] error stack: ${errStack}`);
+      }
       // 12. Nếu lỗi, cập nhật status thành FAILED (lưu chi tiết vào wh_node để admin xem)
       savedHistory.wh_status = WalletHistoryStatus.FAILED;
-      savedHistory.wh_node = error?.message || 'Transaction failed';
+      savedHistory.wh_node = errMsg || 'Transaction failed';
       await this.walletHistoryRepository.save(savedHistory);
 
       throw new BadRequestException(WITHDRAW_ERROR_MESSAGE);
@@ -1744,4 +1958,3 @@ export class WalletsService {
     return await queryBuilder.getMany();
   }
 }
-
