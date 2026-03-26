@@ -4,6 +4,7 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
+  CreateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Coin } from '../../settings/entities/coin.entity';
@@ -102,6 +103,9 @@ export class Transaction {
 
   @Column({ name: 'trans_message', type: 'varchar', nullable: true })
   trans_message: string | null;
+
+  @CreateDateColumn({ name: 'trans_created_at', type: 'timestamptz' })
+  trans_created_at: Date;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'trans_user_buy' })

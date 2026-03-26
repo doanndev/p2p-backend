@@ -5,6 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  CreateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Coin } from '../../settings/entities/coin.entity';
@@ -74,6 +75,9 @@ export class OrderBook {
     enum: OrderBookStatus,
   })
   ob_status: OrderBookStatus;
+
+  @CreateDateColumn({ name: 'ob_created_at', type: 'timestamptz' })
+  ob_created_at: Date;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'ob_user_id' })

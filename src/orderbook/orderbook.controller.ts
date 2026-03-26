@@ -11,6 +11,8 @@ import {
   Query,
   Request,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBody,
@@ -26,10 +28,14 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
-import { QueryTransactionsDto } from './dto/query-transactions.dto';
+import {
+  QueryMyOrderbooksDto,
+  QueryOrderbooksDto,
+  QueryTransactionsDto,
+} from './dto/query.dto';
 import { AttachBankToOrderbookDto } from './dto/attach-bank-to-orderbook.dto';
 
-const ORDERBOOK_RESPONSE_EXAMPLE = {
+const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   id: 101,
   user_id: 12,
   coin: 1,
@@ -44,6 +50,37 @@ const ORDERBOOK_RESPONSE_EXAMPLE = {
   national_min: '500000.00000000',
   national_max: '2000000.00000000',
   status: 'pending',
+};
+
+const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
+  id: 101,
+  user: {
+    id: 12,
+    username: 'john_doe',
+    fullName: 'John Doe',
+    avatar: 'https://cdn.example.com/avatar.jpg',
+  },
+  user_orderbook_stats: {
+    total: 12,
+    by_status: {
+      pending: 3,
+      executed: 8,
+      failed: 1,
+    },
+  },
+  coin: 1,
+  national: 2,
+  adv_code: 'ADV-1711223344556-AB12CD',
+  option: 'sell',
+  coin_symbol: 'USDT',
+  national_symbol: 'VND',
+  amount: '100.00000000',
+  amount_remaining: '80.00000000',
+  price: '25000.00000000',
+  national_min: '500000.00000000',
+  national_max: '2000000.00000000',
+  status: 'pending',
+  created_at: '2026-03-26T01:23:45.000Z',
 };
 
 const TRANSACTION_RESPONSE_EXAMPLE = {
@@ -85,27 +122,102 @@ export class OrderbookController {
   @ApiBody({ type: CreateOrderbookDto })
   @ApiCreatedResponse({
     description: 'Tạo order book thành công',
-    schema: { example: ORDERBOOK_RESPONSE_EXAMPLE },
+    schema: { example: ORDERBOOK_CREATE_RESPONSE_EXAMPLE },
   })
   createOrderBook(@Request() req: any, @Body() dto: CreateOrderbookDto) {
     return this.orderbookService.createOrderBook(req.user.uid, dto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Lấy danh sách order book' })
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    }),
+  )
+  @ApiOperation({
+    summary: 'Lấy danh sách order book',
+    description:
+      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, khoảng amount / amount_remaining, sort theo amount.',
+  })
   @ApiOkResponse({
     description: 'Danh sách order book đang pending',
-    schema: { example: [ORDERBOOK_RESPONSE_EXAMPLE] },
+    schema: { example: [ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE] },
   })
-  getOrderBooks() {
-    return this.orderbookService.getOrderBooks();
+  getOrderBooks(@Query() query: QueryOrderbooksDto) {
+    return this.orderbookService.getOrderBooks(query);
+  }
+
+  /** Đặt trước @Get(':id') để không bị coi id = "my". */
+  @Get('my')
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    }),
+  )
+  @ApiOperation({
+    summary: 'Lấy danh sách order book của user hiện tại',
+    description:
+      'Trả về các orderbook do user hiện tại tạo. Hỗ trợ lọc theo status, ngày tạo, option, coin, national currency, khoảng amount / amount_remaining, sort theo amount.',
+  })
+  @ApiOkResponse({
+    description: 'Danh sách order book của tôi',
+    schema: { example: [ORDERBOOK_CREATE_RESPONSE_EXAMPLE] },
+  })
+  getMyOrderBooks(@Request() req: any, @Query() query: QueryMyOrderbooksDto) {
+    return this.orderbookService.getMyOrderBooks(req.user.uid, query);
+  }
+
+  /** Đặt trước @Get(':id') để không bị coi id = "transactions". */
+  @Get('transactions/list')
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    }),
+  )
+  @ApiOperation({
+    summary: 'Lấy danh sách transaction theo user hiện tại',
+    description:
+      'Lọc theo status, ngày tạo, option, coin, national currency, khoảng amount; sort theo amount.',
+  })
+  @ApiOkResponse({
+    description: 'Danh sách transaction',
+    schema: { example: [TRANSACTION_RESPONSE_EXAMPLE] },
+  })
+  getTransactions(@Request() req: any, @Query() query: QueryTransactionsDto) {
+    return this.transactionService.getTransactions(req.user.uid, query);
+  }
+
+  @Get('transactions/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Lấy chi tiết transaction' })
+  @ApiOkResponse({
+    description: 'Chi tiết transaction',
+    schema: { example: TRANSACTION_RESPONSE_EXAMPLE },
+  })
+  getTransactionDetail(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.getTransactionDetail(
+      req.user.uid,
+      Number(id),
+    );
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Lấy chi tiết order book' })
+  @ApiOperation({
+    summary: 'Lấy chi tiết order book',
+    description:
+      'Chỉ trả về khi orderbook còn pending; các trạng thái khác trả 404 (không lộ tồn tại).',
+  })
   @ApiOkResponse({
     description: 'Chi tiết order book',
-    schema: { example: ORDERBOOK_RESPONSE_EXAMPLE },
+    schema: { example: ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE },
   })
   getOrderBookDetail(@Param('id') id: string) {
     return this.orderbookService.getOrderBookDetail(Number(id));
@@ -155,7 +267,7 @@ export class OrderbookController {
     description: 'Cập nhật order book thành công',
     schema: {
       example: {
-        ...ORDERBOOK_RESPONSE_EXAMPLE,
+        ...ORDERBOOK_CREATE_RESPONSE_EXAMPLE,
         price: '25500.00000000',
       },
     },
@@ -190,31 +302,6 @@ export class OrderbookController {
   })
   createTransaction(@Request() req: any, @Body() dto: CreateTransactionDto) {
     return this.transactionService.createTransaction(req.user.uid, dto);
-  }
-
-  @Get('transactions/list')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Lấy danh sách transaction theo user hiện tại' })
-  @ApiOkResponse({
-    description: 'Danh sách transaction (có thể filter theo status)',
-    schema: { example: [TRANSACTION_RESPONSE_EXAMPLE] },
-  })
-  getTransactions(@Request() req: any, @Query() query: QueryTransactionsDto) {
-    return this.transactionService.getTransactions(req.user.uid, query.status);
-  }
-
-  @Get('transactions/:id')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Lấy chi tiết transaction' })
-  @ApiOkResponse({
-    description: 'Chi tiết transaction',
-    schema: { example: TRANSACTION_RESPONSE_EXAMPLE },
-  })
-  getTransactionDetail(@Request() req: any, @Param('id') id: string) {
-    return this.transactionService.getTransactionDetail(
-      req.user.uid,
-      Number(id),
-    );
   }
 
   @Post('transactions/:id/confirm-payment')

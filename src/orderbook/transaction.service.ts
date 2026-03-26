@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import {
   OrderBook,
   OrderBookOption,
@@ -19,6 +19,7 @@ import {
 } from './entities/transaction.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { QueryTransactionsDto } from './dto/query.dto';
 import { ChatRoom, ChatRoomStatus } from '../chat/entities/chat-room.entity';
 
 @Injectable()
@@ -175,19 +176,56 @@ export class TransactionService {
     });
   }
 
-  async getTransactions(userId: number, status?: TransactionStatus) {
-    const where: FindOptionsWhere<Transaction>[] = [
-      { trans_user_buy: userId },
-      { trans_user_sell: userId },
-    ];
-    if (status) {
-      where[0].trans_status = status;
-      where[1].trans_status = status;
+  async getTransactions(userId: number, query: QueryTransactionsDto) {
+    const qb = this.transactionRepository
+      .createQueryBuilder('t')
+      .where(
+        '(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)',
+        { uid: userId },
+      );
+
+    if (query.status) {
+      qb.andWhere('t.trans_status = :st', { st: query.status });
     }
-    const rows = await this.transactionRepository.find({
-      where,
-      order: { trans_id: 'DESC' },
-    });
+    if (query.dateFrom) {
+      qb.andWhere('t.trans_created_at >= :df', {
+        df: new Date(query.dateFrom),
+      });
+    }
+    if (query.dateTo) {
+      qb.andWhere('t.trans_created_at <= :dt', {
+        dt: new Date(query.dateTo),
+      });
+    }
+    if (query.option !== undefined) {
+      qb.andWhere('t.trans_option = :opt', { opt: query.option });
+    }
+    if (query.coinId !== undefined) {
+      qb.andWhere('t.trans_coin = :coin', { coin: query.coinId });
+    }
+    if (query.nationalCurrencyId !== undefined) {
+      qb.andWhere('t.trans_national = :nat', { nat: query.nationalCurrencyId });
+    }
+    if (query.amountMin !== undefined) {
+      qb.andWhere('t.trans_amount >= :amin', {
+        amin: this.formatAmount(query.amountMin),
+      });
+    }
+    if (query.amountMax !== undefined) {
+      qb.andWhere('t.trans_amount <= :amax', {
+        amax: this.formatAmount(query.amountMax),
+      });
+    }
+
+    if (query.sortAmount === 'asc') {
+      qb.orderBy('t.trans_amount', 'ASC').addOrderBy('t.trans_id', 'DESC');
+    } else if (query.sortAmount === 'desc') {
+      qb.orderBy('t.trans_amount', 'DESC').addOrderBy('t.trans_id', 'DESC');
+    } else {
+      qb.orderBy('t.trans_id', 'DESC');
+    }
+
+    const rows = await qb.getMany();
     return rows.map((t) => ({
       id: t.trans_id,
       reference_code: t.transs_reference_code,

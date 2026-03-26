@@ -8,6 +8,8 @@ import {
   HttpStatus,
   Request,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -399,13 +401,20 @@ export class WalletsController {
     },
   })
   @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
   @HttpCode(HttpStatus.OK)
   async withdraw(@Body() withdrawDto: WithdrawDto, @Request() req: any) {
     const user = req.user; // User from JWT token
     const result = await this.walletsService.withdraw(
       user.uid,
-      withdrawDto.network,
-      withdrawDto.coin,
+      withdrawDto.networkId,
+      withdrawDto.coinId,
       withdrawDto.address,
       withdrawDto.amount,
     );

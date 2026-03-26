@@ -425,6 +425,23 @@ export class WalletsService {
   }
 
   /**
+   * Keypair Solana tại path đầy đủ (d = uwn_end_path hoặc 3 số cuối uwn_id).
+   * Trùng với địa chỉ nạp tiền của user.
+   */
+  private deriveSolKeypair(
+    mnemonic: string,
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+  ): Keypair {
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const path = `m/44'/501'/0'/${a}'/${b}'/${c}'/${d}'`;
+    const derivedSeed = derivePath(path, seed.toString('hex'));
+    return Keypair.fromSeed(derivedSeed.key);
+  }
+
+  /**
    * Generate public key for SOL using ed25519 derivation
    * Path format: m/44'/501'/0'/{a}'/{b}'/{c}'/{d}'
    * where {d} is the last 3 digits of uwn_id
@@ -437,14 +454,12 @@ export class WalletsService {
     d?: number,
   ): string {
     const seed = bip39.mnemonicToSeedSync(mnemonic);
-    // If d is provided, use full path with d, otherwise use old format without d
-    const path =
-      d !== undefined
-        ? `m/44'/501'/0'/${a}'/${b}'/${c}'/${d}'`
-        : `m/44'/501'/0'/${a}'/${b}'/${c}'`;
-    const derivedSeed = derivePath(path, seed.toString('hex'));
-    const keypair = Keypair.fromSeed(derivedSeed.key);
-    return keypair.publicKey.toBase58();
+    if (d === undefined) {
+      const path = `m/44'/501'/0'/${a}'/${b}'/${c}'`;
+      const derivedSeed = derivePath(path, seed.toString('hex'));
+      return Keypair.fromSeed(derivedSeed.key).publicKey.toBase58();
+    }
+    return this.deriveSolKeypair(mnemonic, a, b, c, d).publicKey.toBase58();
   }
 
   /**
@@ -755,8 +770,23 @@ export class WalletsService {
           } catch (error) {
             const errMsg =
               error instanceof Error ? error.message : String(error);
+            const errName = error instanceof Error ? error.name : typeof error;
+            const errCode =
+              error &&
+              typeof error === 'object' &&
+              'code' in error &&
+              (error as { code?: unknown }).code !== undefined
+                ? String((error as { code: unknown }).code)
+                : '';
+            this.logger.debug(
+              `[withdraw-sol-spl] getAccount(sender) fail ` +
+                `signerPubkey=${keypair.publicKey.toBase58()} ` +
+                `mint=${mintPublicKey.toBase58()} rpcUrl=${rpcUrl} ` +
+                `error.name=${errName} error.code=${errCode || 'n/a'} err=${errMsg || '(empty message)'}`,
+            );
             this.logger.error(
-              `[withdraw-sol-spl] sender ATA missing/invalid fromATA=${fromTokenAccount.toBase58()} err=${errMsg}`,
+              `[withdraw-sol-spl] sender ATA missing/invalid fromATA=${fromTokenAccount.toBase58()} ` +
+                `error.name=${errName} err=${errMsg || '(empty message)'}`,
             );
             throw new BadRequestException(
               `Sender token account does not exist or has no balance. Token account: ${fromTokenAccount.toBase58()}`,
@@ -787,8 +817,20 @@ export class WalletsService {
             toTokenAccountInfo = null;
             const errMsg =
               error instanceof Error ? error.message : String(error);
+            const errName = error instanceof Error ? error.name : typeof error;
+            const errCode =
+              error &&
+              typeof error === 'object' &&
+              'code' in error &&
+              (error as { code?: unknown }).code !== undefined
+                ? String((error as { code: unknown }).code)
+                : '';
             this.logger.debug(
-              `[withdraw-sol-spl] receiver ATA not found, will create ATA. toATA=${toTokenAccount.toBase58()} err=${errMsg}`,
+              `[withdraw-sol-spl] getAccount(receiver) fail (may create ATA) ` +
+                `signerPubkey=${keypair.publicKey.toBase58()} ` +
+                `mint=${mintPublicKey.toBase58()} rpcUrl=${rpcUrl} ` +
+                `error.name=${errName} error.code=${errCode || 'n/a'} err=${errMsg || '(empty message)'} ` +
+                `toATA=${toTokenAccount.toBase58()}`,
             );
           }
 
@@ -1549,8 +1591,8 @@ export class WalletsService {
 
   async withdraw(
     userId: number,
-    networkParam: string,
-    coinParam: string,
+    networkId: number,
+    coinId: number,
     address: string,
     amount: number,
   ): Promise<any> {
@@ -1558,7 +1600,7 @@ export class WalletsService {
     address = address.trim();
 
     this.logger.debug(
-      `[withdraw] start userId=${userId} networkParam=${networkParam} coinParam=${coinParam} ` +
+      `[withdraw] start userId=${userId} network_id=${networkId} coin_id=${coinId} ` +
         `to=${address} amount=${amount}`,
     );
 
@@ -1582,21 +1624,10 @@ export class WalletsService {
       );
     }
 
-    // 1. Tìm network theo net_id hoặc net_symbol
-    const networkId = parseInt(networkParam, 10);
-    let network: Network | null = null;
-
-    if (!isNaN(networkId)) {
-      network = await this.networkRepository.findOne({
-        where: { net_id: networkId },
-      });
-    }
-
-    if (!network) {
-      network = await this.networkRepository.findOne({
-        where: { net_symbol: networkParam.toUpperCase() },
-      });
-    }
+    // 1. Tìm network theo net_id
+    const network = await this.networkRepository.findOne({
+      where: { net_id: networkId },
+    });
 
     if (!network) {
       throw new BadRequestException('Network not found');
@@ -1643,21 +1674,10 @@ export class WalletsService {
       }
     }
 
-    // 2. Tìm coin theo coin_id hoặc coin_symbol
-    const coinId = parseInt(coinParam, 10);
-    let coin: Coin | null = null;
-
-    if (!isNaN(coinId)) {
-      coin = await this.coinRepository.findOne({
-        where: { coin_id: coinId },
-      });
-    }
-
-    if (!coin) {
-      coin = await this.coinRepository.findOne({
-        where: { coin_symbol: coinParam.toUpperCase() },
-      });
-    }
+    // 2. Tìm coin theo coin_id
+    const coin = await this.coinRepository.findOne({
+      where: { coin_id: coinId },
+    });
 
     if (!coin) {
       throw new BadRequestException('Coin not found');
@@ -1741,16 +1761,41 @@ export class WalletsService {
       throw new BadRequestException('Invalid wallet seed');
     }
 
-    // 7. Tạo ví sàn với path: m/44'/60'/0'/0'/0'/382' (ETH/BNB) hoặc m/44'/501'/0'/0'/0'/382' (SOL)
-    const exchangeWallet = this.getExchangeWallet(mnemonic, network.net_symbol);
-
-    // 7.5. Lấy wallet network của user để lấy uwn_id cho wh_wallet_netword_id
+    // 7. Ví ký giao dịch: EVM/BNB dùng ví sàn 382'; Solana dùng ví nạp của user (cùng path HD) vì token/SOL nằm trên địa chỉ đó.
     const userWalletNetwork = await this.useWalletNetworkRepository.findOne({
       where: {
         uwn_user_id: userId,
         uwn_network_id: network.net_id,
       },
     });
+
+    let signingWallet: HDNodeWallet | Keypair | Wallet;
+    if (network.net_symbol === 'SOL') {
+      if (!userWalletNetwork?.uwn_public_key) {
+        throw new BadRequestException(
+          'Solana deposit wallet not found. Create a wallet for this network before withdrawing.',
+        );
+      }
+      const d =
+        userWalletNetwork.uwn_end_path !== null &&
+        userWalletNetwork.uwn_end_path !== undefined
+          ? userWalletNetwork.uwn_end_path
+          : this.getLastThreeDigits(userWalletNetwork.uwn_id);
+      const { a, b, c } = this.calculatePathComponents(userId);
+      const userSolKeypair = this.deriveSolKeypair(mnemonic, a, b, c, d);
+      const expectedPk = userWalletNetwork.uwn_public_key.trim();
+      if (userSolKeypair.publicKey.toBase58() !== expectedPk) {
+        throw new BadRequestException(
+          'Solana wallet derivation does not match stored address. Contact support.',
+        );
+      }
+      signingWallet = userSolKeypair;
+      this.logger.debug(
+        `[withdraw] SOL signer=user deposit keypair pubkey=${expectedPk}`,
+      );
+    } else {
+      signingWallet = this.getExchangeWallet(mnemonic, network.net_symbol);
+    }
 
     // 8. Tạo wallet_history với status PENDING
     // Lưu ý: Database vẫn ghi nhận amount gốc (bao gồm cả phí nếu có)
@@ -1775,7 +1820,7 @@ export class WalletsService {
       const txHash = await this.sendTransaction(
         network,
         coin,
-        exchangeWallet,
+        signingWallet,
         address,
         onchainAmount, // Rút onchain với số tiền đã trừ phí (nếu có)
       );
