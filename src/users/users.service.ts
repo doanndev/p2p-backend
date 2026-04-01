@@ -1,11 +1,24 @@
-import { Injectable, ConflictException, BadRequestException, InternalServerErrorException, HttpException, HttpStatus, Logger } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import {
+  Injectable,
+  ConflictException,
+  BadRequestException,
+  InternalServerErrorException,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, UserSex, UserStatus } from './entities/user.entity';
-import { UserCode, UserCodeType, UserCodePlace } from './entities/user-code.entity';
+import {
+  UserCode,
+  UserCodeType,
+  UserCodePlace,
+} from './entities/user-code.entity';
 import { UserVerify } from './entities/user-verify.entity';
 import { VerifyLog } from './entities/verify-log.entity';
 import { KolRegister, KolRegisterStatus } from './entities/kol-register.entity';
@@ -118,7 +131,9 @@ export class UsersService {
       });
 
       if (!referrerUser) {
-        throw new BadRequestException('Invalid referral code. Referral code does not exist');
+        throw new BadRequestException(
+          'Invalid referral code. Referral code does not exist',
+        );
       }
     }
 
@@ -324,10 +339,7 @@ export class UsersService {
   }> {
     // Find user by email (can be uname or uemail)
     const user = await this.userRepository.findOne({
-      where: [
-        { uname: loginDto.email },
-        { uemail: loginDto.email },
-      ],
+      where: [{ uname: loginDto.email }, { uemail: loginDto.email }],
     });
 
     if (!user) {
@@ -335,14 +347,19 @@ export class UsersService {
     }
 
     // Verify password
-    const isPasswordValid = await bcrypt.compare(loginDto.password, user.upassword);
+    const isPasswordValid = await bcrypt.compare(
+      loginDto.password,
+      user.upassword,
+    );
     if (!isPasswordValid) {
       throw new BadRequestException('Invalid email or password');
     }
 
     // Check if user is blocked
     if (user.ustatus === UserStatus.BLOCK) {
-      throw new BadRequestException('Your account has been blocked. Please contact support for assistance.');
+      throw new BadRequestException(
+        'Your account has been blocked. Please contact support for assistance.',
+      );
     }
 
     // Generate tokens
@@ -396,7 +413,9 @@ export class UsersService {
     };
   }
 
-  async generateTokens(user: User): Promise<{ access_token: string; refresh_token: string }> {
+  async generateTokens(
+    user: User,
+  ): Promise<{ access_token: string; refresh_token: string }> {
     const payload = {
       sub: user.uid,
       uname: user.uname,
@@ -471,7 +490,9 @@ export class UsersService {
 
       // Check if user is blocked
       if (user.ustatus === UserStatus.BLOCK) {
-        throw new BadRequestException('Your account has been blocked. Please contact support for assistance.');
+        throw new BadRequestException(
+          'Your account has been blocked. Please contact support for assistance.',
+        );
       }
 
       // Generate new tokens
@@ -479,7 +500,9 @@ export class UsersService {
 
       // Prepare cookie options
       const accessTokenExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-      const refreshTokenExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      const refreshTokenExpires = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000,
+      ); // 7 days
 
       // Get cookie options with domain
       const baseCookieOptions = this.getCookieOptions();
@@ -526,7 +549,9 @@ export class UsersService {
     } catch (error) {
       // Handle JWT verification errors
       if (error.name === 'TokenExpiredError') {
-        throw new BadRequestException('Refresh token has expired. Please login again.');
+        throw new BadRequestException(
+          'Refresh token has expired. Please login again.',
+        );
       }
       if (error.name === 'JsonWebTokenError') {
         throw new BadRequestException('Invalid refresh token');
@@ -562,7 +587,9 @@ export class UsersService {
     return savedUserCode;
   }
 
-  async generateCodeVerifyEmail(userId: number): Promise<{ message: string; code?: UserCode }> {
+  async generateCodeVerifyEmail(
+    userId: number,
+  ): Promise<{ message: string; code?: UserCode }> {
     // Get user and check if email is not activated
     const user = await this.userRepository.findOne({
       where: { uid: userId },
@@ -615,18 +642,22 @@ export class UsersService {
 
       if (canResend) {
         // Resend email with existing code
-        await this.emailService.sendEmailVerificationCode(user.uemail, existingCode.uc_value);
-        
+        await this.emailService.sendEmailVerificationCode(
+          user.uemail,
+          existingCode.uc_value,
+        );
+
         // Update cache with current time (set to expire after 1 minute)
         await this.cacheService.set(cacheKey, now.toISOString(), 60);
-        
+
         return {
           message: 'Verification code has been resent to your email',
           code: existingCode,
         };
       } else {
         return {
-          message: 'A valid verification code already exists. Please check your email. You can request a new code after 1 minute.',
+          message:
+            'A valid verification code already exists. Please check your email. You can request a new code after 1 minute.',
           code: existingCode,
         };
       }
@@ -634,10 +665,10 @@ export class UsersService {
 
     // If no valid code exists, generate and send new code
     const newCode = await this.generateAndSendEmailVerificationCode(user);
-    
+
     // Set cache after sending new code
     await this.cacheService.set(cacheKey, now.toISOString(), 60);
-    
+
     return {
       message: 'Verification code has been sent to your email',
       code: newCode,
@@ -679,7 +710,9 @@ export class UsersService {
       // Mark code as expired
       userCode.uc_life = false;
       await this.userCodeRepository.save(userCode);
-      throw new BadRequestException('Verification code has expired. Please request a new one.');
+      throw new BadRequestException(
+        'Verification code has expired. Please request a new one.',
+      );
     }
 
     // Activate email and mark code as used
@@ -699,7 +732,9 @@ export class UsersService {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
     for (let i = 0; i < 6; i++) {
-      result += characters.charAt(Math.floor(Math.random() * characters.length));
+      result += characters.charAt(
+        Math.floor(Math.random() * characters.length),
+      );
     }
     return result;
   }
@@ -834,7 +869,10 @@ export class UsersService {
     return { status: 'not-verified' };
   }
 
-  async registerKol(userId: number, registerKolDto: RegisterKolDto): Promise<{
+  async registerKol(
+    userId: number,
+    registerKolDto: RegisterKolDto,
+  ): Promise<{
     kolRegister: KolRegister;
     response: {
       statusCode: number;
@@ -867,7 +905,9 @@ export class UsersService {
 
     const validUrls = urls.filter((url) => url && url.trim() !== '');
     if (validUrls.length === 0) {
-      throw new BadRequestException('At least one URL (facebook_url, x_url, group_telegram_url, youtube_url, or website_url) must be provided and cannot be empty');
+      throw new BadRequestException(
+        'At least one URL (facebook_url, x_url, group_telegram_url, youtube_url, or website_url) must be provided and cannot be empty',
+      );
     }
 
     // Get user from database
@@ -876,7 +916,9 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new InternalServerErrorException('User not found. This should not happen. Please contact support.');
+      throw new InternalServerErrorException(
+        'User not found. This should not happen. Please contact support.',
+      );
     }
 
     // Check if user already has ukol = true
@@ -927,7 +969,9 @@ export class UsersService {
     );
 
     if (pendingRecord) {
-      throw new ConflictException('KOL registration request has already been submitted and is pending review');
+      throw new ConflictException(
+        'KOL registration request has already been submitted and is pending review',
+      );
     }
 
     // If no success or pending record exists, create new record with status = pending
@@ -942,7 +986,8 @@ export class UsersService {
       kr_status: KolRegisterStatus.PENDING,
     });
 
-    const savedKolRegister = await this.kolRegisterRepository.save(newKolRegister);
+    const savedKolRegister =
+      await this.kolRegisterRepository.save(newKolRegister);
 
     return {
       kolRegister: savedKolRegister,
@@ -972,7 +1017,9 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new InternalServerErrorException('User not found. This should not happen. Please contact support.');
+      throw new InternalServerErrorException(
+        'User not found. This should not happen. Please contact support.',
+      );
     }
 
     // First check: if ukol = true, return success
@@ -996,7 +1043,11 @@ export class UsersService {
     return { status: 'not-register' };
   }
 
-  async submitKyc(userId: number, kycDto: KycDto, files: Express.Multer.File[]): Promise<{
+  async submitKyc(
+    userId: number,
+    kycDto: KycDto,
+    files: Express.Multer.File[],
+  ): Promise<{
     verification: UserVerify;
     response: {
       statusCode: number;
@@ -1017,14 +1068,19 @@ export class UsersService {
 
     // Validate files
     if (!files || files.length !== 2) {
-      throw new BadRequestException('Please upload both front and backside images');
+      throw new BadRequestException(
+        'Please upload both front and backside images',
+      );
     }
 
     const frontImage = files[0];
     const backsideImage = files[1];
 
     // Validate image files
-    if (!frontImage.mimetype.startsWith('image/') || !backsideImage.mimetype.startsWith('image/')) {
+    if (
+      !frontImage.mimetype.startsWith('image/') ||
+      !backsideImage.mimetype.startsWith('image/')
+    ) {
       throw new BadRequestException('Files must be images');
     }
 
@@ -1034,7 +1090,9 @@ export class UsersService {
     });
 
     if (existingVerify) {
-      throw new ConflictException('KYC verification already exists for this user. Cannot submit again.');
+      throw new ConflictException(
+        'KYC verification already exists for this user. Cannot submit again.',
+      );
     }
 
     let frontImageUrl: string;
@@ -1046,7 +1104,9 @@ export class UsersService {
 
     try {
       // Upload front image to Cloudinary
-      frontImagePublicId = this.cloudinaryService.generatePublicId(`kyc_front_${userId}`);
+      frontImagePublicId = this.cloudinaryService.generatePublicId(
+        `kyc_front_${userId}`,
+      );
       frontImageResult = await this.cloudinaryService.uploadImage(
         frontImage,
         'kyc',
@@ -1061,7 +1121,9 @@ export class UsersService {
 
     try {
       // Upload backside image to Cloudinary
-      backsideImagePublicId = this.cloudinaryService.generatePublicId(`kyc_back_${userId}`);
+      backsideImagePublicId = this.cloudinaryService.generatePublicId(
+        `kyc_back_${userId}`,
+      );
       backsideImageResult = await this.cloudinaryService.uploadImage(
         backsideImage,
         'kyc',
@@ -1073,7 +1135,10 @@ export class UsersService {
       try {
         await this.cloudinaryService.deleteImage(frontImageResult.public_id);
       } catch (deleteError) {
-        console.error('Failed to delete front image after backside upload failure:', deleteError);
+        console.error(
+          'Failed to delete front image after backside upload failure:',
+          deleteError,
+        );
       }
       throw new InternalServerErrorException(
         `Failed to upload backside image to Cloudinary: ${error.message || 'Unknown error'}`,
@@ -1098,7 +1163,10 @@ export class UsersService {
         await this.cloudinaryService.deleteImage(frontImageResult.public_id);
         await this.cloudinaryService.deleteImage(backsideImageResult.public_id);
       } catch (deleteError) {
-        console.error('Failed to delete images after database save failure:', deleteError);
+        console.error(
+          'Failed to delete images after database save failure:',
+          deleteError,
+        );
       }
       throw new InternalServerErrorException(
         `Failed to save KYC verification record: ${error.message || 'Unknown error'}`,
@@ -1124,7 +1192,11 @@ export class UsersService {
     };
   }
 
-  async retryKyc(userId: number, kycDto: KycDto, files: Express.Multer.File[]): Promise<{
+  async retryKyc(
+    userId: number,
+    kycDto: KycDto,
+    files: Express.Multer.File[],
+  ): Promise<{
     verification: UserVerify;
     response: {
       statusCode: number;
@@ -1145,14 +1217,19 @@ export class UsersService {
 
     // Validate files
     if (!files || files.length !== 2) {
-      throw new BadRequestException('Please upload both front and backside images');
+      throw new BadRequestException(
+        'Please upload both front and backside images',
+      );
     }
 
     const frontImage = files[0];
     const backsideImage = files[1];
 
     // Validate image files
-    if (!frontImage.mimetype.startsWith('image/') || !backsideImage.mimetype.startsWith('image/')) {
+    if (
+      !frontImage.mimetype.startsWith('image/') ||
+      !backsideImage.mimetype.startsWith('image/')
+    ) {
       throw new BadRequestException('Files must be images');
     }
 
@@ -1165,7 +1242,9 @@ export class UsersService {
     });
 
     if (!existingVerify) {
-      throw new BadRequestException('No KYC verification with retry status found for this user');
+      throw new BadRequestException(
+        'No KYC verification with retry status found for this user',
+      );
     }
 
     // Store old image URLs for rollback if needed
@@ -1181,7 +1260,9 @@ export class UsersService {
 
     try {
       // Upload front image to Cloudinary
-      frontImagePublicId = this.cloudinaryService.generatePublicId(`kyc_front_${userId}`);
+      frontImagePublicId = this.cloudinaryService.generatePublicId(
+        `kyc_front_${userId}`,
+      );
       frontImageResult = await this.cloudinaryService.uploadImage(
         frontImage,
         'kyc',
@@ -1196,7 +1277,9 @@ export class UsersService {
 
     try {
       // Upload backside image to Cloudinary
-      backsideImagePublicId = this.cloudinaryService.generatePublicId(`kyc_back_${userId}`);
+      backsideImagePublicId = this.cloudinaryService.generatePublicId(
+        `kyc_back_${userId}`,
+      );
       backsideImageResult = await this.cloudinaryService.uploadImage(
         backsideImage,
         'kyc',
@@ -1208,7 +1291,10 @@ export class UsersService {
       try {
         await this.cloudinaryService.deleteImage(frontImageResult.public_id);
       } catch (deleteError) {
-        console.error('Failed to delete front image after backside upload failure:', deleteError);
+        console.error(
+          'Failed to delete front image after backside upload failure:',
+          deleteError,
+        );
       }
       throw new InternalServerErrorException(
         `Failed to upload backside image to Cloudinary: ${error.message || 'Unknown error'}`,
@@ -1232,7 +1318,10 @@ export class UsersService {
         await this.cloudinaryService.deleteImage(frontImageResult.public_id);
         await this.cloudinaryService.deleteImage(backsideImageResult.public_id);
       } catch (deleteError) {
-        console.error('Failed to delete images after database save failure:', deleteError);
+        console.error(
+          'Failed to delete images after database save failure:',
+          deleteError,
+        );
       }
       throw new InternalServerErrorException(
         `Failed to update KYC verification record: ${error.message || 'Unknown error'}`,
@@ -1297,7 +1386,9 @@ export class UsersService {
 
     // If token exists and is still valid (not expired)
     if (existingToken && existingToken.uc_code_time > now) {
-      throw new BadRequestException('A password reset token already exists and is still valid. Please check your email or wait until the token expires.');
+      throw new BadRequestException(
+        'A password reset token already exists and is still valid. Please check your email or wait until the token expires.',
+      );
     }
 
     // Generate reset password token (128 characters: uppercase letters and numbers)
@@ -1328,7 +1419,10 @@ export class UsersService {
     };
   }
 
-  async checkCode(userId: number, code: string): Promise<{
+  async checkCode(
+    userId: number,
+    code: string,
+  ): Promise<{
     statusCode: number;
     message: string;
     code: {
@@ -1356,7 +1450,9 @@ export class UsersService {
     });
 
     if (!userCode) {
-      throw new BadRequestException('Invalid code. Code not found or does not belong to this user');
+      throw new BadRequestException(
+        'Invalid code. Code not found or does not belong to this user',
+      );
     }
 
     // Prepare response (remove 'uc' prefix from field names)
@@ -1388,13 +1484,18 @@ export class UsersService {
     }
 
     // Validate password
-    if (!setNewPasswordDto.password || setNewPasswordDto.password.trim() === '') {
+    if (
+      !setNewPasswordDto.password ||
+      setNewPasswordDto.password.trim() === ''
+    ) {
       throw new BadRequestException('Password is required');
     }
 
     // Check password minimum length (6 characters)
     if (setNewPasswordDto.password.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters long');
+      throw new BadRequestException(
+        'Password must be at least 6 characters long',
+      );
     }
 
     const now = new Date();
@@ -1410,7 +1511,9 @@ export class UsersService {
     });
 
     if (!userCode) {
-      throw new BadRequestException('Invalid code. Code not found, is not a reset-password code, or has already been used');
+      throw new BadRequestException(
+        'Invalid code. Code not found, is not a reset-password code, or has already been used',
+      );
     }
 
     // Check if code is still valid (not expired)
@@ -1418,7 +1521,9 @@ export class UsersService {
       // Mark code as expired
       userCode.uc_life = false;
       await this.userCodeRepository.save(userCode);
-      throw new BadRequestException('Reset password code has expired. Please request a new password reset.');
+      throw new BadRequestException(
+        'Reset password code has expired. Please request a new password reset.',
+      );
     }
 
     // Get user from the code's user_id
@@ -1447,23 +1552,34 @@ export class UsersService {
     };
   }
 
-  async changePassword(userId: number, changePasswordDto: ChangePasswordDto): Promise<{
+  async changePassword(
+    userId: number,
+    changePasswordDto: ChangePasswordDto,
+  ): Promise<{
     statusCode: number;
     message: string;
   }> {
     // Validate current_password
-    if (!changePasswordDto.currentPassword || changePasswordDto.currentPassword.trim() === '') {
+    if (
+      !changePasswordDto.currentPassword ||
+      changePasswordDto.currentPassword.trim() === ''
+    ) {
       throw new BadRequestException('Current password is required');
     }
 
     // Validate new_password
-    if (!changePasswordDto.newPassword || changePasswordDto.newPassword.trim() === '') {
+    if (
+      !changePasswordDto.newPassword ||
+      changePasswordDto.newPassword.trim() === ''
+    ) {
       throw new BadRequestException('New password is required');
     }
 
     // Check new password minimum length (6 characters)
     if (changePasswordDto.newPassword.length < 6) {
-      throw new BadRequestException('New password must be at least 6 characters long');
+      throw new BadRequestException(
+        'New password must be at least 6 characters long',
+      );
     }
 
     // Get user
@@ -1498,7 +1614,10 @@ export class UsersService {
     };
   }
 
-  async updateProfile(userId: number, updateProfileDto: UpdateProfileDto): Promise<{
+  async updateProfile(
+    userId: number,
+    updateProfileDto: UpdateProfileDto,
+  ): Promise<{
     statusCode: number;
     message: string;
     user: {
@@ -1516,7 +1635,9 @@ export class UsersService {
     // This should not happen as JWT strategy already validated user exists
     // But keep check for safety (race condition case)
     if (!user) {
-      throw new InternalServerErrorException('User not found. This should not happen. Please contact support.');
+      throw new InternalServerErrorException(
+        'User not found. This should not happen. Please contact support.',
+      );
     }
 
     // Update display_name (ufulllname) if provided
@@ -1530,7 +1651,10 @@ export class UsersService {
 
     // Update birthday if provided
     if (updateProfileDto.birthday !== undefined) {
-      if (updateProfileDto.birthday && updateProfileDto.birthday.trim() !== '') {
+      if (
+        updateProfileDto.birthday &&
+        updateProfileDto.birthday.trim() !== ''
+      ) {
         user.ubirthday = new Date(updateProfileDto.birthday);
       } else {
         user.ubirthday = null;
@@ -1557,7 +1681,11 @@ export class UsersService {
     };
   }
 
-  async logout(userId: number | null, ipAddress?: string, userAgent?: string): Promise<{
+  async logout(
+    userId: number | null,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<{
     statusCode: number;
     message: string;
   }> {
@@ -1660,7 +1788,9 @@ export class UsersService {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
     for (let i = 0; i < 128; i++) {
-      result += characters.charAt(Math.floor(Math.random() * characters.length));
+      result += characters.charAt(
+        Math.floor(Math.random() * characters.length),
+      );
     }
     return result;
   }
@@ -1669,7 +1799,9 @@ export class UsersService {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
     for (let i = 0; i < 8; i++) {
-      result += characters.charAt(Math.floor(Math.random() * characters.length));
+      result += characters.charAt(
+        Math.floor(Math.random() * characters.length),
+      );
     }
     return result;
   }
@@ -1705,16 +1837,23 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new InternalServerErrorException('User not found. This should not happen. Please contact support.');
+      throw new InternalServerErrorException(
+        'User not found. This should not happen. Please contact support.',
+      );
     }
 
     // 2. Kiểm tra user có phải là KOL không
     if (!user.ukol) {
-      throw new BadRequestException('User is not a KOL. Please register as KOL first.');
+      throw new BadRequestException(
+        'User is not a KOL. Please register as KOL first.',
+      );
     }
 
     // 3. Validate article_url
-    if (!submitKolArticleDto.articleUrl || submitKolArticleDto.articleUrl.trim() === '') {
+    if (
+      !submitKolArticleDto.articleUrl ||
+      submitKolArticleDto.articleUrl.trim() === ''
+    ) {
       throw new BadRequestException('Article URL is required');
     }
 
@@ -1757,7 +1896,10 @@ export class UsersService {
    * @param status - Filter theo status (optional)
    * @returns Danh sách KOL articles của user
    */
-  async getUserKolArticles(userId: number, status?: string): Promise<{
+  async getUserKolArticles(
+    userId: number,
+    status?: string,
+  ): Promise<{
     statusCode: number;
     message: string;
     data: Array<{
@@ -1779,7 +1921,7 @@ export class UsersService {
         KolArticleStatus.APPROVED,
         KolArticleStatus.REJECTED,
       ];
-      
+
       let matchedStatus: KolArticleStatus | null = null;
       for (const validStatus of validStatuses) {
         if (validStatus.toLowerCase() === status.toLowerCase()) {
@@ -1789,7 +1931,9 @@ export class UsersService {
       }
 
       if (matchedStatus) {
-        queryBuilder.andWhere('ka.ka_status = :status', { status: matchedStatus });
+        queryBuilder.andWhere('ka.ka_status = :status', {
+          status: matchedStatus,
+        });
       }
     }
 
@@ -1807,4 +1951,3 @@ export class UsersService {
     };
   }
 }
-

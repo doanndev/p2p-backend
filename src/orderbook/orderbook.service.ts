@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { OrderBook, OrderBookStatus } from './entities/order-book.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
+import { User } from '../users/entities/user.entity';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { QueryMyOrderbooksDto, QueryOrderbooksDto } from './dto/query.dto';
@@ -21,6 +22,8 @@ export class OrderbookService {
     private readonly orderBookRepository: Repository<OrderBook>,
     @InjectRepository(UserWallet)
     private readonly userWalletRepository: Repository<UserWallet>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     @InjectRepository(SettingBankOrder)
     private readonly settingBankOrderRepository: Repository<SettingBankOrder>,
     @InjectRepository(BankUser)
@@ -38,6 +41,24 @@ export class OrderbookService {
 
   private generateAdvCode(): string {
     return `ADV-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  }
+
+  private toPublicUser(user: User | null | undefined) {
+    if (!user) return null;
+    return {
+      id: user.uid,
+      username: user.uname,
+      fullName: user.ufulllname,
+      avatar: user.uavatar,
+    };
+  }
+
+  private async getPublicUserById(userId: number) {
+    const user = await this.userRepository.findOne({
+      where: { uid: userId },
+      select: ['uid', 'uname', 'ufulllname', 'uavatar'],
+    });
+    return this.toPublicUser(user);
   }
 
   async createOrderBook(userId: number, dto: CreateOrderbookDto) {
@@ -102,9 +123,10 @@ export class OrderbookService {
       });
 
       const saved = await manager.save(OrderBook, orderBook);
+      const user = await this.getPublicUserById(saved.ob_user_id);
       return {
         id: saved.ob_id,
-        user_id: saved.ob_user_id,
+        user,
         coin: saved.ob_coin,
         national: saved.ob_national,
         adv_code: saved.ob_adv_code,
@@ -243,6 +265,12 @@ export class OrderbookService {
     const qb = this.orderBookRepository
       .createQueryBuilder('ob')
       .where('ob.ob_user_id = :uid', { uid: userId });
+    qb.leftJoin('ob.user', 'u').addSelect([
+      'u.uid',
+      'u.uname',
+      'u.ufulllname',
+      'u.uavatar',
+    ]);
 
     if (query.status) {
       qb.andWhere('ob.ob_status = :st', { st: query.status });
@@ -294,7 +322,7 @@ export class OrderbookService {
     const rows = await qb.getMany();
     return rows.map((book) => ({
       id: book.ob_id,
-      user_id: book.ob_user_id,
+      user: this.toPublicUser(book.user),
       coin: book.ob_coin,
       national: book.ob_national,
       adv_code: book.ob_adv_code,
@@ -314,6 +342,7 @@ export class OrderbookService {
   async getOrderBookDetail(id: number) {
     const orderBook = await this.orderBookRepository.findOne({
       where: { ob_id: id },
+      relations: ['user'],
     });
     if (!orderBook) {
       throw new NotFoundException('Order book not found');
@@ -327,7 +356,7 @@ export class OrderbookService {
       relations: ['bank_user'],
     });
 
-    const bankUser = setting?.bank_user
+    const bankInfor = setting?.bank_user
       ? {
           id: setting.bank_user.bu_id,
           userId: setting.bank_user.bu_user_id,
@@ -340,7 +369,7 @@ export class OrderbookService {
 
     return {
       id: orderBook.ob_id,
-      user_id: orderBook.ob_user_id,
+      user: this.toPublicUser(orderBook.user),
       coin: orderBook.ob_coin,
       national: orderBook.ob_national,
       adv_code: orderBook.ob_adv_code,
@@ -353,7 +382,7 @@ export class OrderbookService {
       national_min: orderBook.ob_national_min,
       national_max: orderBook.ob_national_max,
       status: orderBook.ob_status,
-      bankUser: bankUser,
+      bank_infor: bankInfor,
     };
   }
 
@@ -438,9 +467,10 @@ export class OrderbookService {
     }
 
     const saved = await this.orderBookRepository.save(orderBook);
+    const user = await this.getPublicUserById(saved.ob_user_id);
     return {
       id: saved.ob_id,
-      user_id: saved.ob_user_id,
+      user,
       coin: saved.ob_coin,
       national: saved.ob_national,
       adv_code: saved.ob_adv_code,

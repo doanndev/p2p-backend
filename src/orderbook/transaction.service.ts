@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
   OrderBook,
   OrderBookOption,
@@ -17,6 +17,7 @@ import {
   TransactionStatus,
   TransactionType,
 } from './entities/transaction.entity';
+import { User } from '../users/entities/user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { QueryTransactionsDto } from './dto/query.dto';
@@ -44,6 +45,60 @@ export class TransactionService {
 
   private generateReferenceCode(): string {
     return `TX-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  }
+
+  private toPublicUser(user: User | null | undefined) {
+    if (!user) return null;
+    return {
+      id: user.uid,
+      username: user.uname,
+      fullName: user.ufulllname,
+      avatar: user.uavatar,
+    };
+  }
+
+  private toTransactionResponse(t: Transaction) {
+    return {
+      id: t.trans_id,
+      reference_code: t.transs_reference_code,
+      user_buy: this.toPublicUser((t as any).user_buy),
+      user_sell: this.toPublicUser((t as any).user_sell),
+      coin: t.trans_coin,
+      national: t.trans_national,
+      order_book: t.trans_order_book,
+      option: t.trans_option,
+      type: t.trans_type,
+      coin_symbol: t.trans_coin_symbol,
+      national_symbol: t.trans_national_symbol,
+      amount: t.trans_amount,
+      price: t.trans_price,
+      price_usd: t.trans_price_usd,
+      total_price: t.trans_total_price,
+      total_usd: t.trans_total_usd,
+      dispute_status: t.trans_dispute_status,
+      time_bank: t.trans_time_bank,
+      status: t.trans_status,
+      message: t.trans_message,
+      created_at: t.trans_created_at,
+    };
+  }
+
+  private async loadTransactionWithUsers(
+    manager: EntityManager | Repository<Transaction>,
+    id: number,
+  ) {
+    const repo =
+      manager instanceof Repository
+        ? manager
+        : (manager as any).getRepository(Transaction);
+    return repo
+      .createQueryBuilder('t')
+      .leftJoin('t.user_buy', 'ub')
+      .addSelect(['ub.uid', 'ub.uname', 'ub.ufulllname', 'ub.uavatar'])
+      .leftJoin('t.user_sell', 'us')
+      .addSelect(['us.uid', 'us.uname', 'us.ufulllname', 'us.uavatar'])
+      .where('t.trans_id = :id', { id })
+      .getOne();
   }
 
   async createTransaction(userId: number, dto: CreateTransactionDto) {
@@ -151,28 +206,11 @@ export class TransactionService {
         await manager.save(ChatRoom, room);
       }
 
-      return {
-        id: saved.trans_id,
-        reference_code: saved.transs_reference_code,
-        user_buy: saved.trans_user_buy,
-        user_sell: saved.trans_user_sell,
-        coin: saved.trans_coin,
-        national: saved.trans_national,
-        order_book: saved.trans_order_book,
-        option: saved.trans_option,
-        type: saved.trans_type,
-        coin_symbol: saved.trans_coin_symbol,
-        national_symbol: saved.trans_national_symbol,
-        amount: saved.trans_amount,
-        price: saved.trans_price,
-        price_usd: saved.trans_price_usd,
-        total_price: saved.trans_total_price,
-        total_usd: saved.trans_total_usd,
-        dispute_status: saved.trans_dispute_status,
-        time_bank: saved.trans_time_bank,
-        status: saved.trans_status,
-        message: saved.trans_message,
-      };
+      const hydrated = await this.loadTransactionWithUsers(
+        (manager as any).getRepository(Transaction),
+        saved.trans_id,
+      );
+      return this.toTransactionResponse(hydrated ?? saved);
     });
   }
 
@@ -183,6 +221,19 @@ export class TransactionService {
         '(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)',
         { uid: userId },
       );
+
+    qb.leftJoin('t.user_buy', 'ub').addSelect([
+      'ub.uid',
+      'ub.uname',
+      'ub.ufulllname',
+      'ub.uavatar',
+    ]);
+    qb.leftJoin('t.user_sell', 'us').addSelect([
+      'us.uid',
+      'us.uname',
+      'us.ufulllname',
+      'us.uavatar',
+    ]);
 
     if (query.status) {
       qb.andWhere('t.trans_status = :st', { st: query.status });
@@ -226,34 +277,18 @@ export class TransactionService {
     }
 
     const rows = await qb.getMany();
-    return rows.map((t) => ({
-      id: t.trans_id,
-      reference_code: t.transs_reference_code,
-      user_buy: t.trans_user_buy,
-      user_sell: t.trans_user_sell,
-      coin: t.trans_coin,
-      national: t.trans_national,
-      order_book: t.trans_order_book,
-      option: t.trans_option,
-      type: t.trans_type,
-      coin_symbol: t.trans_coin_symbol,
-      national_symbol: t.trans_national_symbol,
-      amount: t.trans_amount,
-      price: t.trans_price,
-      price_usd: t.trans_price_usd,
-      total_price: t.trans_total_price,
-      total_usd: t.trans_total_usd,
-      dispute_status: t.trans_dispute_status,
-      time_bank: t.trans_time_bank,
-      status: t.trans_status,
-      message: t.trans_message,
-    }));
+    return rows.map((t) => this.toTransactionResponse(t));
   }
 
   async getTransactionDetail(userId: number, id: number) {
-    const transaction = await this.transactionRepository.findOne({
-      where: { trans_id: id },
-    });
+    const transaction = await this.transactionRepository
+      .createQueryBuilder('t')
+      .leftJoin('t.user_buy', 'ub')
+      .addSelect(['ub.uid', 'ub.uname', 'ub.ufulllname', 'ub.uavatar'])
+      .leftJoin('t.user_sell', 'us')
+      .addSelect(['us.uid', 'us.uname', 'us.ufulllname', 'us.uavatar'])
+      .where('t.trans_id = :id', { id })
+      .getOne();
     if (!transaction) throw new NotFoundException('Transaction not found');
     if (
       transaction.trans_user_buy !== userId &&
@@ -263,28 +298,7 @@ export class TransactionService {
         'You do not have permission to view this transaction',
       );
     }
-    return {
-      id: transaction.trans_id,
-      reference_code: transaction.transs_reference_code,
-      user_buy: transaction.trans_user_buy,
-      user_sell: transaction.trans_user_sell,
-      coin: transaction.trans_coin,
-      national: transaction.trans_national,
-      order_book: transaction.trans_order_book,
-      option: transaction.trans_option,
-      type: transaction.trans_type,
-      coin_symbol: transaction.trans_coin_symbol,
-      national_symbol: transaction.trans_national_symbol,
-      amount: transaction.trans_amount,
-      price: transaction.trans_price,
-      price_usd: transaction.trans_price_usd,
-      total_price: transaction.trans_total_price,
-      total_usd: transaction.trans_total_usd,
-      dispute_status: transaction.trans_dispute_status,
-      time_bank: transaction.trans_time_bank,
-      status: transaction.trans_status,
-      message: transaction.trans_message,
-    };
+    return this.toTransactionResponse(transaction);
   }
 
   async confirmPayment(userId: number, id: number) {
@@ -308,28 +322,11 @@ export class TransactionService {
     transaction.trans_status = TransactionStatus.PAYMENT_CONFIRMED;
     transaction.trans_time_bank = new Date();
     const saved = await this.transactionRepository.save(transaction);
-    return {
-      id: saved.trans_id,
-      reference_code: saved.transs_reference_code,
-      user_buy: saved.trans_user_buy,
-      user_sell: saved.trans_user_sell,
-      coin: saved.trans_coin,
-      national: saved.trans_national,
-      order_book: saved.trans_order_book,
-      option: saved.trans_option,
-      type: saved.trans_type,
-      coin_symbol: saved.trans_coin_symbol,
-      national_symbol: saved.trans_national_symbol,
-      amount: saved.trans_amount,
-      price: saved.trans_price,
-      price_usd: saved.trans_price_usd,
-      total_price: saved.trans_total_price,
-      total_usd: saved.trans_total_usd,
-      dispute_status: saved.trans_dispute_status,
-      time_bank: saved.trans_time_bank,
-      status: saved.trans_status,
-      message: saved.trans_message,
-    };
+    const hydrated = await this.loadTransactionWithUsers(
+      this.transactionRepository,
+      saved.trans_id,
+    );
+    return this.toTransactionResponse(hydrated ?? saved);
   }
 
   async confirmReceived(userId: number, id: number) {
@@ -396,28 +393,11 @@ export class TransactionService {
         .andWhere('room_status = :status', { status: ChatRoomStatus.ACTIVE })
         .execute();
 
-      return {
-        id: saved.trans_id,
-        reference_code: saved.transs_reference_code,
-        user_buy: saved.trans_user_buy,
-        user_sell: saved.trans_user_sell,
-        coin: saved.trans_coin,
-        national: saved.trans_national,
-        order_book: saved.trans_order_book,
-        option: saved.trans_option,
-        type: saved.trans_type,
-        coin_symbol: saved.trans_coin_symbol,
-        national_symbol: saved.trans_national_symbol,
-        amount: saved.trans_amount,
-        price: saved.trans_price,
-        price_usd: saved.trans_price_usd,
-        total_price: saved.trans_total_price,
-        total_usd: saved.trans_total_usd,
-        dispute_status: saved.trans_dispute_status,
-        time_bank: saved.trans_time_bank,
-        status: saved.trans_status,
-        message: saved.trans_message,
-      };
+      const hydrated = await this.loadTransactionWithUsers(
+        (manager as any).getRepository(Transaction),
+        saved.trans_id,
+      );
+      return this.toTransactionResponse(hydrated ?? saved);
     });
   }
 
@@ -496,28 +476,11 @@ export class TransactionService {
         .andWhere('room_status = :status', { status: ChatRoomStatus.ACTIVE })
         .execute();
 
-      return {
-        id: saved.trans_id,
-        reference_code: saved.transs_reference_code,
-        user_buy: saved.trans_user_buy,
-        user_sell: saved.trans_user_sell,
-        coin: saved.trans_coin,
-        national: saved.trans_national,
-        order_book: saved.trans_order_book,
-        option: saved.trans_option,
-        type: saved.trans_type,
-        coin_symbol: saved.trans_coin_symbol,
-        national_symbol: saved.trans_national_symbol,
-        amount: saved.trans_amount,
-        price: saved.trans_price,
-        price_usd: saved.trans_price_usd,
-        total_price: saved.trans_total_price,
-        total_usd: saved.trans_total_usd,
-        dispute_status: saved.trans_dispute_status,
-        time_bank: saved.trans_time_bank,
-        status: saved.trans_status,
-        message: saved.trans_message,
-      };
+      const hydrated = await this.loadTransactionWithUsers(
+        (manager as any).getRepository(Transaction),
+        saved.trans_id,
+      );
+      return this.toTransactionResponse(hydrated ?? saved);
     });
   }
 }

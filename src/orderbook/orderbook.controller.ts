@@ -25,6 +25,7 @@ import {
 import { OrderbookService } from './orderbook.service';
 import { TransactionService } from './transaction.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { VerifiedUserGuard } from '../common/guards/verified-user.guard';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
@@ -37,7 +38,12 @@ import { AttachBankToOrderbookDto } from './dto/attach-bank-to-orderbook.dto';
 
 const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   id: 101,
-  user_id: 12,
+  user: {
+    id: 12,
+    username: 'john_doe',
+    fullName: 'John Doe',
+    avatar: 'https://cdn.example.com/avatar.jpg',
+  },
   coin: 1,
   national: 2,
   adv_code: 'ADV-1711223344556-AB12CD',
@@ -83,11 +89,33 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
   created_at: '2026-03-26T01:23:45.000Z',
 };
 
+const ORDERBOOK_DETAIL_RESPONSE_EXAMPLE = {
+  ...ORDERBOOK_CREATE_RESPONSE_EXAMPLE,
+  bank_infor: {
+    id: 1,
+    userId: 12,
+    bankName: 'Vietcombank',
+    bankBranch: 'Ha Noi',
+    bankAccountName: 'NGUYEN VAN A',
+    bankAccountNumber: '0123456789',
+  },
+};
+
 const TRANSACTION_RESPONSE_EXAMPLE = {
   id: 5001,
   reference_code: 'TX-1711223344556-XY98ZT',
-  user_buy: 22,
-  user_sell: 12,
+  user_buy: {
+    id: 22,
+    username: 'buyer_user',
+    fullName: 'Buyer User',
+    avatar: 'https://cdn.example.com/avatar-buyer.jpg',
+  },
+  user_sell: {
+    id: 12,
+    username: 'seller_user',
+    fullName: 'Seller User',
+    avatar: 'https://cdn.example.com/avatar-seller.jpg',
+  },
   coin: 1,
   national: 2,
   order_book: 101,
@@ -116,7 +144,7 @@ export class OrderbookController {
   ) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo order book' })
   @ApiBody({ type: CreateOrderbookDto })
@@ -174,7 +202,7 @@ export class OrderbookController {
 
   /** Đặt trước @Get(':id') để không bị coi id = "transactions". */
   @Get('transactions/list')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @UsePipes(
     new ValidationPipe({
       transform: true,
@@ -196,7 +224,7 @@ export class OrderbookController {
   }
 
   @Get('transactions/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @ApiOperation({ summary: 'Lấy chi tiết transaction' })
   @ApiOkResponse({
     description: 'Chi tiết transaction',
@@ -217,7 +245,7 @@ export class OrderbookController {
   })
   @ApiOkResponse({
     description: 'Chi tiết order book',
-    schema: { example: ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE },
+    schema: { example: ORDERBOOK_DETAIL_RESPONSE_EXAMPLE },
   })
   getOrderBookDetail(@Param('id') id: string) {
     return this.orderbookService.getOrderBookDetail(Number(id));
@@ -292,7 +320,7 @@ export class OrderbookController {
   }
 
   @Post('transactions')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo transaction cho order book' })
   @ApiBody({ type: CreateTransactionDto })
@@ -305,7 +333,7 @@ export class OrderbookController {
   }
 
   @Post('transactions/:id/confirm-payment')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @ApiOperation({
     summary: 'Xác nhận đã chuyển tiền (pending -> payment_confirmed)',
   })
@@ -324,7 +352,7 @@ export class OrderbookController {
   }
 
   @Post('transactions/:id/confirm-received')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @ApiOperation({
     summary:
       'Xác nhận đã nhận tiền (payment_confirmed -> executed) và chuyển lock_balance',
@@ -343,7 +371,7 @@ export class OrderbookController {
   }
 
   @Post('transactions/:id/cancel')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
   @ApiOperation({ summary: 'Huỷ transaction khi đang pending' })
   @ApiOkResponse({
     description: 'Transaction đã bị huỷ',
