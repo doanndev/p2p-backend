@@ -4,7 +4,6 @@ const { Client } = require('pg');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 require('dotenv').config();
 
-const DEFAULT_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const DEFAULT_USDT_MINT = 'Gr5D54dHC8neoFBQQuy8ni6S19E5ygg7Ewr3i1x6RRP5';
 
 function parseArg(name) {
@@ -74,7 +73,7 @@ async function upsertSolNetwork(client) {
   return inserted.rows[0].net_id;
 }
 
-async function upsertCoinNetwork(client, networkId, coinId, mint) {
+async function upsertCoinNetwork(client, networkId, coinId, mint, coinType) {
   const existed = await client.query(
     `
     SELECT cn_id
@@ -90,36 +89,38 @@ async function upsertCoinNetwork(client, networkId, coinId, mint) {
       `
       UPDATE coin_networks
       SET cn_coin_mint = $1,
+          cn_coin_type = $3,
           cn_status = 'active'
       WHERE cn_id = $2
       `,
-      [mint, existed.rows[0].cn_id],
+      [mint, existed.rows[0].cn_id, coinType],
     );
     return;
   }
 
   await client.query(
     `
-    INSERT INTO coin_networks (cn_network_id, cn_coin_id, cn_coin_mint, cn_status)
-    VALUES ($1, $2, $3, 'active')
+    INSERT INTO coin_networks (cn_network_id, cn_coin_id, cn_coin_mint, cn_coin_type, cn_status)
+    VALUES ($1, $2, $3, $4, 'active')
     `,
-    [networkId, coinId, mint],
+    [networkId, coinId, mint, coinType],
   );
 }
 
 async function main() {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log(
-      'Usage: node scripts/seed-sol-usdt-mints.js [--usdt-mint=<mint>] [--sol-mint=<mint>]',
+      'Usage: node scripts/seed-sol-usdt-mints.js [--usdt-mint=<mint>]',
     );
-    console.log('You can also set env vars: USDT_MINT, SOL_MINT');
+    console.log(
+      'SOL on Solana is seeded as native (cn_coin_type=native, cn_coin_mint=NULL).',
+    );
+    console.log('You can also set env var: USDT_MINT');
     return;
   }
 
   const usdtMint =
     parseArg('usdt-mint') || process.env.USDT_MINT || DEFAULT_USDT_MINT;
-  const solMint =
-    parseArg('sol-mint') || process.env.SOL_MINT || DEFAULT_SOL_MINT;
 
   const client = new Client({
     host: process.env.DB_HOST || 'localhost',
@@ -143,13 +144,14 @@ async function main() {
       name: 'Tether USD',
     });
 
-    await upsertCoinNetwork(client, networkId, solCoinId, solMint);
-    await upsertCoinNetwork(client, networkId, usdtCoinId, usdtMint);
+    // Native SOL (không mint); USDT SPL cần mint
+    await upsertCoinNetwork(client, networkId, solCoinId, null, 'native');
+    await upsertCoinNetwork(client, networkId, usdtCoinId, usdtMint, 'spl');
 
     await client.query('COMMIT');
 
-    console.log('Seed success: SOL + USDT on SOL network');
-    console.log(`SOL mint : ${solMint}`);
+    console.log('Seed success: SOL (native) + USDT (SPL) on SOL network');
+    console.log('SOL      : cn_coin_type=native, cn_coin_mint=NULL');
     console.log(`USDT mint: ${usdtMint}`);
   } catch (error) {
     await client.query('ROLLBACK');

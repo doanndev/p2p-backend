@@ -1,6 +1,14 @@
-import { IsInt, IsNotEmpty, IsNumber, IsString, Min } from 'class-validator';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class WithdrawDto {
   @ApiProperty({
@@ -41,4 +49,14 @@ export class WithdrawDto {
   @IsNumber()
   @Min(0.00000001)
   amount: number;
+
+  @ApiPropertyOptional({
+    example: '123456',
+    description:
+      'Bắt buộc khi tài khoản đã bật 2FA (Google Authenticator).',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'twoFactorCode must be a 6-digit TOTP' })
+  twoFactorCode?: string;
 }

@@ -278,7 +278,10 @@ export class SupportChatGateway
     return { ok: true };
   }
 
-  emitConversationClosed(conversationId: number, payload?: Record<string, unknown>) {
+  emitConversationClosed(
+    conversationId: number,
+    payload?: Record<string, unknown>,
+  ) {
     this.server
       .to(supportRoomName(conversationId))
       .emit('conversation_closed', { conversationId, ...(payload || {}) });

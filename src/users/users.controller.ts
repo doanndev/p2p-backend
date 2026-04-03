@@ -12,12 +12,15 @@ import {
   UploadedFiles,
   Query,
   HttpException,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { UsersService } from './users.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { KycDto } from './dto/kyc.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -154,6 +157,72 @@ export class UsersController {
     // Set cookies directly - Express will overwrite existing cookies with same name
     // KHÔNG clear cookies trước vì sẽ tạo thêm 2 Set-Cookie headers (clear),
     // làm tổng cộng 4 cookies trong 1 header, browser có thể chỉ parse cookie đầu tiên
+    res.cookie(
+      'access_token',
+      result.cookieOptions.access_token.value,
+      accessTokenOptions,
+    );
+    res.cookie(
+      'refresh_token',
+      result.cookieOptions.refresh_token.value,
+      refreshTokenOptions,
+    );
+
+    return result.response;
+  }
+
+  @Post('google-login')
+  @ApiOperation({
+    summary: 'Đăng nhập Google (authorization code)',
+    description:
+      'Frontend gửi `code` từ OAuth redirect; path mặc định `google-login` để khớp redirect_uri.',
+  })
+  @ApiBody({ type: GoogleLoginDto })
+  @ApiOkResponse({
+    description:
+      'Đăng nhập Google thành công, set cookie access_token và refresh_token',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Login with Google successful',
+        user: {
+          id: 120,
+          name: 'User_120',
+          email: 'you@gmail.com',
+          display_name: 'You',
+        },
+      },
+    },
+  })
+  @HttpCode(HttpStatus.OK)
+  async googleLogin(
+    @Body() googleLoginDto: GoogleLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.usersService.loginWithGoogle(googleLoginDto);
+
+    const accessTokenOptions: any = {
+      httpOnly: result.cookieOptions.access_token.httpOnly,
+      secure: result.cookieOptions.access_token.secure,
+      sameSite: result.cookieOptions.access_token.sameSite,
+      expires: result.cookieOptions.access_token.expires,
+      path: result.cookieOptions.access_token.path,
+    };
+    if (result.cookieOptions.access_token.domain) {
+      accessTokenOptions.domain = result.cookieOptions.access_token.domain;
+    }
+
+    const refreshTokenOptions: any = {
+      httpOnly: result.cookieOptions.refresh_token.httpOnly,
+      secure: result.cookieOptions.refresh_token.secure,
+      sameSite: result.cookieOptions.refresh_token.sameSite,
+      expires: result.cookieOptions.refresh_token.expires,
+      path: result.cookieOptions.refresh_token.path,
+    };
+    if (result.cookieOptions.refresh_token.domain) {
+      refreshTokenOptions.domain = result.cookieOptions.refresh_token.domain;
+    }
+
     res.cookie(
       'access_token',
       result.cookieOptions.access_token.value,
@@ -496,7 +565,11 @@ export class UsersController {
   }
 
   @Post('change-password')
-  @ApiOperation({ summary: 'Đổi mật khẩu khi đã đăng nhập' })
+  @ApiOperation({
+    summary: 'Đổi mật khẩu khi đã đăng nhập',
+    description:
+      'Nếu đã bật 2FA, gửi kèm `twoFactorCode` (6 chữ số từ Google Authenticator).',
+  })
   @ApiBody({ type: ChangePasswordDto })
   @ApiOkResponse({
     description: 'Đổi mật khẩu thành công',
@@ -505,6 +578,13 @@ export class UsersController {
     },
   })
   @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @Request() req: any,

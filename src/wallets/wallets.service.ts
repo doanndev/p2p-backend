@@ -64,6 +64,7 @@ import {
 import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { RpcRateLimitService } from '../common/rpc-rate-limit.service';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
+import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 
 /** Thông báo lỗi chung trả về frontend khi rút tiền thất bại (ví main thiếu dư, RPC lỗi, simulation fail, ...). */
 const WITHDRAW_ERROR_MESSAGE =
@@ -713,7 +714,6 @@ export class WalletsService {
           wsEndpoint: wssUrl || undefined,
         });
         const keypair = exchangeWallet as Keypair;
-        const mintPublicKey = new PublicKey(coinNetwork.cn_coin_mint);
         const toPublicKey = new PublicKey(toAddress);
 
         // Kiểm tra xem coin có phải native SOL không
@@ -736,6 +736,12 @@ export class WalletsService {
           return signature;
         } else {
           // SPL Token transfer (USDT, USDC, etc.)
+          if (!coinNetwork.cn_coin_mint) {
+            throw new BadRequestException(
+              `SPL token ${coin.coin_symbol} requires cn_coin_mint on network ${network.net_symbol}`,
+            );
+          }
+          const mintPublicKey = new PublicKey(coinNetwork.cn_coin_mint);
           // Lấy mint info để biết decimals
           const mintInfo = await this.rpcRateLimitService.withRpcLimit(() =>
             getMint(connection, mintPublicKey),
@@ -1012,6 +1018,11 @@ export class WalletsService {
             return receipt.hash;
           } else {
             // ERC20 Token transfer (USDT, USDC, etc.)
+            if (!coinNetwork.cn_coin_mint) {
+              throw new BadRequestException(
+                `Token ${coin.coin_symbol} requires cn_coin_mint (contract) on network ${network.net_symbol}`,
+              );
+            }
             // Chuẩn hóa địa chỉ checksum (tránh lỗi "bad address checksum" trên BNB/ETH)
             const normalizedContractAddress = this.normalizeEvmAddress(
               coinNetwork.cn_coin_mint,
@@ -1488,11 +1499,23 @@ export class WalletsService {
    * Tính toán số dư reward thực và cộng vào uw_balance
    * Sử dụng hàm calculateBalanceReward để đảm bảo tính nhất quán
    */
-  async transferReward(userId: number): Promise<{
+  async transferReward(
+    userId: number,
+    twoFactorCode?: string,
+  ): Promise<{
     message: string;
     newBalanceReward: number;
     updatedCoins: number[];
   }> {
+    const user2fa = await this.userRepository.findOne({
+      where: { uid: userId },
+      select: ['uid', 'u_active_ggauth', 'uggauth'],
+    });
+    if (!user2fa) {
+      throw new BadRequestException('User not found');
+    }
+    requireTotpIfEnabled(user2fa, twoFactorCode);
+
     // 1. Tính newBalanceReward từ hàm helper để đảm bảo tính nhất quán
     const newBalanceReward = await this.calculateBalanceReward(userId);
 
@@ -1595,6 +1618,7 @@ export class WalletsService {
     coinId: number,
     address: string,
     amount: number,
+    twoFactorCode?: string,
   ): Promise<any> {
     // Normalize address: trim whitespace để tránh lỗi do người dùng nhập nhầm
     address = address.trim();
@@ -1607,12 +1631,14 @@ export class WalletsService {
     // 0. Kiểm tra user đã xác minh danh tính và status = active
     const user = await this.userRepository.findOne({
       where: { uid: userId },
-      select: ['uid', 'uverify', 'ustatus'],
+      select: ['uid', 'uverify', 'ustatus', 'u_active_ggauth', 'uggauth'],
     });
 
     if (!user) {
       throw new BadRequestException('User not found');
     }
+
+    requireTotpIfEnabled(user, twoFactorCode);
 
     if (!user.uverify) {
       throw new BadRequestException('Identity not verified');
@@ -1703,7 +1729,11 @@ export class WalletsService {
     }
 
     this.logger.debug(
-      `[withdraw] coinNetwork active mint/contract=${this.debugShortAddr(coinNetwork.cn_coin_mint, 10, 8)}`,
+      `[withdraw] coinNetwork active mint/contract=${
+        coinNetwork.cn_coin_mint
+          ? this.debugShortAddr(coinNetwork.cn_coin_mint, 10, 8)
+          : 'native'
+      }`,
     );
 
     // 2.5. Kiểm tra và đồng bộ balance trước khi kiểm tra amount

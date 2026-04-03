@@ -16,6 +16,7 @@ import {
 import { WalletsService } from './wallets.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
+import { TransferRewardDto } from './dto/transfer-reward.dto';
 import { TransactionHistoryDto } from './dto/transaction-history.dto';
 import { TransferRewardsHistoryDto } from './dto/transfer-rewards-history.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -310,7 +311,12 @@ export class WalletsController {
   }
 
   @Post('transfer-reward')
-  @ApiOperation({ summary: 'Chuyển số dư reward sang ví chính' })
+  @ApiOperation({
+    summary: 'Chuyển số dư reward sang ví chính',
+    description:
+      'Body JSON có thể rỗng `{}`. Nếu đã bật 2FA, gửi `{ "twoFactorCode": "123456" }`.',
+  })
+  @ApiBody({ type: TransferRewardDto })
   @ApiOkResponse({
     description: 'Chuyển reward thành công',
     schema: {
@@ -322,10 +328,23 @@ export class WalletsController {
     },
   })
   @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
   @HttpCode(HttpStatus.OK)
-  async transferReward(@Request() req: any) {
+  async transferReward(
+    @Body() body: TransferRewardDto,
+    @Request() req: any,
+  ) {
     const user = req.user; // User from JWT token
-    const result = await this.walletsService.transferReward(user.uid);
+    const result = await this.walletsService.transferReward(
+      user.uid,
+      body.twoFactorCode,
+    );
     return {
       statusCode: HttpStatus.OK,
       message: result.message,
@@ -388,7 +407,11 @@ export class WalletsController {
   }
 
   @Post('withdraw')
-  @ApiOperation({ summary: 'Rút coin về ví ngoài' })
+  @ApiOperation({
+    summary: 'Rút coin về ví ngoài',
+    description:
+      'Nếu tài khoản đã bật 2FA (Google Authenticator), gửi kèm `twoFactorCode` (6 chữ số).',
+  })
   @ApiBody({ type: WithdrawDto })
   @ApiOkResponse({
     description: 'Rút coin thành công',
@@ -417,6 +440,7 @@ export class WalletsController {
       withdrawDto.coinId,
       withdrawDto.address,
       withdrawDto.amount,
+      withdrawDto.twoFactorCode,
     );
     return {
       statusCode: HttpStatus.OK,

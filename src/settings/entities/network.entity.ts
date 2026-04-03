@@ -34,4 +34,3 @@ export class Network {
   @OneToMany(() => CoinNetwork, (coinNetwork) => coinNetwork.network)
   coin_networks: CoinNetwork[];
 }
-

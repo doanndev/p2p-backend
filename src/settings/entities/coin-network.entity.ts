@@ -13,6 +13,15 @@ export enum CoinNetworkStatus {
   INACTIVE = 'inactive',
 }
 
+/** Chuẩn token theo mạng (mint/contract chỉ bắt buộc với các loại không native). */
+export enum CoinType {
+  NATIVE = 'native',
+  SPL = 'spl',
+  ERC20 = 'erc20',
+  BEP20 = 'bep20',
+  TRC20 = 'trc20',
+}
+
 @Entity('coin_networks')
 export class CoinNetwork {
   @PrimaryGeneratedColumn({ name: 'cn_id', type: 'integer' })
@@ -24,8 +33,22 @@ export class CoinNetwork {
   @Column({ name: 'cn_coin_id', type: 'integer' })
   cn_coin_id: number;
 
-  @Column({ name: 'cn_coin_mint', type: 'varchar', unique: true })
-  cn_coin_mint: string;
+  /** Mint SPL / contract EVM-BEP; null khi {@link CoinType.NATIVE}. */
+  @Column({
+    name: 'cn_coin_mint',
+    type: 'varchar',
+    unique: true,
+    nullable: true,
+  })
+  cn_coin_mint: string | null;
+
+  @Column({
+    name: 'cn_coin_type',
+    type: 'enum',
+    enum: CoinType,
+    nullable: true,
+  })
+  cn_coin_type: CoinType | null;
 
   @Column({
     name: 'cn_status',
@@ -43,4 +66,3 @@ export class CoinNetwork {
   @JoinColumn({ name: 'cn_coin_id' })
   coin: Coin;
 }
-

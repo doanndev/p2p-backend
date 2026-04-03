@@ -3296,9 +3296,6 @@ export class AdminsService implements OnModuleInit {
         });
 
         const keypair = userWallet as Keypair;
-        const mintPublicKey = new PublicKey(
-          this.getMintForSolUsdt(network, coin, coinNetwork),
-        );
         const toPublicKey = new PublicKey(mainWalletAddress);
 
         if (coin.coin_symbol === 'SOL') {
@@ -3320,6 +3317,13 @@ export class AdminsService implements OnModuleInit {
           return signature;
         } else {
           // SPL Token transfer (USDT)
+          const mintStr = this.getMintForSolUsdt(network, coin, coinNetwork);
+          if (!mintStr) {
+            throw new BadRequestException(
+              `SPL ${coin.coin_symbol} requires cn_coin_mint (or USDT mint override) on SOL`,
+            );
+          }
+          const mintPublicKey = new PublicKey(mintStr);
           const mintInfo = await this.rpcRateLimitService.withRpcLimit(() =>
             getMint(connection, mintPublicKey),
           );
@@ -3478,6 +3482,11 @@ export class AdminsService implements OnModuleInit {
             await this.rpcRateLimitService.withRpcLimit(() => tx.wait());
             return tx.hash;
           } else {
+            if (!coinNetwork.cn_coin_mint) {
+              throw new BadRequestException(
+                `Token ${coin.coin_symbol} requires cn_coin_mint on network ${network.net_symbol}`,
+              );
+            }
             const erc20Abi = [
               'function transfer(address to, uint256 amount) returns (bool)',
               'function decimals() view returns (uint8)',
@@ -3728,7 +3737,7 @@ export class AdminsService implements OnModuleInit {
     network: Network,
     coin: Coin,
     coinNetwork: CoinNetwork,
-  ): string {
+  ): string | null {
     if (network.net_symbol === 'SOL' && coin.coin_symbol === 'USDT') {
       return SOL_USDT_MINT;
     }
@@ -3764,9 +3773,11 @@ export class AdminsService implements OnModuleInit {
           return true;
         }
 
-        const mintPublicKey = new PublicKey(
-          this.getMintForSolUsdt(network, coin, coinNetwork),
-        );
+        const mintStr = this.getMintForSolUsdt(network, coin, coinNetwork);
+        if (!mintStr) {
+          return true;
+        }
+        const mintPublicKey = new PublicKey(mintStr);
         const fromTokenAccount = await getAssociatedTokenAddress(
           mintPublicKey,
           keypair.publicKey,
@@ -4571,9 +4582,6 @@ export class AdminsService implements OnModuleInit {
     if (network.net_symbol === 'SOL') {
       return this.runWithSolRpcUrl(async (rpcUrl) => {
         const connection = new Connection(rpcUrl, { commitment: 'confirmed' });
-        const mintPublicKey = new PublicKey(
-          this.getMintForSolUsdt(network, coin, coinNetwork),
-        );
         const addressPublicKey = new PublicKey(address);
 
         if (coin.coin_symbol === 'SOL') {
@@ -4583,6 +4591,11 @@ export class AdminsService implements OnModuleInit {
           return balance / 1e9; // Convert lamports to SOL
         } else {
           // SPL Token
+          const mintStr = this.getMintForSolUsdt(network, coin, coinNetwork);
+          if (!mintStr) {
+            return 0;
+          }
+          const mintPublicKey = new PublicKey(mintStr);
           const tokenAccount = await getAssociatedTokenAddress(
             mintPublicKey,
             addressPublicKey,
@@ -4648,6 +4661,9 @@ export class AdminsService implements OnModuleInit {
                   : String(balance);
               return parseFloat(parseUnits(balanceStr, 0).toString()) / 1e18;
             } else {
+              if (!coinNetwork.cn_coin_mint) {
+                return 0;
+              }
               const erc20Abi = [
                 'function balanceOf(address owner) view returns (uint256)',
                 'function decimals() view returns (uint8)',

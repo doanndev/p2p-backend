@@ -25,12 +25,16 @@ import { KolRegister, KolRegisterStatus } from './entities/kol-register.entity';
 import { KolArticle, KolArticleStatus } from './entities/kol-article.entity';
 import { Notification } from './entities/notification.entity';
 import { UserLog, UserLogType, UserLogLevel } from './entities/user-log.entity';
+import { randomBytes } from 'crypto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
+import { GoogleAuthService } from './google-auth.service';
 import { KycDto } from './dto/kyc.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SetNewPasswordDto } from './dto/set-new-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RegisterKolDto } from './dto/register-kol.dto';
 import { SubmitKolArticleDto } from './dto/submit-kol-article.dto';
@@ -73,6 +77,7 @@ export class UsersService {
     private storageService: StorageService,
     private cloudinaryService: CloudinaryService,
     private configService: ConfigService,
+    private googleAuthService: GoogleAuthService,
   ) {}
 
   /**
@@ -187,6 +192,7 @@ export class UsersService {
       uphone: registerDto.phone || null,
       utelegram: null,
       uggauth: null,
+      ugoogle_sub: null,
       upassword: hashedPassword,
       uref: newUref,
       ufulllname: registerDto.displayName,
@@ -397,6 +403,186 @@ export class UsersService {
     const response = {
       statusCode: 200,
       message: 'Login successful',
+      user: {
+        id: user.uid,
+        name: user.uname,
+        email: user.uemail,
+        display_name: user.ufulllname,
+      },
+    };
+
+    return {
+      user,
+      tokens,
+      response,
+      cookieOptions,
+    };
+  }
+
+  async loginWithGoogle(googleLoginDto: GoogleLoginDto): Promise<{
+    user: User;
+    tokens: { access_token: string; refresh_token: string };
+    response: {
+      statusCode: number;
+      message: string;
+      user: {
+        id: number;
+        name: string;
+        email: string;
+        display_name: string;
+      };
+    };
+    cookieOptions: {
+      access_token: {
+        value: string;
+        expires: Date;
+        httpOnly: boolean;
+        secure: boolean;
+        sameSite: 'none' | 'lax' | 'strict';
+        path: string;
+        domain?: string;
+      };
+      refresh_token: {
+        value: string;
+        expires: Date;
+        httpOnly: boolean;
+        secure: boolean;
+        sameSite: 'none' | 'lax' | 'strict';
+        path: string;
+        domain?: string;
+      };
+    };
+  }> {
+    const path = googleLoginDto.path?.trim() || 'google-login';
+    const tokenResponse = await this.googleAuthService.exchangeCodeForToken(
+      googleLoginDto.code,
+      path,
+    );
+    const googleUser = await this.googleAuthService.verifyIdToken(
+      tokenResponse.id_token,
+    );
+
+    const sub = googleUser.sub as string;
+    const email = googleUser.email as string;
+    const displayName =
+      googleUser.name?.trim() || email.split('@')[0] || 'User';
+    const picture = googleUser.picture?.trim() || null;
+
+    let user = await this.userRepository.findOne({
+      where: { ugoogle_sub: sub },
+    });
+
+    if (user) {
+      user.u_active_email = true;
+      user.ufulllname = displayName;
+      if (picture) user.uavatar = picture;
+      await this.userRepository.save(user);
+    } else {
+      user = await this.userRepository.findOne({
+        where: { uemail: email },
+      });
+
+      if (user) {
+        if (user.ugoogle_sub && user.ugoogle_sub !== sub) {
+          throw new ConflictException(
+            'This email is already linked to another Google account',
+          );
+        }
+        user.ugoogle_sub = sub;
+        user.u_active_email = true;
+        user.ufulllname = displayName;
+        if (picture) user.uavatar = picture;
+        await this.userRepository.save(user);
+      } else {
+        let newUref = this.generateUref();
+        let existingUrefUser = await this.userRepository.findOne({
+          where: { uref: newUref },
+        });
+        while (existingUrefUser) {
+          newUref = this.generateUref();
+          existingUrefUser = await this.userRepository.findOne({
+            where: { uref: newUref },
+          });
+        }
+
+        const hashedRandomPassword = await bcrypt.hash(
+          randomBytes(32).toString('hex'),
+          10,
+        );
+        const tempUname = `__g_${randomBytes(8).toString('hex')}`;
+
+        const newUser = this.userRepository.create({
+          uname: tempUname,
+          uemail: email,
+          uphone: null,
+          utelegram: null,
+          uggauth: null,
+          ugoogle_sub: sub,
+          upassword: hashedRandomPassword,
+          uref: newUref,
+          ufulllname: displayName,
+          uavatar: picture,
+          ubirthday: null,
+          usex: UserSex.OTHER,
+          u_active_email: true,
+          u_active_ggauth: false,
+          uverify: false,
+          ulevel: 1,
+          ukol: false,
+          ustatus: UserStatus.ACTIVE,
+        });
+
+        user = await this.userRepository.save(newUser);
+
+        let finalUname = `User_${user.uid}`;
+        const unameTaken = await this.userRepository.findOne({
+          where: { uname: finalUname },
+        });
+        if (unameTaken && unameTaken.uid !== user.uid) {
+          finalUname = `User_${user.uid}_${randomBytes(4).toString('hex')}`;
+        }
+        user.uname = finalUname;
+        await this.userRepository.save(user);
+      }
+    }
+
+    if (user.ustatus === UserStatus.BLOCK) {
+      throw new BadRequestException(
+        'Your account has been blocked. Please contact support for assistance.',
+      );
+    }
+
+    const tokens = await this.generateTokens(user);
+
+    const accessTokenExpires = new Date(Date.now() + 15 * 60 * 1000);
+    const refreshTokenExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const baseCookieOptions = this.getCookieOptions();
+
+    const cookieOptions = {
+      access_token: {
+        value: tokens.access_token,
+        expires: accessTokenExpires,
+        httpOnly: baseCookieOptions.httpOnly,
+        secure: baseCookieOptions.secure,
+        sameSite: baseCookieOptions.sameSite,
+        path: baseCookieOptions.path,
+        ...(baseCookieOptions.domain && { domain: baseCookieOptions.domain }),
+      },
+      refresh_token: {
+        value: tokens.refresh_token,
+        expires: refreshTokenExpires,
+        httpOnly: baseCookieOptions.httpOnly,
+        secure: baseCookieOptions.secure,
+        sameSite: baseCookieOptions.sameSite,
+        path: baseCookieOptions.path,
+        ...(baseCookieOptions.domain && { domain: baseCookieOptions.domain }),
+      },
+    };
+
+    const response = {
+      statusCode: 200,
+      message: 'Login with Google successful',
       user: {
         id: user.uid,
         name: user.uname,
@@ -1600,6 +1786,8 @@ export class UsersService {
     if (!isCurrentPasswordValid) {
       throw new BadRequestException('Current password is incorrect');
     }
+
+    requireTotpIfEnabled(user, changePasswordDto.twoFactorCode);
 
     // Hash new password
     const hashedPassword = await bcrypt.hash(changePasswordDto.newPassword, 10);

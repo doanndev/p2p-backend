@@ -44,6 +44,15 @@ export class User {
   @Column({ name: 'uggauth', type: 'varchar', unique: true, nullable: true })
   uggauth: string | null;
 
+  /** Google OAuth subject (`sub` claim); not Google Authenticator secret */
+  @Column({
+    name: 'ugoogle_sub',
+    type: 'varchar',
+    unique: true,
+    nullable: true,
+  })
+  ugoogle_sub: string | null;
+
   @Column({ name: 'upassword', type: 'varchar' })
   upassword: string;
 

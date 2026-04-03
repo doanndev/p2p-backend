@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { GoogleAuthService } from './google-auth.service';
 import { StorageService } from './storage.service';
 import { User } from './entities/user.entity';
 import { UserCode } from './entities/user-code.entity';
@@ -22,6 +23,8 @@ import { SystemsModule } from '../systems/systems.module';
 import { BankUsersController } from './bank-users.controller';
 import { BankUsersService } from './bank-users.service';
 import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entity';
+import { UserSecurityController } from './user-security.controller';
+import { UserSecurityService } from './user-security.service';
 
 @Module({
   imports: [
@@ -53,9 +56,15 @@ import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entit
       inject: [ConfigService],
     }),
   ],
-  controllers: [UsersController, BankUsersController],
-  providers: [UsersService, StorageService, JwtStrategy, BankUsersService],
+  controllers: [UsersController, BankUsersController, UserSecurityController],
+  providers: [
+    UsersService,
+    GoogleAuthService,
+    StorageService,
+    JwtStrategy,
+    BankUsersService,
+    UserSecurityService,
+  ],
   exports: [UsersService],
 })
 export class UsersModule {}
-
