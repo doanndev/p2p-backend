@@ -21,6 +21,7 @@ import { TransactionHistoryDto } from './dto/transaction-history.dto';
 import { TransferRewardsHistoryDto } from './dto/transfer-rewards-history.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import {
+  ApiBadRequestResponse,
   ApiBody,
   ApiCreatedResponse,
   ApiCookieAuth,
@@ -314,17 +315,65 @@ export class WalletsController {
   @ApiOperation({
     summary: 'Chuyển số dư reward sang ví chính',
     description:
-      'Body JSON có thể rỗng `{}`. Nếu đã bật 2FA, gửi `{ "twoFactorCode": "123456" }`.',
+      'Gửi `Content-Type: application/json`. User **chưa bật 2FA**: body `{}` hoặc bỏ qua field. ' +
+      'User **đã bật 2FA**: bắt buộc `twoFactorCode` (6 chữ số từ Google Authenticator).',
   })
-  @ApiBody({ type: TransferRewardDto })
+  @ApiBody({
+    type: TransferRewardDto,
+    examples: {
+      khong2FA: {
+        summary: 'Không bật 2FA',
+        value: {},
+      },
+      co2FA: {
+        summary: 'Đã bật 2FA',
+        value: { twoFactorCode: '123456' },
+      },
+    },
+  })
   @ApiOkResponse({
-    description: 'Chuyển reward thành công',
+    description:
+      'Chuyển reward thành công. **data.new_balance_reward**: số reward vừa gộp (sau xử lý thường 0). **data.updated_coins**: danh sách coin_id đã cập nhật.',
     schema: {
       example: {
         statusCode: 200,
-        message: 'Transfer reward successfully',
-        data: { new_balance_reward: 0, updated_coins: 3 },
+        message: 'Reward transferred to main balance successfully',
+        data: {
+          new_balance_reward: 12.5,
+          updated_coins: [1, 2, 3],
+        },
       },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Thiếu/sai mã 2FA (khi đã bật), hoặc lỗi nghiệp vụ (reward ≤ 0, không có ví, …)',
+    schema: {
+      oneOf: [
+        {
+          example: {
+            statusCode: 400,
+            message:
+              'Two-factor authentication code is required for this action',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message: 'Invalid two-factor authentication code',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message:
+              'Cannot transfer reward: calculated balance is 0 (must be > 0)',
+            error: 'Bad Request',
+          },
+        },
+      ],
     },
   })
   @UseGuards(JwtAuthGuard)
@@ -336,10 +385,7 @@ export class WalletsController {
     }),
   )
   @HttpCode(HttpStatus.OK)
-  async transferReward(
-    @Body() body: TransferRewardDto,
-    @Request() req: any,
-  ) {
+  async transferReward(@Body() body: TransferRewardDto, @Request() req: any) {
     const user = req.user; // User from JWT token
     const result = await this.walletsService.transferReward(
       user.uid,
@@ -410,17 +456,77 @@ export class WalletsController {
   @ApiOperation({
     summary: 'Rút coin về ví ngoài',
     description:
-      'Nếu tài khoản đã bật 2FA (Google Authenticator), gửi kèm `twoFactorCode` (6 chữ số).',
+      '**twoFactorCode**: bắt buộc khi user đã bật 2FA (`GET /users/security/2fa/status` → enabled=true). ' +
+      'Địa chỉ và mạng phải khớp quy tắc từng chain (EVM / Solana).',
   })
-  @ApiBody({ type: WithdrawDto })
+  @ApiBody({
+    type: WithdrawDto,
+    examples: {
+      khong2FA: {
+        summary: 'Chưa bật 2FA',
+        value: {
+          networkId: 1,
+          coinId: 2,
+          address: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+          amount: 10.5,
+        },
+      },
+      co2FA: {
+        summary: 'Đã bật 2FA',
+        value: {
+          networkId: 1,
+          coinId: 2,
+          address: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+          amount: 10.5,
+          twoFactorCode: '123456',
+        },
+      },
+    },
+  })
   @ApiOkResponse({
-    description: 'Rút coin thành công',
+    description:
+      'Rút thành công. **transaction_hash**: hash on-chain. **history_id**: id bản ghi lịch sử ví.',
     schema: {
       example: {
         statusCode: 200,
         message: 'Withdraw successfully',
-        data: { transaction_hash: '0xabc123def456', history_id: 201 },
+        data: {
+          transaction_hash:
+            '5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW',
+          history_id: 201,
+        },
       },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Thiếu/sai mã 2FA (khi đã bật), KYC, số dư, địa chỉ, RPC/overload, …',
+    schema: {
+      oneOf: [
+        {
+          example: {
+            statusCode: 400,
+            message:
+              'Two-factor authentication code is required for this action',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message: 'Invalid two-factor authentication code',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message:
+              'The system is overloaded. Please try again later or try a different network.',
+            error: 'Bad Request',
+          },
+        },
+      ],
     },
   })
   @UseGuards(JwtAuthGuard)

@@ -69,7 +69,9 @@ export class GoogleAuthService {
 
       if (!res.ok) {
         const text = await res.text();
-        this.logger.error(`Google token exchange failed: ${res.status} ${text}`);
+        this.logger.error(
+          `Google token exchange failed: ${res.status} ${text}`,
+        );
         throw new BadRequestException('Failed to exchange code for token');
       }
 
@@ -112,7 +114,9 @@ export class GoogleAuthService {
       const verified =
         payload.email_verified === true || payload.email_verified === 'true';
       if (!verified) {
-        this.logger.warn(`Email not verified for Google user: ${payload.email}`);
+        this.logger.warn(
+          `Email not verified for Google user: ${payload.email}`,
+        );
         throw new BadRequestException('Email not verified');
       }
 

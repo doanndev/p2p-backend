@@ -8,12 +8,18 @@ import {
 } from 'class-validator';
 
 export class ChangePasswordDto {
-  @ApiProperty({ example: 'OldPassword@123', description: 'Mật khẩu hiện tại' })
+  @ApiProperty({
+    example: 'OldPassword@123',
+    description: 'Mật khẩu đang dùng (xác minh trước khi đổi)',
+  })
   @IsNotEmpty()
   @IsString()
   currentPassword: string;
 
-  @ApiProperty({ example: 'NewPassword@123', description: 'Mật khẩu mới' })
+  @ApiProperty({
+    example: 'NewPassword@123',
+    description: 'Mật khẩu mới (tối thiểu 6 ký tự)',
+  })
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
@@ -21,7 +27,8 @@ export class ChangePasswordDto {
 
   @ApiPropertyOptional({
     example: '123456',
-    description: 'Bắt buộc khi tài khoản đã bật 2FA (Google Authenticator).',
+    description:
+      'Mã TOTP 6 chữ số. **Bắt buộc** khi đã bật 2FA; bỏ qua khi chưa bật.',
   })
   @IsOptional()
   @IsString()

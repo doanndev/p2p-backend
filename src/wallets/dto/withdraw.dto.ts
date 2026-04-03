@@ -53,7 +53,8 @@ export class WithdrawDto {
   @ApiPropertyOptional({
     example: '123456',
     description:
-      'Bắt buộc khi tài khoản đã bật 2FA (Google Authenticator).',
+      'Mã TOTP 6 chữ số. **Bắt buộc** khi `GET /users/security/2fa/status` trả `data.enabled === true`. ' +
+      'Khi chưa bật 2FA, không gửi field này.',
   })
   @IsOptional()
   @IsString()

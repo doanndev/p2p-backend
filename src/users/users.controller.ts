@@ -32,6 +32,7 @@ import { SubmitKolArticleDto } from './dto/submit-kol-article.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { multerConfig } from './multer.config';
 import {
+  ApiBadRequestResponse,
   ApiBody,
   ApiCreatedResponse,
   ApiConsumes,
@@ -568,13 +569,65 @@ export class UsersController {
   @ApiOperation({
     summary: 'Đổi mật khẩu khi đã đăng nhập',
     description:
-      'Nếu đã bật 2FA, gửi kèm `twoFactorCode` (6 chữ số từ Google Authenticator).',
+      '**twoFactorCode** bắt buộc khi tài khoản đã bật 2FA (sau khi verify Google Authenticator). ' +
+      'Thứ tự kiểm tra: mật khẩu hiện tại → mã 2FA (nếu bật) → lưu mật khẩu mới.',
   })
-  @ApiBody({ type: ChangePasswordDto })
+  @ApiBody({
+    type: ChangePasswordDto,
+    examples: {
+      khong2FA: {
+        summary: 'Chưa bật 2FA',
+        value: {
+          currentPassword: 'OldPassword@123',
+          newPassword: 'NewPassword@456',
+        },
+      },
+      co2FA: {
+        summary: 'Đã bật 2FA',
+        value: {
+          currentPassword: 'OldPassword@123',
+          newPassword: 'NewPassword@456',
+          twoFactorCode: '123456',
+        },
+      },
+    },
+  })
   @ApiOkResponse({
     description: 'Đổi mật khẩu thành công',
     schema: {
-      example: { statusCode: 200, message: 'Change password successfully' },
+      example: {
+        statusCode: 200,
+        message: 'Password has been changed successfully',
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Mật khẩu hiện tại sai, mật khẩu mới quá ngắn, thiếu/sai mã 2FA (khi đã bật), hoặc lỗi validation body',
+    schema: {
+      oneOf: [
+        {
+          example: {
+            statusCode: 400,
+            message: 'Current password is incorrect',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message: 'Two-factor authentication code is required for this action',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message: 'Invalid two-factor authentication code',
+            error: 'Bad Request',
+          },
+        },
+      ],
     },
   })
   @UseGuards(JwtAuthGuard)

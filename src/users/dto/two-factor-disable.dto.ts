@@ -2,7 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class TwoFactorDisableDto {
-  @ApiProperty({ description: 'Mật khẩu hiện tại' })
+  @ApiProperty({
+    example: 'CurrentPassword@123',
+    description: 'Mật khẩu đăng nhập hiện tại (dùng để xác nhận chủ tài khoản)',
+  })
   @IsNotEmpty()
   @IsString()
   password: string;

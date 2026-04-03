@@ -5,7 +5,7 @@ export class TransferRewardDto {
   @ApiPropertyOptional({
     example: '123456',
     description:
-      'Bắt buộc khi tài khoản đã bật 2FA (Google Authenticator).',
+      'Mã TOTP 6 chữ số. **Bắt buộc** khi user đã bật 2FA; khi chưa bật có thể gửi body `{}`.',
   })
   @IsOptional()
   @IsString()
