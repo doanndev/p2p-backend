@@ -11,6 +11,7 @@ import { VerifyLog } from './verify-log.entity';
 
 export enum UserVerifyStatus {
   PENDING = 'pedding',
+  CHALLENGE_PENDING = 'challenge_pending',
   VERIFY = 'verify',
   CANCEL = 'cancel',
   RETRY = 'retry',
@@ -39,6 +40,19 @@ export class UserVerify {
     enum: UserVerifyStatus,
   })
   uv_status: UserVerifyStatus;
+
+  @Column({ name: 'uv_challenge_code', type: 'varchar', nullable: true })
+  uv_challenge_code: string | null;
+
+  @Column({
+    name: 'uv_challenge_expires_at',
+    type: 'timestamp',
+    nullable: true,
+  })
+  uv_challenge_expires_at: Date | null;
+
+  @Column({ name: 'uv_paper_image', type: 'varchar', nullable: true })
+  uv_paper_image: string | null;
 
   @ManyToOne(() => User, (user) => user.user_verifies)
   @JoinColumn({ name: 'uv_user_id' })

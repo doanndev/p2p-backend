@@ -29,7 +29,10 @@ export class AdminsKycController {
   constructor(private readonly adminsService: AdminsService) {}
 
   @Get('list')
-  @ApiOperation({ summary: 'Lấy danh sách KYC theo trạng thái' })
+  @ApiOperation({
+    summary:
+      'Lấy danh sách KYC theo trạng thái. Filter status=pending chỉ gồm hồ sơ đã có ảnh cầm giấy; challenge_pending = đang chờ user gửi ảnh cầm giấy.',
+  })
   @ApiOkResponse({
     description: 'Danh sách KYC',
     schema: {

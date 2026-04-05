@@ -61,7 +61,7 @@ export class ChatController {
       '- **Validate**:',
       '  - user thuộc transaction',
       '  - room `ACTIVE`',
-      '  - transaction status phải `pendding`',
+      '  - transaction status phải `pending`',
       '',
       '### 3) room_closed (server emit)',
       '- **WS → Room**: `room_closed`',
@@ -97,7 +97,7 @@ export class ChatController {
       '',
       '## TTL 30 phút',
       '- Chat room được tạo khi tạo transaction.',
-      '- Sau **30 phút** nếu transaction vẫn `pendding` → set `failed` và room `closed`.',
+      '- Sau **30 phút** nếu transaction vẫn `pending` → set `failed` và room `closed`.',
     ].join('\n'),
   })
   @ApiOkResponse({

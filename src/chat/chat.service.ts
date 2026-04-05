@@ -121,7 +121,7 @@ export class ChatService {
     if (room.room_status !== ChatRoomStatus.ACTIVE) {
       throw new BadRequestException('Chat room is closed');
     }
-    if (transaction.trans_status !== TransactionStatus.PENDDING) {
+    if (transaction.trans_status !== TransactionStatus.PENDING) {
       throw new BadRequestException('Transaction is not pending');
     }
 
@@ -173,7 +173,7 @@ export class ChatService {
       });
       if (!tx) continue;
 
-      if (tx.trans_status === TransactionStatus.PENDDING) {
+      if (tx.trans_status === TransactionStatus.PENDING) {
         tx.trans_status = TransactionStatus.FAILED;
         await this.transactionRepository.save(tx);
       }

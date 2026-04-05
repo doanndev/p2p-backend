@@ -11,6 +11,8 @@ import { User } from '../users/entities/user.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
+import { Notification } from '../users/entities/notification.entity';
+import { P2pCoinUnlockSchedulerService } from './p2p-coin-unlock.scheduler';
 
 @Module({
   imports: [
@@ -23,10 +25,15 @@ import { UserWallet } from '../wallets/entities/user-wallet.entity';
       Coin,
       BankUser,
       UserWallet,
+      Notification,
     ]),
   ],
   controllers: [OrderbookController],
-  providers: [OrderbookService, TransactionService],
+  providers: [
+    OrderbookService,
+    TransactionService,
+    P2pCoinUnlockSchedulerService,
+  ],
   exports: [OrderbookService, TransactionService],
 })
 export class OrderbookModule {}

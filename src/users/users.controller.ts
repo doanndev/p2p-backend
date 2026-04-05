@@ -393,8 +393,16 @@ export class UsersController {
   @Get('kyc-status')
   @ApiOperation({ summary: 'Lấy trạng thái KYC của người dùng' })
   @ApiOkResponse({
-    description: 'Trạng thái KYC hiện tại',
-    schema: { example: { statusCode: 200, status: 'pending' } },
+    description:
+      'Status: verify | retry | pending | not-verified | awaiting_paper | challenge_expired',
+    schema: {
+      example: {
+        statusCode: 200,
+        status: 'awaiting_paper',
+        challenge_code: '48291037',
+        challenge_expires_at: '2026-04-06T10:00:00.000Z',
+      },
+    },
   })
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -402,14 +410,25 @@ export class UsersController {
     const user = req.user; // User from JWT token
     const result = await this.usersService.getKycStatus(user.uid);
 
-    const response: any = {
+    const response: Record<string, unknown> = {
       statusCode: HttpStatus.OK,
       status: result.status,
     };
 
-    // Add notes if status is retry
     if (result.status === 'retry' && result.notes) {
       response.notes = result.notes;
+    }
+
+    if (result.status === 'awaiting_paper') {
+      if (result.challenge_code) {
+        response.challenge_code = result.challenge_code;
+      }
+      if (result.challenge_expires_at) {
+        response.challenge_expires_at =
+          result.challenge_expires_at instanceof Date
+            ? result.challenge_expires_at.toISOString()
+            : result.challenge_expires_at;
+      }
     }
 
     return response;
@@ -434,7 +453,10 @@ export class UsersController {
   }
 
   @Post('kyc')
-  @ApiOperation({ summary: 'Gửi hồ sơ KYC lần đầu (kèm 2 ảnh)' })
+  @ApiOperation({
+    summary:
+      'Bước 1 KYC: ảnh CCCD mặt trước & mặt sau (thứ tự file: [0]=trước, [1]=sau). Trả về mã để viết lên giấy và gửi ảnh cầm giấy ở POST /users/kyc-paper.',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -452,12 +474,19 @@ export class UsersController {
     },
   })
   @ApiCreatedResponse({
-    description: 'Gửi KYC thành công',
+    description:
+      'Đã lưu CCCD; cần gửi thêm ảnh cầm giấy (challenge_code, challenge_expires_at)',
     schema: {
       example: {
         statusCode: 201,
-        message: 'Submit KYC successfully',
-        data: { status: 'pending' },
+        message: 'CCCD đã nhận...',
+        challenge_code: '48291037',
+        challenge_expires_at: '2026-04-06T10:00:00.000Z',
+        verification: {
+          id: 1,
+          id_card_number: '079123456789',
+          status: 'challenge_pending',
+        },
       },
     },
   })
@@ -475,7 +504,10 @@ export class UsersController {
   }
 
   @Post('kyc-retry')
-  @ApiOperation({ summary: 'Gửi lại hồ sơ KYC sau khi bị yêu cầu retry' })
+  @ApiOperation({
+    summary:
+      'Gửi lại CCCD sau retry admin; thứ tự ảnh [0]=trước [1]=sau. Trả về mã mới cho bước kyc-paper.',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -493,12 +525,13 @@ export class UsersController {
     },
   })
   @ApiOkResponse({
-    description: 'Gửi lại KYC thành công',
+    description: 'CCCD cập nhật; cần gửi ảnh cầm giấy',
     schema: {
       example: {
         statusCode: 200,
-        message: 'Retry KYC successfully',
-        data: { status: 'pending' },
+        challenge_code: '48291037',
+        challenge_expires_at: '2026-04-06T10:00:00.000Z',
+        verification: { id: 1, status: 'challenge_pending' },
       },
     },
   })
@@ -512,6 +545,66 @@ export class UsersController {
   ) {
     const user = req.user; // User from JWT token
     const result = await this.usersService.retryKyc(user.uid, kycDto, files);
+    return result.response;
+  }
+
+  @Post('kyc-paper')
+  @ApiOperation({
+    summary:
+      'Bước 2 KYC: một ảnh cầm giấy ghi đúng mã challenge (multipart field: image)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        image: { type: 'string', format: 'binary' },
+      },
+      required: ['image'],
+    },
+  })
+  @ApiOkResponse({
+    description: 'Đã nhận ảnh minh chứng; chờ admin duyệt',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Paper proof received...',
+        verification: { id: 1, status: 'pedding', paper_image: 'https://...' },
+      },
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FilesInterceptor('image', 1, multerConfig))
+  @HttpCode(HttpStatus.OK)
+  async submitKycPaper(
+    @Request() req: any,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    const user = req.user;
+    const result = await this.usersService.submitKycPaper(user.uid, files);
+    return result.response;
+  }
+
+  @Post('kyc-renew-challenge')
+  @ApiOperation({
+    summary:
+      'Cấp lại mã cầm giấy khi mã cũ đã hết hạn (chỉ khi đang challenge_pending và đã expire)',
+  })
+  @ApiOkResponse({
+    description: 'Mã mới',
+    schema: {
+      example: {
+        statusCode: 200,
+        challenge_code: '12345678',
+        challenge_expires_at: '2026-04-06T10:00:00.000Z',
+      },
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async renewKycChallenge(@Request() req: any) {
+    const user = req.user;
+    const result = await this.usersService.renewKycChallenge(user.uid);
     return result.response;
   }
 
@@ -616,7 +709,8 @@ export class UsersController {
         {
           example: {
             statusCode: 400,
-            message: 'Two-factor authentication code is required for this action',
+            message:
+              'Two-factor authentication code is required for this action',
             error: 'Bad Request',
           },
         },

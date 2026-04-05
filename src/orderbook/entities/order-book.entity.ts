@@ -12,6 +12,7 @@ import { Coin } from '../../settings/entities/coin.entity';
 import { NationalCurrency } from './national-currency.entity';
 import { SettingBankOrder } from './setting-bank-order.entity';
 import { Transaction } from './transaction.entity';
+import { OrderBookTradeMode } from './order-book-trade-mode';
 
 export enum OrderBookOption {
   BUY = 'buy',
@@ -75,6 +76,14 @@ export class OrderBook {
     enum: OrderBookStatus,
   })
   ob_status: OrderBookStatus;
+
+  @Column({
+    name: 'ob_trade_mode',
+    type: 'enum',
+    enum: OrderBookTradeMode,
+    default: OrderBookTradeMode.SAFE,
+  })
+  ob_trade_mode: OrderBookTradeMode;
 
   @CreateDateColumn({ name: 'ob_created_at', type: 'timestamptz' })
   ob_created_at: Date;

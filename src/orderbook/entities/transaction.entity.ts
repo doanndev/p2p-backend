@@ -10,6 +10,7 @@ import { User } from '../../users/entities/user.entity';
 import { Coin } from '../../settings/entities/coin.entity';
 import { NationalCurrency } from './national-currency.entity';
 import { OrderBook } from './order-book.entity';
+import { OrderBookTradeMode } from './order-book-trade-mode';
 
 export enum TransactionOption {
   BUY = 'buy',
@@ -23,7 +24,7 @@ export enum TransactionType {
 }
 
 export enum TransactionStatus {
-  PENDDING = 'pendding',
+  PENDING = 'pending',
   EXECUTED = 'executed',
   FAILED = 'failed',
   PAYMENT_CONFIRMED = 'payment_confirmed',
@@ -103,6 +104,24 @@ export class Transaction {
 
   @Column({ name: 'trans_message', type: 'varchar', nullable: true })
   trans_message: string | null;
+
+  @Column({
+    name: 'trans_trade_mode',
+    type: 'enum',
+    enum: OrderBookTradeMode,
+    nullable: true,
+  })
+  trans_trade_mode: OrderBookTradeMode | null;
+
+  @Column({ name: 'trans_coin_unlock_at', type: 'timestamptz', nullable: true })
+  trans_coin_unlock_at: Date | null;
+
+  @Column({
+    name: 'trans_lock_released_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  trans_lock_released_at: Date | null;
 
   @CreateDateColumn({ name: 'trans_created_at', type: 'timestamptz' })
   trans_created_at: Date;

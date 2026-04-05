@@ -11,6 +11,7 @@ import {
   OrderBookOption,
   OrderBookStatus,
 } from '../entities/order-book.entity';
+import { OrderBookTradeMode } from '../entities/order-book-trade-mode';
 import {
   TransactionOption,
   TransactionStatus,
@@ -96,6 +97,14 @@ export class QueryOrderbooksDto {
   @IsNumber()
   @Min(1)
   nationalCurrencyId?: number;
+
+  @ApiPropertyOptional({
+    enum: OrderBookTradeMode,
+    description: 'Lọc theo chế độ giao dịch (fast / safe)',
+  })
+  @IsOptional()
+  @IsEnum(OrderBookTradeMode)
+  tradeMode?: OrderBookTradeMode;
 }
 
 export class QueryMyOrderbooksDto extends QueryOrderbooksDto {

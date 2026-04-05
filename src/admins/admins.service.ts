@@ -2149,6 +2149,9 @@ export class AdminsService implements OnModuleInit {
       uv_id_card_number: string;
       uv_front_image: string;
       uv_backside_image: string | null;
+      uv_paper_image: string | null;
+      uv_challenge_code: string | null;
+      uv_challenge_expires_at: Date | null;
       uv_status: UserVerifyStatus;
       user: {
         uid: number;
@@ -2170,6 +2173,9 @@ export class AdminsService implements OnModuleInit {
         'uv.uv_id_card_number',
         'uv.uv_front_image',
         'uv.uv_backside_image',
+        'uv.uv_paper_image',
+        'uv.uv_challenge_code',
+        'uv.uv_challenge_expires_at',
         'uv.uv_status',
         'user.uid',
         'user.uname',
@@ -2182,15 +2188,14 @@ export class AdminsService implements OnModuleInit {
 
     // Filter by status if provided
     if (status) {
-      // Validate status
       const validStatuses = [
         UserVerifyStatus.PENDING,
+        UserVerifyStatus.CHALLENGE_PENDING,
         UserVerifyStatus.VERIFY,
         UserVerifyStatus.CANCEL,
         UserVerifyStatus.RETRY,
       ];
 
-      // Check if status matches enum (case-insensitive)
       const normalizedStatus = status.toLowerCase();
       let matchedStatus: UserVerifyStatus | null = null;
 
@@ -2203,19 +2208,23 @@ export class AdminsService implements OnModuleInit {
 
       if (matchedStatus) {
         queryBuilder.where('uv.uv_status = :status', { status: matchedStatus });
+        if (matchedStatus === UserVerifyStatus.PENDING) {
+          queryBuilder.andWhere('uv.uv_paper_image IS NOT NULL');
+        }
       }
-      // If status doesn't match, ignore filter and return all
     }
 
     const kycList = await queryBuilder.getMany();
 
-    // Format response
     const formattedData = kycList.map((kyc) => ({
       uv_id: kyc.uv_id,
       uv_user_id: kyc.uv_user_id,
       uv_id_card_number: kyc.uv_id_card_number,
       uv_front_image: kyc.uv_front_image,
       uv_backside_image: kyc.uv_backside_image,
+      uv_paper_image: kyc.uv_paper_image,
+      uv_challenge_code: kyc.uv_challenge_code,
+      uv_challenge_expires_at: kyc.uv_challenge_expires_at,
       uv_status: kyc.uv_status,
       user: {
         uid: kyc.user.uid,
@@ -2243,6 +2252,9 @@ export class AdminsService implements OnModuleInit {
       uv_id_card_number: string;
       uv_front_image: string;
       uv_backside_image: string | null;
+      uv_paper_image: string | null;
+      uv_challenge_code: string | null;
+      uv_challenge_expires_at: Date | null;
       uv_status: UserVerifyStatus;
       created_at?: Date;
     }>;
@@ -2260,8 +2272,6 @@ export class AdminsService implements OnModuleInit {
       throw new NotFoundException('User not found');
     }
 
-    // Get all KYC verifications for this user
-    // Order by: priority (pending/retry first), then by uv_id DESC (newest first)
     const kycHistory = await this.userVerifyRepository
       .createQueryBuilder('uv')
       .where('uv.uv_user_id = :userId', { userId })
@@ -2271,26 +2281,32 @@ export class AdminsService implements OnModuleInit {
         'uv.uv_id_card_number',
         'uv.uv_front_image',
         'uv.uv_backside_image',
+        'uv.uv_paper_image',
+        'uv.uv_challenge_code',
+        'uv.uv_challenge_expires_at',
         'uv.uv_status',
       ])
       .orderBy(
         `CASE 
           WHEN uv.uv_status = '${UserVerifyStatus.PENDING}' THEN 1
-          WHEN uv.uv_status = '${UserVerifyStatus.RETRY}' THEN 2
-          ELSE 3
+          WHEN uv.uv_status = '${UserVerifyStatus.CHALLENGE_PENDING}' THEN 2
+          WHEN uv.uv_status = '${UserVerifyStatus.RETRY}' THEN 3
+          ELSE 4
         END`,
         'ASC',
       )
       .addOrderBy('uv.uv_id', 'DESC')
       .getMany();
 
-    // Format response
     const formattedData = kycHistory.map((kyc) => ({
       uv_id: kyc.uv_id,
       uv_user_id: kyc.uv_user_id,
       uv_id_card_number: kyc.uv_id_card_number,
       uv_front_image: kyc.uv_front_image,
       uv_backside_image: kyc.uv_backside_image,
+      uv_paper_image: kyc.uv_paper_image,
+      uv_challenge_code: kyc.uv_challenge_code,
+      uv_challenge_expires_at: kyc.uv_challenge_expires_at,
       uv_status: kyc.uv_status,
     }));
 
@@ -2304,8 +2320,16 @@ export class AdminsService implements OnModuleInit {
   async checkUserKycStatus(userId: number): Promise<{
     statusCode: number;
     message: string;
-    status: 'verify' | 'retry' | 'pending' | 'not-verified';
+    status:
+      | 'verify'
+      | 'retry'
+      | 'pending'
+      | 'not-verified'
+      | 'awaiting_paper'
+      | 'challenge_expired';
     notes?: Array<{ id: number; message: string | null }>;
+    challenge_code?: string;
+    challenge_expires_at?: string;
   }> {
     if (!userId || Number.isNaN(userId)) {
       throw new BadRequestException('Invalid user id');
@@ -2387,7 +2411,33 @@ export class AdminsService implements OnModuleInit {
       };
     }
 
-    // 3. If no verify and retry, check if at least one record has uv_status = "pending" → status = "pending"
+    const challengeRecords = verifications.filter(
+      (v) => v.uv_status === UserVerifyStatus.CHALLENGE_PENDING,
+    );
+    if (challengeRecords.length > 0) {
+      const challenge = challengeRecords.sort((a, b) => b.uv_id - a.uv_id)[0];
+      const now = new Date();
+      if (
+        challenge.uv_challenge_expires_at &&
+        now > challenge.uv_challenge_expires_at
+      ) {
+        return {
+          statusCode: 200,
+          message: 'KYC status retrieved successfully',
+          status: 'challenge_expired',
+        };
+      }
+      return {
+        statusCode: 200,
+        message: 'KYC status retrieved successfully',
+        status: 'awaiting_paper',
+        challenge_code: challenge.uv_challenge_code ?? undefined,
+        challenge_expires_at: challenge.uv_challenge_expires_at
+          ? challenge.uv_challenge_expires_at.toISOString()
+          : undefined,
+      };
+    }
+
     const hasPending = verifications.some(
       (v) => v.uv_status === UserVerifyStatus.PENDING,
     );
@@ -2400,7 +2450,6 @@ export class AdminsService implements OnModuleInit {
       };
     }
 
-    // 4. If no verify, retry and pending → status = "not-verified"
     return {
       statusCode: 200,
       message: 'KYC status retrieved successfully',
@@ -2436,14 +2485,21 @@ export class AdminsService implements OnModuleInit {
     if (user.uverify === true) {
       statusCheck = 'verify';
     } else {
-      // Get all KYC verifications for this user
       const verifications = await this.userVerifyRepository.find({
         where: {
           uv_user_id: userId,
         },
       });
 
-      // Check in priority order
+      const hasChallengePending = verifications.some(
+        (v) => v.uv_status === UserVerifyStatus.CHALLENGE_PENDING,
+      );
+      if (hasChallengePending) {
+        throw new BadRequestException(
+          'Cannot update KYC: user has not submitted the paper-holding photo yet (status: challenge_pending).',
+        );
+      }
+
       const hasVerify = verifications.some(
         (v) => v.uv_status === UserVerifyStatus.VERIFY,
       );
@@ -2465,16 +2521,13 @@ export class AdminsService implements OnModuleInit {
       }
     }
 
-    // If status_check = verify or not-verified, return error
     if (statusCheck === 'verify' || statusCheck === 'not-verified') {
       throw new BadRequestException(
         'Cannot update KYC status. User KYC status is already verified or not-verified.',
       );
     }
 
-    // If status_check = retry or pending, only accept status = verify or retry
     if (statusCheck === 'retry' || statusCheck === 'pending') {
-      // Validate status
       if (
         updateKycStatusDto.status !== 'verify' &&
         updateKycStatusDto.status !== 'retry'
@@ -2484,17 +2537,21 @@ export class AdminsService implements OnModuleInit {
         );
       }
 
-      // Find all verification records with status = pending or retry
-      const verificationsToUpdate = await this.userVerifyRepository.find({
-        where: [
-          { uv_user_id: userId, uv_status: UserVerifyStatus.PENDING },
-          { uv_user_id: userId, uv_status: UserVerifyStatus.RETRY },
-        ],
-      });
+      const verificationsToUpdate = await this.userVerifyRepository
+        .createQueryBuilder('uv')
+        .where('uv.uv_user_id = :userId', { userId })
+        .andWhere(
+          '(uv.uv_status = :retry OR (uv.uv_status = :pending AND uv.uv_paper_image IS NOT NULL))',
+          {
+            retry: UserVerifyStatus.RETRY,
+            pending: UserVerifyStatus.PENDING,
+          },
+        )
+        .getMany();
 
       if (verificationsToUpdate.length === 0) {
         throw new BadRequestException(
-          'No verification records found with pending or retry status',
+          'No verification records ready for review (pending with paper proof, or retry).',
         );
       }
 

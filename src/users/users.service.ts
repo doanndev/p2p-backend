@@ -25,7 +25,7 @@ import { KolRegister, KolRegisterStatus } from './entities/kol-register.entity';
 import { KolArticle, KolArticleStatus } from './entities/kol-article.entity';
 import { Notification } from './entities/notification.entity';
 import { UserLog, UserLogType, UserLogLevel } from './entities/user-log.entity';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
@@ -975,9 +975,27 @@ export class UsersService {
     };
   }
 
+  private generateKycChallengeCode(): string {
+    return String(randomInt(100_000, 100_000_000));
+  }
+
+  private getKycChallengeExpiresAt(): Date {
+    const raw = this.configService.get<string>('KYC_CHALLENGE_TTL_MINUTES');
+    const minutes = Math.max(1, parseInt(raw ?? '1440', 10) || 1440);
+    return new Date(Date.now() + minutes * 60 * 1000);
+  }
+
   async getKycStatus(userId: number): Promise<{
-    status: 'verify' | 'retry' | 'pending' | 'not-verified';
+    status:
+      | 'verify'
+      | 'retry'
+      | 'pending'
+      | 'not-verified'
+      | 'awaiting_paper'
+      | 'challenge_expired';
     notes?: Array<{ id: number; message: string | null }>;
+    challenge_code?: string;
+    challenge_expires_at?: Date;
   }> {
     // First, check uverify field of the user
     const user = await this.userRepository.findOne({
@@ -1042,7 +1060,27 @@ export class UsersService {
       return { status: 'retry', notes };
     }
 
-    // 3. If no verify and retry, check if at least one record has uv_status = "pending" → status = "pending"
+    // 3. Awaiting paper proof (challenge step)
+    const challengeRecords = verifications.filter(
+      (v) => v.uv_status === UserVerifyStatus.CHALLENGE_PENDING,
+    );
+    if (challengeRecords.length > 0) {
+      const challenge = challengeRecords.sort((a, b) => b.uv_id - a.uv_id)[0];
+      const now = new Date();
+      if (
+        challenge.uv_challenge_expires_at &&
+        now > challenge.uv_challenge_expires_at
+      ) {
+        return { status: 'challenge_expired' };
+      }
+      return {
+        status: 'awaiting_paper',
+        challenge_code: challenge.uv_challenge_code ?? undefined,
+        challenge_expires_at: challenge.uv_challenge_expires_at ?? undefined,
+      };
+    }
+
+    // 4. If no verify and retry, check if at least one record has uv_status = "pending" → status = "pending"
     const hasPending = verifications.some(
       (v) => v.uv_status === UserVerifyStatus.PENDING,
     );
@@ -1051,7 +1089,7 @@ export class UsersService {
       return { status: 'pending' };
     }
 
-    // 4. If no verify, retry and pending → status = "not-verified"
+    // 5. If no verify, retry and pending → status = "not-verified"
     return { status: 'not-verified' };
   }
 
@@ -1238,6 +1276,8 @@ export class UsersService {
     response: {
       statusCode: number;
       message: string;
+      challenge_code: string;
+      challenge_expires_at: string;
       verification: {
         id: number;
         id_card_number: string;
@@ -1331,7 +1371,10 @@ export class UsersService {
       );
     }
 
-    // Create user verify record
+    const challengeCode = this.generateKycChallengeCode();
+    const challengeExpiresAt = this.getKycChallengeExpiresAt();
+
+    // Create user verify record (step 1: documents only; user must upload paper photo next)
     let savedVerify: UserVerify;
     try {
       const userVerify = this.userVerifyRepository.create({
@@ -1339,7 +1382,10 @@ export class UsersService {
         uv_id_card_number: kycDto.idCardNumber.trim(),
         uv_front_image: frontImageUrl,
         uv_backside_image: backsideImageUrl,
-        uv_status: UserVerifyStatus.PENDING,
+        uv_status: UserVerifyStatus.CHALLENGE_PENDING,
+        uv_challenge_code: challengeCode,
+        uv_challenge_expires_at: challengeExpiresAt,
+        uv_paper_image: null,
       });
 
       savedVerify = await this.userVerifyRepository.save(userVerify);
@@ -1359,10 +1405,12 @@ export class UsersService {
       );
     }
 
-    // Prepare response (remove 'uv' prefix from field names)
     const response = {
       statusCode: 201,
-      message: 'KYC verification submitted successfully',
+      message:
+        'CCCD đã nhận. Viết mã dưới đây lên giấy, cầm giấy chụp ảnh và gửi qua POST /users/kyc-paper.',
+      challenge_code: savedVerify.uv_challenge_code!,
+      challenge_expires_at: savedVerify.uv_challenge_expires_at!.toISOString(),
       verification: {
         id: savedVerify.uv_id,
         id_card_number: savedVerify.uv_id_card_number,
@@ -1387,6 +1435,8 @@ export class UsersService {
     response: {
       statusCode: number;
       message: string;
+      challenge_code: string;
+      challenge_expires_at: string;
       verification: {
         id: number;
         id_card_number: string;
@@ -1487,15 +1537,18 @@ export class UsersService {
       );
     }
 
-    // Update user verify record
-    // Note: Even if id_card_number is the same as existing value, we still update it
-    // This allows users to retry verification with new images while keeping the same ID card number
+    const challengeCode = this.generateKycChallengeCode();
+    const challengeExpiresAt = this.getKycChallengeExpiresAt();
+
     let savedVerify: UserVerify;
     try {
       existingVerify.uv_id_card_number = kycDto.idCardNumber.trim();
       existingVerify.uv_front_image = frontImageUrl;
       existingVerify.uv_backside_image = backsideImageUrl;
-      existingVerify.uv_status = UserVerifyStatus.PENDING;
+      existingVerify.uv_status = UserVerifyStatus.CHALLENGE_PENDING;
+      existingVerify.uv_challenge_code = challengeCode;
+      existingVerify.uv_challenge_expires_at = challengeExpiresAt;
+      existingVerify.uv_paper_image = null;
 
       savedVerify = await this.userVerifyRepository.save(existingVerify);
     } catch (error) {
@@ -1514,10 +1567,12 @@ export class UsersService {
       );
     }
 
-    // Prepare response (remove 'uv' prefix from field names)
     const response = {
       statusCode: 200,
-      message: 'KYC verification retry submitted successfully',
+      message:
+        'ID card has been updated. Please write the code below on a piece of paper, hold it up, take a photo, and submit.',
+      challenge_code: savedVerify.uv_challenge_code!,
+      challenge_expires_at: savedVerify.uv_challenge_expires_at!.toISOString(),
       verification: {
         id: savedVerify.uv_id,
         id_card_number: savedVerify.uv_id_card_number,
@@ -1530,6 +1585,154 @@ export class UsersService {
     return {
       verification: savedVerify,
       response,
+    };
+  }
+
+  async submitKycPaper(
+    userId: number,
+    files: Express.Multer.File[],
+  ): Promise<{
+    verification: UserVerify;
+    response: {
+      statusCode: number;
+      message: string;
+      verification: {
+        id: number;
+        id_card_number: string;
+        front_image: string;
+        backside_image: string | null;
+        paper_image: string | null;
+        status: UserVerifyStatus;
+      };
+    };
+  }> {
+    if (!files || files.length !== 1) {
+      throw new BadRequestException(
+        'Please upload one image holding the paper with the challenge code',
+      );
+    }
+
+    const paperFile = files[0];
+    if (!paperFile.mimetype.startsWith('image/')) {
+      throw new BadRequestException('File must be an image');
+    }
+
+    const existingVerify = await this.userVerifyRepository.findOne({
+      where: {
+        uv_user_id: userId,
+        uv_status: UserVerifyStatus.CHALLENGE_PENDING,
+      },
+    });
+
+    if (!existingVerify) {
+      throw new BadRequestException(
+        'No active KYC challenge. Submit CCCD images first (POST /users/kyc or /users/kyc-retry).',
+      );
+    }
+
+    const now = new Date();
+    if (
+      !existingVerify.uv_challenge_expires_at ||
+      now > existingVerify.uv_challenge_expires_at
+    ) {
+      throw new BadRequestException(
+        'Challenge code has expired. Call POST /users/kyc-renew-challenge to get a new code or contact support.',
+      );
+    }
+
+    const paperPublicId = this.cloudinaryService.generatePublicId(
+      `kyc_paper_${userId}`,
+    );
+    let paperResult: { url: string; public_id: string };
+    try {
+      paperResult = await this.cloudinaryService.uploadImage(
+        paperFile,
+        'kyc',
+        paperPublicId,
+      );
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `Failed to upload paper proof image: ${error.message || 'Unknown error'}`,
+      );
+    }
+
+    try {
+      existingVerify.uv_paper_image = paperResult.url;
+      existingVerify.uv_status = UserVerifyStatus.PENDING;
+      const savedVerify = await this.userVerifyRepository.save(existingVerify);
+
+      const response = {
+        statusCode: 200,
+        message: 'Paper proof received. Your KYC is pending admin review.',
+        verification: {
+          id: savedVerify.uv_id,
+          id_card_number: savedVerify.uv_id_card_number,
+          front_image: savedVerify.uv_front_image,
+          backside_image: savedVerify.uv_backside_image,
+          paper_image: savedVerify.uv_paper_image,
+          status: savedVerify.uv_status,
+        },
+      };
+
+      return { verification: savedVerify, response };
+    } catch (error) {
+      try {
+        await this.cloudinaryService.deleteImage(paperResult.public_id);
+      } catch (deleteError) {
+        this.logger.error(
+          'Failed to delete paper image after DB error',
+          deleteError,
+        );
+      }
+      throw new InternalServerErrorException(
+        `Failed to save KYC paper proof: ${error.message || 'Unknown error'}`,
+      );
+    }
+  }
+
+  async renewKycChallenge(userId: number): Promise<{
+    response: {
+      statusCode: number;
+      message: string;
+      challenge_code: string;
+      challenge_expires_at: string;
+    };
+  }> {
+    const existingVerify = await this.userVerifyRepository.findOne({
+      where: {
+        uv_user_id: userId,
+        uv_status: UserVerifyStatus.CHALLENGE_PENDING,
+      },
+    });
+
+    if (!existingVerify) {
+      throw new BadRequestException(
+        'No KYC challenge in progress. Submit CCCD images first.',
+      );
+    }
+
+    const now = new Date();
+    if (
+      existingVerify.uv_challenge_expires_at &&
+      now <= existingVerify.uv_challenge_expires_at
+    ) {
+      throw new BadRequestException(
+        'Challenge is still valid. Use the existing code or wait until it expires.',
+      );
+    }
+
+    existingVerify.uv_challenge_code = this.generateKycChallengeCode();
+    existingVerify.uv_challenge_expires_at = this.getKycChallengeExpiresAt();
+    await this.userVerifyRepository.save(existingVerify);
+
+    return {
+      response: {
+        statusCode: 200,
+        message: 'New challenge code issued.',
+        challenge_code: existingVerify.uv_challenge_code,
+        challenge_expires_at:
+          existingVerify.uv_challenge_expires_at!.toISOString(),
+      },
     };
   }
 

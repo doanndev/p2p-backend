@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { OrderBook, OrderBookStatus } from './entities/order-book.entity';
+import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
@@ -120,6 +121,7 @@ export class OrderbookService {
             ? null
             : this.formatAmount(dto.nationalMax),
         ob_status: OrderBookStatus.PENDING,
+        ob_trade_mode: dto.tradeMode ?? OrderBookTradeMode.SAFE,
       });
 
       const saved = await manager.save(OrderBook, orderBook);
@@ -139,6 +141,7 @@ export class OrderbookService {
         national_min: saved.ob_national_min,
         national_max: saved.ob_national_max,
         status: saved.ob_status,
+        trade_mode: saved.ob_trade_mode,
       };
     });
   }
@@ -170,6 +173,9 @@ export class OrderbookService {
     }
     if (query.nationalCurrencyId !== undefined) {
       qb.andWhere('ob.ob_national = :nat', { nat: query.nationalCurrencyId });
+    }
+    if (query.tradeMode !== undefined) {
+      qb.andWhere('ob.ob_trade_mode = :tm', { tm: query.tradeMode });
     }
     if (query.amountMin !== undefined) {
       qb.andWhere('ob.ob_amount >= :amin', {
@@ -257,6 +263,7 @@ export class OrderbookService {
       national_min: book.ob_national_min,
       national_max: book.ob_national_max,
       status: book.ob_status,
+      trade_mode: book.ob_trade_mode,
       created_at: book.ob_created_at,
     }));
   }
@@ -289,6 +296,9 @@ export class OrderbookService {
     }
     if (query.nationalCurrencyId !== undefined) {
       qb.andWhere('ob.ob_national = :nat', { nat: query.nationalCurrencyId });
+    }
+    if (query.tradeMode !== undefined) {
+      qb.andWhere('ob.ob_trade_mode = :tm', { tm: query.tradeMode });
     }
     if (query.amountMin !== undefined) {
       qb.andWhere('ob.ob_amount >= :amin', {
@@ -335,6 +345,7 @@ export class OrderbookService {
       national_min: book.ob_national_min,
       national_max: book.ob_national_max,
       status: book.ob_status,
+      trade_mode: book.ob_trade_mode,
       created_at: book.ob_created_at,
     }));
   }
@@ -382,6 +393,7 @@ export class OrderbookService {
       national_min: orderBook.ob_national_min,
       national_max: orderBook.ob_national_max,
       status: orderBook.ob_status,
+      trade_mode: orderBook.ob_trade_mode,
       bank_infor: bankInfor,
     };
   }
@@ -483,6 +495,7 @@ export class OrderbookService {
       national_min: saved.ob_national_min,
       national_max: saved.ob_national_max,
       status: saved.ob_status,
+      trade_mode: saved.ob_trade_mode,
     };
   }
 

@@ -56,6 +56,7 @@ const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   national_min: '500000.00000000',
   national_max: '2000000.00000000',
   status: 'pending',
+  trade_mode: 'safe',
 };
 
 const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
@@ -86,6 +87,7 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
   national_min: '500000.00000000',
   national_max: '2000000.00000000',
   status: 'pending',
+  trade_mode: 'safe',
   created_at: '2026-03-26T01:23:45.000Z',
 };
 
@@ -130,8 +132,11 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   total_usd: '500000.00000000',
   dispute_status: false,
   time_bank: '2026-03-25T08:30:00.000Z',
-  status: 'pendding',
+  status: 'pending',
   message: null,
+  trade_mode: 'safe',
+  coin_unlock_at: null,
+  lock_released_at: null,
 };
 
 @ApiTags('Orderbook')
@@ -167,7 +172,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách order book',
     description:
-      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, khoảng amount / amount_remaining, sort theo amount.',
+      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, tradeMode (fast|safe), khoảng amount / amount_remaining, sort theo amount.',
   })
   @ApiOkResponse({
     description: 'Danh sách order book đang pending',
@@ -190,7 +195,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách order book của user hiện tại',
     description:
-      'Trả về các orderbook do user hiện tại tạo. Hỗ trợ lọc theo status, ngày tạo, option, coin, national currency, khoảng amount / amount_remaining, sort theo amount.',
+      'Trả về các orderbook do user hiện tại tạo. Hỗ trợ lọc theo status, ngày tạo, option, coin, national currency, tradeMode, khoảng amount / amount_remaining, sort theo amount.',
   })
   @ApiOkResponse({
     description: 'Danh sách order book của tôi',

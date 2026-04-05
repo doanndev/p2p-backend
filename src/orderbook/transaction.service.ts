@@ -17,6 +17,7 @@ import {
   TransactionStatus,
   TransactionType,
 } from './entities/transaction.entity';
+import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { User } from '../users/entities/user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
@@ -45,6 +46,27 @@ export class TransactionService {
 
   private generateReferenceCode(): string {
     return `TX-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  }
+
+  /** Hours of buyer lock after trade completes (confirmReceived). */
+  static getP2pLockHours(
+    tradeMode: OrderBookTradeMode | null,
+    buyerLevel: number,
+  ): number {
+    const mode = tradeMode ?? OrderBookTradeMode.SAFE;
+    if (mode === OrderBookTradeMode.SAFE) {
+      return 24;
+    }
+    switch (buyerLevel) {
+      case 1:
+        return 24;
+      case 2:
+        return 12;
+      case 3:
+        return 4;
+      default:
+        return 24;
+    }
   }
 
   private toPublicUser(user: User | null | undefined) {
@@ -80,6 +102,13 @@ export class TransactionService {
       status: t.trans_status,
       message: t.trans_message,
       created_at: t.trans_created_at,
+      trade_mode: t.trans_trade_mode,
+      coin_unlock_at: t.trans_coin_unlock_at
+        ? t.trans_coin_unlock_at.toISOString()
+        : null,
+      lock_released_at: t.trans_lock_released_at
+        ? t.trans_lock_released_at.toISOString()
+        : null,
     };
   }
 
@@ -184,8 +213,11 @@ export class TransactionService {
         trans_total_usd: this.formatAmount(total),
         trans_dispute_status: false,
         trans_time_bank: null,
-        trans_status: TransactionStatus.PENDDING,
+        trans_status: TransactionStatus.PENDING,
         trans_message: null,
+        trans_trade_mode: orderBook.ob_trade_mode,
+        trans_coin_unlock_at: null,
+        trans_lock_released_at: null,
       });
 
       const saved = await manager.save(Transaction, transaction);
@@ -217,10 +249,9 @@ export class TransactionService {
   async getTransactions(userId: number, query: QueryTransactionsDto) {
     const qb = this.transactionRepository
       .createQueryBuilder('t')
-      .where(
-        '(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)',
-        { uid: userId },
-      );
+      .where('(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)', {
+        uid: userId,
+      });
 
     qb.leftJoin('t.user_buy', 'ub').addSelect([
       'ub.uid',
@@ -314,7 +345,7 @@ export class TransactionService {
         'You are not a participant in this transaction',
       );
     }
-    if (transaction.trans_status !== TransactionStatus.PENDDING) {
+    if (transaction.trans_status !== TransactionStatus.PENDING) {
       throw new BadRequestException(
         'Only pending transaction can be confirmed',
       );
@@ -381,6 +412,21 @@ export class TransactionService {
       await manager.save(UserWallet, sellerWallet);
       await manager.save(UserWallet, buyerWallet);
 
+      const buyerUser = await manager.findOne(User, {
+        where: { uid: transaction.trans_user_buy },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!buyerUser) {
+        throw new NotFoundException('Buyer user not found');
+      }
+
+      const lockHours = TransactionService.getP2pLockHours(
+        transaction.trans_trade_mode,
+        buyerUser.ulevel,
+      );
+      transaction.trans_coin_unlock_at = new Date(
+        Date.now() + lockHours * 60 * 60 * 1000,
+      );
       transaction.trans_status = TransactionStatus.EXECUTED;
       const saved = await manager.save(Transaction, transaction);
 
@@ -416,7 +462,7 @@ export class TransactionService {
           'You are not a participant in this transaction',
         );
       }
-      if (transaction.trans_status !== TransactionStatus.PENDDING) {
+      if (transaction.trans_status !== TransactionStatus.PENDING) {
         throw new BadRequestException(
           'Only pending transaction can be cancelled',
         );
