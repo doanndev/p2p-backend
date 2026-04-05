@@ -45,17 +45,18 @@ export class WalletsFileStorageService {
   }
 
   /**
-   * Lấy đường dẫn file cho một địa chỉ ví và network
+   * Lấy đường dẫn file cho một địa chỉ ví và network (tùy chọn tách theo coin_id).
    */
   private getFilePath(
     address: string,
     network: string,
     compressed = false,
+    coinId?: number,
   ): string {
-    // Tạo tên file từ address và network (sanitize để tránh ký tự đặc biệt)
     const sanitizedAddress = address.replace(/[^a-zA-Z0-9]/g, '_');
     const extension = compressed ? '.json.gz' : '.json';
-    const fileName = `${network}_${sanitizedAddress}${extension}`;
+    const networkKey = coinId != null ? `${network}_c${coinId}` : network;
+    const fileName = `${networkKey}_${sanitizedAddress}${extension}`;
     return path.join(this.storageDir, fileName);
   }
 
@@ -211,8 +212,9 @@ export class WalletsFileStorageService {
       from?: string;
       to: string;
     }>,
+    coinId?: number,
   ): Promise<void> {
-    const filePath = this.getFilePath(address, network);
+    const filePath = this.getFilePath(address, network, false, coinId);
     const release = await this.acquireLock(filePath);
 
     try {
@@ -302,6 +304,7 @@ export class WalletsFileStorageService {
   async loadTransactions(
     address: string,
     network: string,
+    coinId?: number,
   ): Promise<Array<{
     hash: string;
     amount: number;
@@ -309,7 +312,7 @@ export class WalletsFileStorageService {
     from?: string;
     to: string;
   }> | null> {
-    const filePath = this.getFilePath(address, network);
+    const filePath = this.getFilePath(address, network, false, coinId);
     const release = await this.acquireLock(filePath);
 
     try {
@@ -345,8 +348,12 @@ export class WalletsFileStorageService {
   /**
    * Kiểm tra file có tồn tại không
    */
-  async fileExists(address: string, network: string): Promise<boolean> {
-    const filePath = this.getFilePath(address, network);
+  async fileExists(
+    address: string,
+    network: string,
+    coinId?: number,
+  ): Promise<boolean> {
+    const filePath = this.getFilePath(address, network, false, coinId);
     try {
       const stats = await fs.stat(filePath);
       return stats.isFile();
@@ -371,6 +378,7 @@ export class WalletsFileStorageService {
       {
         address: string;
         network: string;
+        coinId?: number;
         transactions: Array<{
           hash: string;
           amount: number;
@@ -390,7 +398,12 @@ export class WalletsFileStorageService {
       await Promise.all(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         batch.map(([_, data]) =>
-          this.saveTransactions(data.address, data.network, data.transactions),
+          this.saveTransactions(
+            data.address,
+            data.network,
+            data.transactions,
+            data.coinId,
+          ),
         ),
       );
     }

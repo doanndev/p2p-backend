@@ -4,6 +4,11 @@ import { WalletsController } from './wallets.controller';
 import { WalletsService } from './wallets.service';
 import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { WalletsFileStorageService } from './wallets-file-storage.service';
+import { SolChainSyncService } from './chain-sync/sol-chain-sync.service';
+import { EvmChainSyncService } from './chain-sync/evm-chain-sync.service';
+import { BtcChainSyncService } from './chain-sync/btc-chain-sync.service';
+import { TronChainSyncService } from './chain-sync/tron-chain-sync.service';
+import { ChainSyncRouterService } from './chain-sync/chain-sync-router.service';
 import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { UserWallet } from './entities/user-wallet.entity';
 import { WalletHistory } from './entities/wallet-history.entity';
@@ -39,6 +44,11 @@ import { SettingsModule } from '../settings/settings.module';
   controllers: [WalletsController],
   providers: [
     WalletsService,
+    SolChainSyncService,
+    EvmChainSyncService,
+    BtcChainSyncService,
+    TronChainSyncService,
+    ChainSyncRouterService,
     WalletsSchedulerService,
     WalletsFileStorageService,
   ],

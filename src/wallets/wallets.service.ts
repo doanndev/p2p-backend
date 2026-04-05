@@ -1,5 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
+import axios from 'axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -26,14 +32,14 @@ import {
 import {
   HDNodeWallet,
   Mnemonic,
-  JsonRpcProvider,
   parseUnits,
   Contract,
   Interface,
   Wallet,
-  Network as EthersNetwork,
   getAddress,
 } from 'ethers';
+import { TronWeb } from 'tronweb';
+import { createEvmJsonRpcProvider } from '../common/evm-json-rpc-provider.factory';
 import * as QRCode from 'qrcode';
 import { UserWalletNetwork } from './entities/user-wallet-network.entity';
 import { UserWallet } from './entities/user-wallet.entity';
@@ -65,13 +71,29 @@ import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { RpcRateLimitService } from '../common/rpc-rate-limit.service';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
+import { CacheService } from '../systems/cache.service';
 
 /** Thông báo lỗi chung trả về frontend khi rút tiền thất bại (ví main thiếu dư, RPC lỗi, simulation fail, ...). */
 const WITHDRAW_ERROR_MESSAGE =
   'The system is overloaded. Please try again later or try a different network.';
 
+/** CoinGecko id → symbol; giá quy đổi gần USDT (dùng USD ~ USDT). */
+const TOKEN_USDT_PRICE_COINGECKO_IDS: Record<string, string> = {
+  bitcoin: 'BTC',
+  ethereum: 'ETH',
+  solana: 'SOL',
+  binancecoin: 'BNB',
+  tron: 'TRX',
+  arbitrum: 'ARB',
+  tether: 'USDT',
+};
+
+const TOKEN_USDT_PRICES_CACHE_KEY = 'wallets:token_prices_usdt';
+const TOKEN_USDT_PRICES_TTL_SEC = 60;
+const TOKEN_USDT_PRICES_REFRESH_MS = 60_000;
+
 @Injectable()
-export class WalletsService {
+export class WalletsService implements OnModuleInit {
   private readonly logger = new Logger(WalletsService.name);
 
   private debugShortAddr(addr: string, head = 8, tail = 6): string {
@@ -106,7 +128,113 @@ export class WalletsService {
     private walletsSchedulerService: WalletsSchedulerService,
     private rpcRateLimitService: RpcRateLimitService,
     private adminSettingsConfigService: AdminSettingsConfigService,
+    private cacheService: CacheService,
   ) {}
+
+  onModuleInit(): void {
+    void this.fetchAndCacheTokenPricesUsdt();
+    setInterval(() => {
+      void this.fetchAndCacheTokenPricesUsdt();
+    }, TOKEN_USDT_PRICES_REFRESH_MS);
+  }
+
+  /**
+   * Giá token theo USDT (thực tế lấy USD từ CoinGecko / USDT pair từ Binance fallback).
+   * Trả về map symbol → số USDT cho 1 đơn vị token, thêm timestamp (ms).
+   */
+  async getTokenPricesUsdt(): Promise<
+    Record<string, number> & { timestamp?: number }
+  > {
+    const raw = await this.cacheService.get(TOKEN_USDT_PRICES_CACHE_KEY);
+    if (raw) {
+      try {
+        return JSON.parse(raw) as Record<string, number> & {
+          timestamp?: number;
+        };
+      } catch {
+        this.logger.warn('token prices cache parse failed, refreshing');
+      }
+    }
+    await this.fetchAndCacheTokenPricesUsdt();
+    const again = await this.cacheService.get(TOKEN_USDT_PRICES_CACHE_KEY);
+    if (!again) {
+      return {};
+    }
+    try {
+      return JSON.parse(again) as Record<string, number> & {
+        timestamp?: number;
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  private async fetchAndCacheTokenPricesUsdt(): Promise<void> {
+    const ids = Object.keys(TOKEN_USDT_PRICE_COINGECKO_IDS).join(',');
+    try {
+      const { data } = await axios.get<Record<string, { usd?: number }>>(
+        'https://api.coingecko.com/api/v3/simple/price',
+        { params: { ids, vs_currencies: 'usd' }, timeout: 15_000 },
+      );
+
+      const result: Record<string, number> & { timestamp: number } = {
+        timestamp: Date.now(),
+      };
+      for (const key of Object.keys(data)) {
+        const symbol = TOKEN_USDT_PRICE_COINGECKO_IDS[key];
+        const usd = data[key]?.usd;
+        if (symbol != null && typeof usd === 'number') {
+          result[symbol] = usd;
+        }
+      }
+
+      await this.cacheService.set(
+        TOKEN_USDT_PRICES_CACHE_KEY,
+        JSON.stringify(result),
+        TOKEN_USDT_PRICES_TTL_SEC,
+      );
+    } catch (e) {
+      this.logger.warn(
+        `CoinGecko price fetch failed, using Binance fallback: ${(e as Error)?.message}`,
+      );
+
+      const symbols = [
+        'BTCUSDT',
+        'ETHUSDT',
+        'SOLUSDT',
+        'BNBUSDT',
+        'TRXUSDT',
+        'ARBUSDT',
+      ];
+      try {
+        const res = await axios.get<{ symbol: string; price: string }[]>(
+          'https://api.binance.com/api/v3/ticker/price',
+          { timeout: 15_000 },
+        );
+
+        const map: Record<string, number> & { timestamp: number } = {
+          USDT: 1,
+          timestamp: Date.now(),
+        };
+        const want = new Set(symbols);
+        for (const i of res.data) {
+          if (want.has(i.symbol)) {
+            map[i.symbol.replace('USDT', '')] = Number(i.price);
+          }
+        }
+
+        await this.cacheService.set(
+          TOKEN_USDT_PRICES_CACHE_KEY,
+          JSON.stringify(map),
+          TOKEN_USDT_PRICES_TTL_SEC,
+        );
+      } catch (fallbackErr) {
+        this.logger.error(
+          `Binance price fallback failed: ${(fallbackErr as Error)?.message}`,
+        );
+      }
+    }
+  }
 
   async getListCoins(): Promise<Coin[]> {
     return await this.coinRepository.find({
@@ -426,6 +554,69 @@ export class WalletsService {
   }
 
   /**
+   * Địa chỉ Tron (base58 T…) từ cùng cấu trúc HD như ETH nhưng coin type 195 (BIP44 TRX).
+   * Path: m/44'/195'/0'/{a}'/{b}'/{c}'[/ {d}'] — khớp pattern a,b,c,d của user.
+   */
+  private generateTronAddress(
+    mnemonic: string,
+    a: number,
+    b: number,
+    c: number,
+    d?: number,
+  ): string {
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const bip32Factory = bip32.BIP32Factory(tinysecp);
+    const root = bip32Factory.fromSeed(seed);
+    const path =
+      d !== undefined
+        ? `m/44'/195'/0'/${a}'/${b}'/${c}'/${d}'`
+        : `m/44'/195'/0'/${a}'/${b}'/${c}'`;
+    const derivedNode = root.derivePath(path);
+    if (!derivedNode.privateKey) {
+      throw new BadRequestException('Failed to derive private key');
+    }
+    const privateKeyHex = Buffer.from(derivedNode.privateKey).toString('hex');
+    const addr = TronWeb.address.fromPrivateKey(privateKeyHex);
+    if (!addr || typeof addr !== 'string') {
+      throw new BadRequestException('Failed to derive Tron address');
+    }
+    return addr;
+  }
+
+  /**
+   * Public key / địa chỉ nạp theo mạng (bước tạm không có d, hoặc bước cuối có d).
+   */
+  private resolveDerivedDepositAddress(
+    networkSymbol: string,
+    mnemonic: string,
+    a: number,
+    b: number,
+    c: number,
+    d?: number,
+  ): string {
+    const sym = networkSymbol.trim().toUpperCase();
+    switch (sym) {
+      case 'SOL':
+        return d === undefined
+          ? this.generateSolAddress(mnemonic, a, b, c)
+          : this.generateSolAddress(mnemonic, a, b, c, d);
+      case 'TRX':
+      case 'TRON':
+        return d === undefined
+          ? this.generateTronAddress(mnemonic, a, b, c)
+          : this.generateTronAddress(mnemonic, a, b, c, d);
+      case 'ETH':
+      case 'BNB':
+      case 'BSC':
+      case 'ARB':
+      default:
+        return d === undefined
+          ? this.generateEthAddress(mnemonic, a, b, c)
+          : this.generateEthAddress(mnemonic, a, b, c, d);
+    }
+  }
+
+  /**
    * Keypair Solana tại path đầy đủ (d = uwn_end_path hoặc 3 số cuối uwn_id).
    * Trùng với địa chỉ nạp tiền của user.
    */
@@ -556,19 +747,14 @@ export class WalletsService {
     // c = uid % 1000
     const { a, b, c } = this.calculatePathComponents(userId);
 
-    // 5. Tạo wallet tạm để lấy uwn_id
-    // Sử dụng path cũ (không có d) để tạo public key tạm
-    let tempPublicKey: string;
-
-    if (network.net_symbol === 'SOL') {
-      // Sử dụng ed25519 derivation cho Solana
-      // Path format tạm: m/44'/501'/0'/{a}'/{b}'/{c}'
-      tempPublicKey = this.generateSolAddress(mnemonic, a, b, c);
-    } else {
-      // Sử dụng BIP44 derivation cho ETH, BNB và các mạng EVM khác
-      // Path format tạm: m/44'/60'/0'/{a}'/{b}'/{c}'
-      tempPublicKey = this.generateEthAddress(mnemonic, a, b, c);
-    }
+    // 5. Tạo wallet tạm để lấy uwn_id (path chưa có d)
+    const tempPublicKey = this.resolveDerivedDepositAddress(
+      network.net_symbol,
+      mnemonic,
+      a,
+      b,
+      c,
+    );
 
     // 6. Tạo wallet tạm để lấy uwn_id
     const tempWallet = this.useWalletNetworkRepository.create({
@@ -584,20 +770,15 @@ export class WalletsService {
     // 8. Lấy 3 ký tự cuối của uwn_id làm d
     const d = this.getLastThreeDigits(savedTempWallet.uwn_id);
 
-    // 9. Generate lại public key với path mới có d
-    // Path format mới: m/44'/60'/0'/{a}'/{b}'/{c}'/{d}' (ETH/BNB)
-    // Path format mới: m/44'/501'/0'/{a}'/{b}'/{c}'/{d}' (SOL)
-    let finalPublicKey: string;
-
-    if (network.net_symbol === 'SOL') {
-      // Sử dụng ed25519 derivation cho Solana
-      // Path format: m/44'/501'/0'/{a}'/{b}'/{c}'/{d}'
-      finalPublicKey = this.generateSolAddress(mnemonic, a, b, c, d);
-    } else {
-      // Sử dụng BIP44 derivation cho ETH, BNB và các mạng EVM khác
-      // Path format: m/44'/60'/0'/{a}'/{b}'/{c}'/{d}'
-      finalPublicKey = this.generateEthAddress(mnemonic, a, b, c, d);
-    }
+    // 9. Generate lại địa chỉ với path đầy đủ có d
+    const finalPublicKey = this.resolveDerivedDepositAddress(
+      network.net_symbol,
+      mnemonic,
+      a,
+      b,
+      c,
+      d,
+    );
 
     // 10. Cập nhật public key và uwn_end_path với giá trị mới
     savedTempWallet.uwn_public_key = finalPublicKey;
@@ -949,24 +1130,7 @@ export class WalletsService {
       let lastEvmErr: Error | null = null;
       for (const rpcUrl of rpcUrls) {
         try {
-          // Tạo provider với static network để tránh auto-detect (tránh retry liên tục)
-          let provider: JsonRpcProvider;
-          if (network.net_symbol === 'ETH') {
-            const ethNetwork = EthersNetwork.from('mainnet');
-            provider = new JsonRpcProvider(rpcUrl, ethNetwork, {
-              staticNetwork: ethNetwork,
-            });
-          } else if (
-            network.net_symbol === 'BNB' ||
-            network.net_symbol === 'BSC'
-          ) {
-            const bscNetwork = new EthersNetwork('bsc', 56);
-            provider = new JsonRpcProvider(rpcUrl, bscNetwork, {
-              staticNetwork: bscNetwork,
-            });
-          } else {
-            provider = new JsonRpcProvider(rpcUrl);
-          }
+          const provider = createEvmJsonRpcProvider(rpcUrl);
 
           const connectedWallet = wallet.connect(provider);
           const normalizedToAddressEvm = this.normalizeEvmAddress(toAddress);

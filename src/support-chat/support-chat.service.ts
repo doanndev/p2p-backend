@@ -6,10 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  SupportChat,
-  SupportChatStatus,
-} from './entities/support-chat.entity';
+import { SupportChat, SupportChatStatus } from './entities/support-chat.entity';
 import {
   SupportChatMessage,
   SupportChatMessageType,
@@ -76,7 +73,10 @@ export class SupportChatService {
     return conversation;
   }
 
-  async getConversations(actor: SupportChatActor, query: QueryConversationsDto) {
+  async getConversations(
+    actor: SupportChatActor,
+    query: QueryConversationsDto,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const qb = this.supportChatRepository.createQueryBuilder('c');
@@ -96,7 +96,9 @@ export class SupportChatService {
     if (actor.type === 'user') {
       const targetUserId = query.userId ?? actor.id;
       if (targetUserId !== actor.id) {
-        throw new ForbiddenException('You cannot access other users conversations');
+        throw new ForbiddenException(
+          'You cannot access other users conversations',
+        );
       }
       qb.andWhere('c.user_id = :ownerUserId', { ownerUserId: actor.id });
     }
@@ -210,7 +212,10 @@ export class SupportChatService {
     conversationId: number,
     content: string,
   ) {
-    const conversation = await this.assertCanAccessConversation(actor, conversationId);
+    const conversation = await this.assertCanAccessConversation(
+      actor,
+      conversationId,
+    );
     if (conversation.status !== SupportChatStatus.OPEN) {
       throw new BadRequestException('Conversation is closed');
     }
@@ -223,7 +228,9 @@ export class SupportChatService {
     const message = this.supportChatMessageRepository.create({
       conversation_id: conversation.id,
       sender_type:
-        actor.type === 'admin' ? SupportChatSenderType.ADMIN : SupportChatSenderType.USER,
+        actor.type === 'admin'
+          ? SupportChatSenderType.ADMIN
+          : SupportChatSenderType.USER,
       sender_admin_id: actor.type === 'admin' ? actor.id : null,
       sender_user_id: actor.type === 'user' ? actor.id : null,
       message_type: SupportChatMessageType.TEXT,
@@ -245,7 +252,10 @@ export class SupportChatService {
     conversationId: number,
     eventType: SupportChatSystemEventType,
   ) {
-    const conversation = await this.assertCanAccessConversation(actor, conversationId);
+    const conversation = await this.assertCanAccessConversation(
+      actor,
+      conversationId,
+    );
 
     const message = this.supportChatMessageRepository.create({
       conversation_id: conversation.id,

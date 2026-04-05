@@ -7,4 +7,3 @@ export class CreateWalletDto {
   @IsNumber()
   networkId: number;
 }
-

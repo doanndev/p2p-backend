@@ -1,10 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AdminsController } from './admins.controller';
-import { AdminsSettingsController } from './admins-settings.controller';
 import { AdminsStatisticalController } from './admins-statistical.controller';
 import { AdminUsersController } from './admin-users.controller';
 import { AdminWalletController } from './admin-wallet.controller';
@@ -18,7 +17,6 @@ import { AdminLog } from './entities/admin-log.entity';
 import { AdminJwtStrategy } from './strategies/admin-jwt.strategy';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionGuard } from './guards/admin-permission.guard';
-import { AdminSetting } from '../settings/entities/admin-setting.entity';
 import { User } from '../users/entities/user.entity';
 import { WalletHistory } from '../wallets/entities/wallet-history.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
@@ -47,14 +45,13 @@ import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
-    SettingsModule,
+    forwardRef(() => SettingsModule),
     TypeOrmModule.forFeature([
       AdminRole,
       Permission,
       RolePermission,
       Admin,
       AdminLog,
-      AdminSetting,
       User,
       WalletHistory,
       UserWallet,
@@ -85,7 +82,6 @@ import { SettingsModule } from '../settings/settings.module';
   ],
   controllers: [
     AdminsController,
-    AdminsSettingsController,
     AdminsStatisticalController,
     AdminUsersController,
     AdminWalletController,
@@ -107,6 +103,12 @@ import { SettingsModule } from '../settings/settings.module';
     AdminPermissionUpdateNetworksGuard,
     AdminSuperAdminGuard,
   ],
-  exports: [AdminsService],
+  exports: [
+    AdminsService,
+    AdminJwtAuthGuard,
+    AdminPermissionGuard,
+    AdminPermissionReadSettingsGuard,
+    AdminJwtStrategy,
+  ],
 })
 export class AdminsModule {}

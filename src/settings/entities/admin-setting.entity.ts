@@ -88,19 +88,38 @@ export class AdminSetting {
   })
   as_difficulty: Difficulty;
 
-  @Column({ name: 'as_config_zerion_key', type: 'varchar', nullable: true, default: null })
+  @Column({
+    name: 'as_config_zerion_key',
+    type: 'varchar',
+    nullable: true,
+    default: null,
+  })
   as_config_zerion_key: string | null;
 
-  @Column({ name: 'as_config_rps_sol', type: 'varchar', nullable: true, default: null })
+  @Column({
+    name: 'as_config_rps_sol',
+    type: 'varchar',
+    nullable: true,
+    default: null,
+  })
   as_config_rps_sol: string | null;
 
-  @Column({ name: 'as_config_rps_eth', type: 'varchar', nullable: true, default: null })
+  @Column({
+    name: 'as_config_rps_eth',
+    type: 'varchar',
+    nullable: true,
+    default: null,
+  })
   as_config_rps_eth: string | null;
 
-  @Column({ name: 'as_config_rps_bnb', type: 'varchar', nullable: true, default: null })
+  @Column({
+    name: 'as_config_rps_bnb',
+    type: 'varchar',
+    nullable: true,
+    default: null,
+  })
   as_config_rps_bnb: string | null;
 
   @Column({ name: 'as_config_rps_rate_limit', type: 'int', default: 50 })
   as_config_rps_rate_limit: number;
 }
-

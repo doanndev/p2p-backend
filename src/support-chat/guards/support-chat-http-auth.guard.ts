@@ -62,7 +62,9 @@ export class SupportChatHttpAuthGuard implements CanActivate {
       }
       actor = { type: 'admin', id: admin.admin_id, admin };
     } else {
-      const user = await this.userRepository.findOne({ where: { uid: actorId } });
+      const user = await this.userRepository.findOne({
+        where: { uid: actorId },
+      });
       if (!user || user.ustatus === UserStatus.BLOCK) {
         throw new UnauthorizedException('User not authenticated');
       }

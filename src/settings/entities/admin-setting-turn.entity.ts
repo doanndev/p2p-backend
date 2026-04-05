@@ -19,4 +19,3 @@ export class AdminSettingTurn {
   @Column({ name: 'ast_devices', type: 'smallint' })
   ast_devices: number;
 }
-

@@ -17,7 +17,13 @@ import { AdminPermissionAdvancedUsersGuard } from './guards/admin-permission-adv
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateKolDto } from './dto/update-kol.dto';
 import { UpdateKolArticleStatusDto } from './dto/update-kol-article-status.dto';
-import { ApiBody, ApiCookieAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Admin Users')
 @ApiCookieAuth('admin_access_token')
@@ -29,14 +35,17 @@ export class AdminUsersController {
   @ApiOperation({ summary: 'Danh sách user phân trang' })
   @ApiOkResponse({
     description: 'Danh sách user',
-    schema: { example: { statusCode: 200, data: [{ uid: 120, uname: 'john_doe', uemail: 'john@example.com' }], meta: { page: 1, limit: 30, total: 500 } } },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [{ uid: 120, uname: 'john_doe', uemail: 'john@example.com' }],
+        meta: { page: 1, limit: 30, total: 500 },
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
-  async getUsers(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
+  async getUsers(@Query('page') page?: string, @Query('limit') limit?: string) {
     const result = await this.adminsService.getUsersPaginated(
       page ? parseInt(page, 10) || 1 : 1,
       limit ? parseInt(limit, 10) || 30 : 30,
@@ -48,7 +57,12 @@ export class AdminUsersController {
   @ApiOperation({ summary: 'Danh sách hồ sơ đăng ký KOL' })
   @ApiOkResponse({
     description: 'Danh sách hồ sơ KOL',
-    schema: { example: { statusCode: 200, data: [{ user_id: 120, name: 'John KOL', status: 'pending' }] } },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [{ user_id: 120, name: 'John KOL', status: 'pending' }],
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -61,7 +75,19 @@ export class AdminUsersController {
   @ApiOperation({ summary: 'Danh sách bài viết KOL' })
   @ApiOkResponse({
     description: 'Danh sách bài viết KOL',
-    schema: { example: { statusCode: 200, data: [{ id: 9, user_id: 120, article_url: 'https://medium.com/@john/article', status: 'approved' }] } },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [
+          {
+            id: 9,
+            user_id: 120,
+            article_url: 'https://medium.com/@john/article',
+            status: 'approved',
+          },
+        ],
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -70,7 +96,10 @@ export class AdminUsersController {
     @Query('user_id') userId?: string,
   ) {
     const userIdNumber = userId ? parseInt(userId, 10) : undefined;
-    const result = await this.adminsService.getKolArticles(status, userIdNumber);
+    const result = await this.adminsService.getKolArticles(
+      status,
+      userIdNumber,
+    );
     return result;
   }
 
@@ -78,7 +107,17 @@ export class AdminUsersController {
   @ApiOperation({ summary: 'Chi tiết user theo id' })
   @ApiOkResponse({
     description: 'Chi tiết user',
-    schema: { example: { statusCode: 200, data: { uid: 120, uname: 'john_doe', uemail: 'john@example.com', status: 'active' } } },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: {
+          uid: 120,
+          uname: 'john_doe',
+          uemail: 'john@example.com',
+          status: 'active',
+        },
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -93,7 +132,9 @@ export class AdminUsersController {
   @ApiBody({ type: UpdateKolDto })
   @ApiOkResponse({
     description: 'Cập nhật trạng thái KOL thành công',
-    schema: { example: { statusCode: 200, message: 'Update KOL status successfully' } },
+    schema: {
+      example: { statusCode: 200, message: 'Update KOL status successfully' },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionAdvancedUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -102,7 +143,10 @@ export class AdminUsersController {
     @Body() updateKolDto: UpdateKolDto,
   ) {
     const uid = parseInt(id, 10);
-    const result = await this.adminsService.toggleUserKol(uid, updateKolDto.status);
+    const result = await this.adminsService.toggleUserKol(
+      uid,
+      updateKolDto.status,
+    );
     return result;
   }
 
@@ -111,7 +155,9 @@ export class AdminUsersController {
   @ApiBody({ type: UpdateUserStatusDto })
   @ApiOkResponse({
     description: 'Cập nhật trạng thái user thành công',
-    schema: { example: { statusCode: 200, message: 'Update user status successfully' } },
+    schema: {
+      example: { statusCode: 200, message: 'Update user status successfully' },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionAdvancedUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -135,7 +181,12 @@ export class AdminUsersController {
   @ApiBody({ type: UpdateKolArticleStatusDto })
   @ApiOkResponse({
     description: 'Cập nhật trạng thái bài viết thành công',
-    schema: { example: { statusCode: 200, message: 'Update KOL article status successfully' } },
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Update KOL article status successfully',
+      },
+    },
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionAdvancedUsersGuard)
   @HttpCode(HttpStatus.OK)
@@ -154,4 +205,3 @@ export class AdminUsersController {
     return result;
   }
 }
-

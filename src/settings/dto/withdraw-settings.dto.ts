@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class WithdrawSettingsDto {
-  @ApiPropertyOptional({ example: 2, description: 'Số lượt rút miễn phí mỗi ngày' })
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Số lượt rút miễn phí mỗi ngày',
+  })
   turnFree?: number;
 }
-

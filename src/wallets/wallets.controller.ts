@@ -81,6 +81,31 @@ export class WalletsController {
     };
   }
 
+  @Get('token-prices-usdt')
+  @ApiOperation({
+    summary:
+      'Giá token quy đổi USDT (cache ~60s, CoinGecko / fallback Binance)',
+  })
+  @ApiOkResponse({
+    description: 'Map symbol → giá USDT gần đúng + timestamp',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'OK',
+        data: { BTC: 95000, ETH: 3500, USDT: 1, timestamp: 1710000000000 },
+      },
+    },
+  })
+  @HttpCode(HttpStatus.OK)
+  async getTokenPricesUsdt() {
+    const data = await this.walletsService.getTokenPricesUsdt();
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Get token prices (USDT) successfully',
+      data,
+    };
+  }
+
   @Get('network')
   @ApiOperation({ summary: 'Lấy ví của user theo network id' })
   @ApiQuery({ name: 'id', required: true, example: '1' })
