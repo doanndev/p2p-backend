@@ -1273,7 +1273,7 @@ export class AdminsService implements OnModuleInit {
 
   /**
    * Generate exchange wallet (ví sàn) with fixed path
-   * Path: m/44'/60'/0'/0'/0'/382' (ETH/BNB) or m/44'/501'/0'/0'/0'/382' (SOL)
+   * Path: m/44'/60'/0'/0'/0'/382' (ETH/BSC) or m/44'/501'/0'/0'/0'/382' (SOL)
    */
   private getExchangeWallet(
     mnemonic: string,
@@ -1287,7 +1287,7 @@ export class AdminsService implements OnModuleInit {
       );
       return Keypair.fromSeed(derivedSeed.key);
     } else {
-      // ETH/BNB và các mạng EVM khác
+      // ETH/BSC và các mạng EVM khác
       const seed = bip39.mnemonicToSeedSync(mnemonic);
       const bip32Factory = bip32.BIP32Factory(tinysecp);
       const root = bip32Factory.fromSeed(seed);
@@ -2789,7 +2789,7 @@ export class AdminsService implements OnModuleInit {
   /**
    * Lấy ví trợ phí (fee support wallet) từ HD Wallet
    * Path cố định:
-   * - ETH / BNB (EVM): m/44'/60'/0'/0'/0'/369'
+   * - ETH / BSC (EVM): m/44'/60'/0'/0'/0'/369'
    * - SOL:            m/44'/501'/0'/0'/0'/369'
    */
   private getFeeSupportWallet(
@@ -2998,7 +2998,7 @@ export class AdminsService implements OnModuleInit {
         });
       }
 
-      // EVM (ETH/BNB) – gửi native từ ví 369, không bắt buộc nativeCoin trong DB
+      // EVM (ETH/BSC) – gửi native từ ví 369, không bắt buộc nativeCoin trong DB
       const rpcUrls = await this.getEvmRpcUrls(network);
       const valueWei = parseUnits(amount.toString(), 18);
       for (const rpcUrl of rpcUrls) {
@@ -3027,9 +3027,7 @@ export class AdminsService implements OnModuleInit {
           return tx.hash;
         } catch (err: any) {
           const isEvmWithFallbacks =
-            (network.net_symbol === 'BNB' ||
-              network.net_symbol === 'BSC' ||
-              network.net_symbol === 'ETH') &&
+            (network.net_symbol === 'BSC' || network.net_symbol === 'ETH') &&
             rpcUrls.indexOf(rpcUrl) < rpcUrls.length - 1;
           if (isEvmWithFallbacks) {
             continue;
@@ -3194,7 +3192,7 @@ export class AdminsService implements OnModuleInit {
         }
       });
     } else {
-      // EVM transaction – thử lần lượt nhiều RPC (BNB có fallback) giống getWalletBalance
+      // EVM transaction – thử lần lượt nhiều RPC (BSC có fallback) giống getWalletBalance
       const rpcUrls = await this.getEvmRpcUrls(network);
       if (!rpcUrls.length) {
         throw new BadRequestException(
@@ -3206,7 +3204,7 @@ export class AdminsService implements OnModuleInit {
       const isNativeToken =
         coin.coin_symbol === network.net_symbol ||
         (network.net_symbol === 'ETH' && coin.coin_symbol === 'ETH') ||
-        (network.net_symbol === 'BNB' && coin.coin_symbol === 'BNB');
+        (network.net_symbol === 'BSC' && coin.coin_symbol === 'BNB');
 
       let lastEvmError: Error | null = null;
       for (const rpcUrl of rpcUrls) {
@@ -3275,9 +3273,7 @@ export class AdminsService implements OnModuleInit {
         } catch (err: any) {
           lastEvmError = err;
           const tryNextRpc =
-            (network.net_symbol === 'BNB' ||
-              network.net_symbol === 'BSC' ||
-              network.net_symbol === 'ETH') &&
+            (network.net_symbol === 'BSC' || network.net_symbol === 'ETH') &&
             rpcUrls.indexOf(rpcUrl) < rpcUrls.length - 1;
           if (tryNextRpc) {
             continue;
@@ -3445,7 +3441,7 @@ export class AdminsService implements OnModuleInit {
 
     if (networkSymbol === 'ETH') {
       ceoWalletAddress = this.configService.get<string>('WALLET_CEO_ETH');
-    } else if (networkSymbol === 'BNB' || networkSymbol === 'BSC') {
+    } else if (networkSymbol === 'BSC') {
       ceoWalletAddress = this.configService.get<string>('WALLET_CEO_BNB');
     } else if (networkSymbol === 'SOL') {
       ceoWalletAddress = this.configService.get<string>('WALLET_CEO_SOL');
@@ -3483,7 +3479,7 @@ export class AdminsService implements OnModuleInit {
         return false;
       }
     } else {
-      // EVM addresses (ETH, BNB) are 0x followed by 40 hex characters
+      // EVM addresses (ETH, BSC, …) are 0x followed by 40 hex characters
       return /^0x[a-fA-F0-9]{40}$/.test(address);
     }
   }
@@ -3800,7 +3796,7 @@ export class AdminsService implements OnModuleInit {
       nativeCoin = await this.coinRepository.findOne({
         where: { coin_symbol: 'ETH' },
       });
-    } else if (network.net_symbol === 'BNB') {
+    } else if (network.net_symbol === 'BSC') {
       nativeCoin = await this.coinRepository.findOne({
         where: { coin_symbol: 'BNB' },
       });
@@ -3819,7 +3815,7 @@ export class AdminsService implements OnModuleInit {
         },
       });
 
-      const minGasThreshold = network.net_symbol === 'SOL' ? 0.001 : 0.0001; // 0.001 SOL or 0.0001 ETH/BNB
+      const minGasThreshold = network.net_symbol === 'SOL' ? 0.001 : 0.0001; // 0.001 SOL or 0.0001 ETH/BNB (gas trên BSC)
 
       if (nativeCoinNetwork) {
         try {
@@ -3888,7 +3884,7 @@ export class AdminsService implements OnModuleInit {
         }
       }
 
-      // Nạp native (SOL/ETH/BNB) từ ví trợ phí (path 369) nếu ví user thiếu phí. SOL luôn thử; EVM cần có nativeCoinNetwork.
+      // Nạp native (SOL/ETH/BNB gas trên BSC) từ ví trợ phí (path 369) nếu ví user thiếu phí. SOL luôn thử; EVM cần có nativeCoinNetwork.
       const canTopUp =
         network.net_symbol === 'SOL' || nativeCoinNetwork != null;
       if (nativeBalance < minGasThreshold && canTopUp) {
@@ -3951,11 +3947,9 @@ export class AdminsService implements OnModuleInit {
       }
     }
 
-    // BNB/ETH: đảm bảo ví user có đủ native (BNB/ETH) trả phí, trợ từ ví 369 nếu thiếu
+    // BSC/ETH: đảm bảo ví user có đủ native (BNB/ETH) trả phí, trợ từ ví 369 nếu thiếu
     const isEvmNetwork =
-      network.net_symbol === 'BNB' ||
-      network.net_symbol === 'BSC' ||
-      network.net_symbol === 'ETH';
+      network.net_symbol === 'BSC' || network.net_symbol === 'ETH';
     if (
       isEvmNetwork &&
       !this.feeSupportDepletedNetworks.has(network.net_symbol)
@@ -4097,7 +4091,7 @@ export class AdminsService implements OnModuleInit {
           }
         }
 
-        // Rút 100% USDT trên mọi mạng (SOL, BNB, ETH); gas trả bằng native, không cần giữ lại % USDT
+        // Rút 100% USDT trên mọi mạng (SOL, BSC, ETH); gas trả bằng native, không cần giữ lại % USDT
         const withdrawAmount = actualBalance;
 
         if (withdrawAmount <= 0) {
@@ -4238,8 +4232,8 @@ export class AdminsService implements OnModuleInit {
     }
   }
 
-  /** Fallback RPC cho BNB khi RPC chính trả về invalid JSON / lỗi. */
-  private static readonly BNB_RPC_FALLBACKS = [
+  /** Fallback RPC cho BSC khi RPC chính trả về invalid JSON / lỗi. */
+  private static readonly BSC_RPC_FALLBACKS = [
     'https://bsc-dataseed.bnbchain.org',
     'https://bsc-dataseed1.defibit.io',
     'https://rpc.ankr.com/bsc',
@@ -4299,8 +4293,8 @@ export class AdminsService implements OnModuleInit {
       );
     const urls = primaryUrls.length ? [...primaryUrls] : [];
     const normalizedSet = new Set(urls.map(AdminsService.normalizeRpcUrl));
-    if (network.net_symbol === 'BNB' || network.net_symbol === 'BSC') {
-      for (const fallback of AdminsService.BNB_RPC_FALLBACKS) {
+    if (network.net_symbol === 'BSC') {
+      for (const fallback of AdminsService.BSC_RPC_FALLBACKS) {
         if (!normalizedSet.has(AdminsService.normalizeRpcUrl(fallback)))
           urls.push(fallback);
       }
@@ -4357,7 +4351,7 @@ export class AdminsService implements OnModuleInit {
         }
       });
     } else {
-      // EVM – thử nhiều RPC (BNB có fallback), retry khi invalid JSON / lỗi mạng
+      // EVM – thử nhiều RPC (BSC có fallback), retry khi invalid JSON / lỗi mạng
       const rpcUrls = await this.getEvmRpcUrls(network);
       if (rpcUrls.length === 0) {
         throw new BadRequestException(
@@ -4377,7 +4371,7 @@ export class AdminsService implements OnModuleInit {
             if (
               coin.coin_symbol === network.net_symbol ||
               (network.net_symbol === 'ETH' && coin.coin_symbol === 'ETH') ||
-              (network.net_symbol === 'BNB' && coin.coin_symbol === 'BNB')
+              (network.net_symbol === 'BSC' && coin.coin_symbol === 'BNB')
             ) {
               const balance = await this.rpcRateLimitService.withRpcLimit(() =>
                 provider.getBalance(address),
@@ -4446,7 +4440,7 @@ export class AdminsService implements OnModuleInit {
   /**
    * Chuyển toàn bộ tài sản từ ví trợ phí (path 369) sang ví CEO (fallback ví main 382).
    * - USDT: chỉ chuyển nếu balance >= 1 USDT.
-   * - Native (SOL/ETH/BNB): chuyển gần như toàn bộ, giữ lại một ít làm phí.
+   * - Native (SOL/ETH/BNB trên BSC): chuyển gần như toàn bộ, giữ lại một ít làm phí.
    */
   async feeSubsidyToMain(adminId: number): Promise<{
     statusCode: number;
@@ -4589,7 +4583,7 @@ export class AdminsService implements OnModuleInit {
         }
       }
 
-      // 2. Chuyển native coin (SOL / ETH / BNB) còn lại từ ví trợ phí sang ví CEO (fallback main 382)
+      // 2. Chuyển native coin (SOL / ETH / BNB trên BSC) còn lại từ ví trợ phí sang ví CEO (fallback main 382)
       try {
         let nativeBalance = 0;
 

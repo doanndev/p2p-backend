@@ -112,6 +112,7 @@ export class AdminSetting {
   })
   as_config_rps_eth: string | null;
 
+  /** RPC BSC (cột DB giữ tên as_config_rps_bnb). */
   @Column({
     name: 'as_config_rps_bnb',
     type: 'varchar',

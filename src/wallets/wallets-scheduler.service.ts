@@ -183,7 +183,7 @@ export class WalletsSchedulerService implements OnModuleInit {
               }
             }
           } else {
-            // Xử lý song song cho ETH/BNB/EVM khác
+            // Xử lý song song cho ETH/BSC/EVM khác
             await Promise.all(
               batch.map((tracker) =>
                 this.processWalletTracker(tracker, network, markUserCoin),
@@ -799,7 +799,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           wh_amount: tx.amount,
           wh_hash: tx.hash,
           wh_status: WalletHistoryStatus.SUCCESS,
-          wh_node: network.net_symbol, // Lưu network symbol (SOL, ETH, BNB)
+          wh_node: network.net_symbol, // Lưu network symbol (SOL, ETH, BSC, …)
           wh_user: tracker.awt_user_id,
         });
 

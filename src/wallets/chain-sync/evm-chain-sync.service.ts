@@ -16,7 +16,7 @@ import type { ChainDepositAssetContext } from './chain-deposit-asset.context';
 import type { ChainDepositSyncPort } from './chain-deposit-sync.port';
 import type { OnchainTransaction } from './onchain-transaction.types';
 
-const EVM_SYMBOLS = new Set(['ETH', 'BNB', 'BSC', 'ARB']);
+const EVM_SYMBOLS = new Set(['ETH', 'BSC', 'ARB']);
 
 const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
@@ -33,7 +33,7 @@ const MAX_LOG_CHUNK_BLOCKS = 2000;
 const EXPLORER_TIMEOUT_MS = 25_000;
 const MAX_BLOCKS_NATIVE_SCAN_FALLBACK = 4000;
 
-/** Etherscan API V2 — ETH / BNB / ARB: cùng base URL + apikey, khác chainid. */
+/** Etherscan API V2 — ETH / BSC / ARB: cùng base URL + apikey, khác chainid. */
 type ExplorerConfig = {
   baseUrl: string;
   apiKey: string;
@@ -80,7 +80,7 @@ export class EvmChainSyncService implements ChainDepositSyncPort {
       const chainId = this.parsePositiveChainEnv('ETHERSCAN_CHAIN_ID', 1);
       return this.getEtherscanV2Config(chainId);
     }
-    if (u === 'BNB' || u === 'BSC') {
+    if (u === 'BSC') {
       const chainId = this.parsePositiveChainEnv('BNB_CHAIN_ID', 56);
       return this.getEtherscanV2Config(chainId);
     }

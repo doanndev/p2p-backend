@@ -328,7 +328,7 @@ export class WalletsService implements OnModuleInit {
 
   /**
    * Track wallet activity - save or update active wallet tracker.
-   * Địa chỉ được trim để tránh trùng do khoảng trắng. Cùng địa chỉ trên hai mạng (VD: ETH và BNB) là hai ví khác nhau, có hai bản ghi.
+   * Địa chỉ được trim để tránh trùng do khoảng trắng. Cùng địa chỉ trên hai mạng (VD: ETH và BSC) là hai ví khác nhau, có hai bản ghi.
    * Nếu đã tồn tại theo (awt_address + awt_network_id) hoặc theo uwn_id thì chỉ cập nhật thời gian, không tạo mới.
    */
   async trackingWallet(
@@ -512,7 +512,7 @@ export class WalletsService implements OnModuleInit {
   }
 
   /**
-   * Generate public key for ETH/BNB using BIP44 derivation path
+   * Generate public key for ETH/BSC (EVM) using BIP44 derivation path
    * Path format: m/44'/60'/0'/{a}'/{b}'/{c}'/{d}'
    * where {d} is the last 3 digits of uwn_id
    */
@@ -606,7 +606,6 @@ export class WalletsService implements OnModuleInit {
           ? this.generateTronAddress(mnemonic, a, b, c)
           : this.generateTronAddress(mnemonic, a, b, c, d);
       case 'ETH':
-      case 'BNB':
       case 'BSC':
       case 'ARB':
       default:
@@ -688,10 +687,10 @@ export class WalletsService implements OnModuleInit {
       throw new BadRequestException('Wallet already exists for this network');
     }
 
-    // 2.5. Kiểm tra nếu đang tạo ví ETH hoặc BNB, xem đã có ví của mạng lưới còn lại chưa
-    // Nếu có, sử dụng lại cùng public key và uwn_end_path (vì ETH và BNB dùng cùng HD Wallet derivation)
-    if (network.net_symbol === 'ETH' || network.net_symbol === 'BNB') {
-      const otherNetworkSymbol = network.net_symbol === 'ETH' ? 'BNB' : 'ETH';
+    // 2.5. Kiểm tra nếu đang tạo ví ETH hoặc BSC, xem đã có ví của mạng lưới còn lại chưa
+    // Nếu có, sử dụng lại cùng public key và uwn_end_path (vì ETH và BSC dùng cùng HD Wallet derivation)
+    if (network.net_symbol === 'ETH' || network.net_symbol === 'BSC') {
+      const otherNetworkSymbol = network.net_symbol === 'ETH' ? 'BSC' : 'ETH';
       const otherNetwork = await this.networkRepository.findOne({
         where: { net_symbol: otherNetworkSymbol },
       });
@@ -794,7 +793,7 @@ export class WalletsService implements OnModuleInit {
 
   /**
    * Generate exchange wallet (ví sàn) with fixed path
-   * Path: m/44'/60'/0'/0'/0'/382' (ETH/BNB) or m/44'/501'/0'/0'/0'/382' (SOL)
+   * Path: m/44'/60'/0'/0'/0'/382' (ETH/BSC) or m/44'/501'/0'/0'/0'/382' (SOL)
    */
   private getExchangeWallet(
     mnemonic: string,
@@ -808,7 +807,7 @@ export class WalletsService implements OnModuleInit {
       );
       return Keypair.fromSeed(derivedSeed.key);
     } else {
-      // ETH/BNB và các mạng EVM khác
+      // ETH/BSC và các mạng EVM khác
       // Sử dụng bip32 để tạo ví sàn (nhất quán với generateEthAddress)
       const seed = bip39.mnemonicToSeedSync(mnemonic);
       const bip32Factory = bip32.BIP32Factory(tinysecp);
@@ -854,7 +853,7 @@ export class WalletsService implements OnModuleInit {
     throw lastErr ?? new BadRequestException('SOLANA_RPC_URL not configured');
   }
 
-  /** Chuẩn hóa địa chỉ EVM (checksum) để tránh lỗi "bad address checksum" (BNB/ETH). */
+  /** Chuẩn hóa địa chỉ EVM (checksum) để tránh lỗi "bad address checksum" (BSC/ETH). */
   private normalizeEvmAddress(address: string): string {
     if (!address || !address.startsWith('0x')) return address;
     try {
@@ -1135,14 +1134,14 @@ export class WalletsService implements OnModuleInit {
           const connectedWallet = wallet.connect(provider);
           const normalizedToAddressEvm = this.normalizeEvmAddress(toAddress);
 
-          // Kiểm tra xem coin có phải native token không (ETH hoặc BNB)
+          // Kiểm tra xem coin có phải native token không (ETH hoặc BNB trên BSC)
           const isNativeToken =
             coin.coin_symbol === network.net_symbol ||
             (network.net_symbol === 'ETH' && coin.coin_symbol === 'ETH') ||
-            (network.net_symbol === 'BNB' && coin.coin_symbol === 'BNB');
+            (network.net_symbol === 'BSC' && coin.coin_symbol === 'BNB');
 
           if (isNativeToken) {
-            // Native token transfer (ETH hoặc BNB)
+            // Native token transfer (ETH hoặc BNB trên BSC)
             // Kiểm tra balance của sender trước khi transfer
             const transferAmount = parseUnits(amount.toString(), 18);
             const senderBalance = await this.rpcRateLimitService.withRpcLimit(
@@ -1187,7 +1186,7 @@ export class WalletsService implements OnModuleInit {
                 `Token ${coin.coin_symbol} requires cn_coin_mint (contract) on network ${network.net_symbol}`,
               );
             }
-            // Chuẩn hóa địa chỉ checksum (tránh lỗi "bad address checksum" trên BNB/ETH)
+            // Chuẩn hóa địa chỉ checksum (tránh lỗi "bad address checksum" trên BSC/ETH)
             const normalizedContractAddress = this.normalizeEvmAddress(
               coinNetwork.cn_coin_mint,
             );
@@ -1390,7 +1389,7 @@ export class WalletsService implements OnModuleInit {
    * Kiểm tra và đồng bộ balance trước khi rút tiền
    * Kiểm tra xem uw_balance có bằng tổng deposit - tổng withdraw - tổng staking không
    * Nếu không bằng thì gọi lại hàm kiểm tra lịch sử giao dịch và cập nhật balance
-   * Đồng bộ TẤT CẢ networks của user (SOL, ETH, BNB) để đảm bảo tính chính xác
+   * Đồng bộ TẤT CẢ networks của user (SOL, ETH, BSC, …) để đảm bảo tính chính xác
    * Chỉ cập nhật database nếu balance mới khác với balance cũ (uw_balance + staking)
    */
   private async checkAndSyncBalance(
@@ -1845,7 +1844,7 @@ export class WalletsService implements OnModuleInit {
       // Normalize public_key: trim whitespace
       const normalizedPublicKey = userWallet.uwn_public_key.trim();
 
-      // Với EVM chains (ETH, BNB): so sánh case-insensitive (lowercase)
+      // Với EVM chains (ETH, BSC, …): so sánh case-insensitive (lowercase)
       // Với Solana: so sánh case-sensitive
       let isMatch = false;
 
@@ -1853,7 +1852,7 @@ export class WalletsService implements OnModuleInit {
         // Solana: so sánh case-sensitive
         isMatch = address === normalizedPublicKey;
       } else {
-        // EVM (ETH, BNB): so sánh case-insensitive
+        // EVM (ETH, BSC, …): so sánh case-insensitive
         isMatch = address.toLowerCase() === normalizedPublicKey.toLowerCase();
       }
 
@@ -1955,7 +1954,7 @@ export class WalletsService implements OnModuleInit {
       throw new BadRequestException('Invalid wallet seed');
     }
 
-    // 7. Ví ký giao dịch: EVM/BNB dùng ví sàn 382'; Solana dùng ví nạp của user (cùng path HD) vì token/SOL nằm trên địa chỉ đó.
+    // 7. Ví ký giao dịch: EVM (ETH/BSC/…) dùng ví sàn 382'; Solana dùng ví nạp của user (cùng path HD) vì token/SOL nằm trên địa chỉ đó.
     const userWalletNetwork = await this.useWalletNetworkRepository.findOne({
       where: {
         uwn_user_id: userId,

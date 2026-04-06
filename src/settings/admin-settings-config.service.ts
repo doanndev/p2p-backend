@@ -74,20 +74,20 @@ export class AdminSettingsConfigService {
     return validString(this.configService.get<string>('RPC_ETH')) ?? null;
   }
 
-  /** RPC BNB: as_config_rps_bnb hoặc RPC_BNB. */
-  async getEffectiveRpcBnb(): Promise<string | null> {
+  /** RPC BSC (Binance Smart Chain): as_config_rps_bnb hoặc RPC_BNB. */
+  async getEffectiveRpcBsc(): Promise<string | null> {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_rps_bnb ?? null);
     if (fromDb != null) return fromDb;
     return validString(this.configService.get<string>('RPC_BNB')) ?? null;
   }
 
-  /** RPC theo network symbol (SOL, ETH, BNB/BSC). */
+  /** RPC theo network symbol (SOL, ETH, BSC). */
   async getEffectiveRpcByNetwork(netSymbol: string): Promise<string | null> {
     const upper = netSymbol.toUpperCase();
     if (upper === 'SOL') return this.getEffectiveRpcSol();
     if (upper === 'ETH') return this.getEffectiveRpcEth();
-    if (upper === 'BNB' || upper === 'BSC') return this.getEffectiveRpcBnb();
+    if (upper === 'BSC') return this.getEffectiveRpcBsc();
     return (
       validString(this.configService.get<string>(`RPC_${netSymbol}`)) ?? null
     );
@@ -123,7 +123,7 @@ export class AdminSettingsConfigService {
     return [fromDb, fromEnv];
   }
 
-  async getRpcBnbUrlsToTry(): Promise<string[]> {
+  async getRpcBscUrlsToTry(): Promise<string[]> {
     const row = await this.getRow();
     const fromDb = validString(row?.as_config_rps_bnb ?? null);
     const fromEnv = validString(
@@ -141,7 +141,7 @@ export class AdminSettingsConfigService {
     const upper = netSymbol.toUpperCase();
     if (upper === 'SOL') return this.getRpcSolUrlsToTry();
     if (upper === 'ETH') return this.getRpcEthUrlsToTry();
-    if (upper === 'BNB' || upper === 'BSC') return this.getRpcBnbUrlsToTry();
+    if (upper === 'BSC') return this.getRpcBscUrlsToTry();
     const env = validString(this.configService.get<string>(`RPC_${netSymbol}`));
     return env ? [env] : [];
   }
