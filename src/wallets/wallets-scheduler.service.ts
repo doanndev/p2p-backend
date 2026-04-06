@@ -77,14 +77,10 @@ export class WalletsSchedulerService implements OnModuleInit {
    */
   async onModuleInit() {
     this.logger.log(
-      'WalletsSchedulerService initialized, starting initial deposit listener in background...',
+      'WalletsScheduler: deposit sync (cron + first run in background)',
     );
-    // Chạy trong background (không await) để không block server startup
     this.handleDepositListener().catch((error) => {
-      this.logger.error(
-        `Error in initial deposit listener: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`deposit-cron initial: ${error.message}`, error.stack);
     });
   }
 
@@ -93,7 +89,7 @@ export class WalletsSchedulerService implements OnModuleInit {
    */
   @Cron('*/2 * * * *') // Chạy mỗi 2 phút
   async handleDepositListener() {
-    this.logger.log('Starting deposit listener cron job...');
+    this.logger.debug('deposit-cron start');
 
     try {
       // 1. Lấy danh sách các ví tracker còn thời hạn (UTC+0)
@@ -103,18 +99,12 @@ export class WalletsSchedulerService implements OnModuleInit {
         .where('awt.awt_expires_at > :now', { now: nowUTC.toISOString() })
         .getMany();
 
-      this.logger.log(`Found ${activeTrackers.length} active wallet trackers`);
-
       if (activeTrackers.length === 0) {
-        this.logger.log(
-          'Deposit listener: không có bản ghi active_wallet_tracker nào thỏa awt_expires_at > now (UTC). ' +
-            'Scheduler sẽ không gọi RPC / không in [deposit-sync], [balance-check], [tx-cache] — ' +
-            'các log đó chỉ xuất hiện khi có ít nhất 1 tracker (tạo khi user mở flow nạp ví trong WalletsService). ' +
-            'Để xem chi tiết khi đã có tracker: LOG_LEVEL=debug.',
-        );
-        this.logger.log('Deposit listener cron job completed');
+        this.logger.log('deposit-cron: 0 active trackers (skip RPC)');
         return;
       }
+
+      this.logger.debug(`deposit-cron trackers=${activeTrackers.length}`);
 
       // 2. Nhóm theo network và deduplicate theo address để tránh xử lý trùng lặp
       const trackersByNetwork = new Map<number, ActiveWalletTracker[]>();
@@ -156,12 +146,12 @@ export class WalletsSchedulerService implements OnModuleInit {
         });
 
         if (!network) {
-          this.logger.warn(`Network ${networkId} not found`);
+          this.logger.warn(`deposit-cron: net_id=${networkId} missing`);
           continue;
         }
 
-        this.logger.log(
-          `Processing ${trackers.length} trackers for network ${network.net_symbol}`,
+        this.logger.debug(
+          `deposit-cron net=${network.net_symbol} trackers=${trackers.length}`,
         );
 
         // Xử lý song song nhưng giới hạn số lượng để tránh quá tải
@@ -206,23 +196,16 @@ export class WalletsSchedulerService implements OnModuleInit {
             else uwBalanceUnchanged++;
           } catch (error: any) {
             this.logger.error(
-              `Error updating balance user=${userId} coin=${coinId}: ${error.message}`,
+              `uw_balance u=${userId} coin=${coinId}: ${error.message}`,
             );
           }
         }
       }
       this.logger.log(
-        `uw_balance pass: ${pairCount} user/coin pair(s), ${userCoinsToRefresh.size} user(s) — ` +
-          `DB updated=${uwBalanceRowsUpdated}, skipped=${uwBalanceUnchanged}. ` +
-          `Chi tiết: LOG_LEVEL=debug, prefix [uw-balance].`,
+        `deposit-cron done | trackers=${activeTrackers.length} pairs=${pairCount} uw_balance +${uwBalanceRowsUpdated} ~${uwBalanceUnchanged}`,
       );
-
-      this.logger.log('Deposit listener cron job completed');
     } catch (error) {
-      this.logger.error(
-        `Error in deposit listener: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`deposit-cron: ${error.message}`, error.stack);
     }
   }
 
@@ -257,7 +240,7 @@ export class WalletsSchedulerService implements OnModuleInit {
   ): OnchainTransaction[] {
     if (fetched.length === 0 && cached.length > 0) {
       this.logger.warn(
-        `Full onchain fetch returned 0 txs but cache has ${cached.length}; keeping cache to avoid wipe`,
+        `onchain fetch empty, keep cache (${cached.length} txs)`,
       );
       return cached;
     }
@@ -275,7 +258,7 @@ export class WalletsSchedulerService implements OnModuleInit {
     try {
       if (!this.chainSyncRouter.resolve(network.net_symbol)) {
         this.logger.debug(
-          `[deposit-sync] No chain handler for ${network.net_symbol}, skip awt_id=${tracker.awt_id}`,
+          `sync skip no handler net=${network.net_symbol} awt=${tracker.awt_id}`,
         );
         return;
       }
@@ -296,7 +279,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         const ctx = this.buildDepositAssetContext(cn, network);
         if (!ctx) {
           this.logger.warn(
-            `coin_network cn_id=${cn.cn_id} coin_id=${cn.cn_coin_id} on ${network.net_symbol}: missing mint for non-native, skip`,
+            `skip cn_id=${cn.cn_id} coin=${cn.cn_coin_id} ${network.net_symbol}: no mint`,
           );
           continue;
         }
@@ -312,7 +295,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       }
     } catch (error: any) {
       this.logger.error(
-        `Error processing tracker ${tracker.awt_id}: ${error.message}`,
+        `sync tracker awt=${tracker.awt_id}: ${error.message}`,
         error.stack,
       );
     }
@@ -333,9 +316,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           ? 'native'
           : this.debugShortAddr(ctx.mintOrContract, 6, 6);
       this.logger.debug(
-        `[deposit-sync] start awt_id=${tracker.awt_id} user_id=${tracker.awt_user_id} ` +
-          `network=${network.net_symbol} addr=${this.debugShortAddr(tracker.awt_address)} ` +
-          `coin=${coin.coin_symbol} coin_id=${coinId} asset=${assetLabel} mode=${mode}`,
+        `sync start awt=${tracker.awt_id} u=${tracker.awt_user_id} ${network.net_symbol} ${coin.coin_symbol} ${this.debugShortAddr(tracker.awt_address)} ${assetLabel} ${mode}`,
       );
 
       const cachedTransactions = await this.getCachedTransactions(
@@ -352,9 +333,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       );
 
       this.logger.debug(
-        `[deposit-sync] conflictCheck awt_id=${tracker.awt_id} coin=${coin.coin_symbol} ` +
-          `hasConflict=${conflictCheck.hasConflict} missingInCache=${conflictCheck.missingInCache.length} ` +
-          `cachedTxCount=${cachedTransactions.length}`,
+        `sync conflict awt=${tracker.awt_id} ${coin.coin_symbol} conflict=${conflictCheck.hasConflict} miss=${conflictCheck.missingInCache.length} cache=${cachedTransactions.length}`,
       );
 
       let finalTransactions: OnchainTransaction[];
@@ -363,7 +342,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       if (mode === 'manual') {
         if (conflictCheck.hasConflict) {
           this.logger.warn(
-            `Conflict for ${tracker.awt_address} (${coin.coin_symbol}), fetching full onchain history`,
+            `sync conflict → full history ${network.net_symbol} ${coin.coin_symbol} awt=${tracker.awt_id}`,
           );
           finalTransactions = await this.getAllOnchainDeposits(
             tracker.awt_address,
@@ -399,22 +378,19 @@ export class WalletsSchedulerService implements OnModuleInit {
         balanceMatchForLog = balanceCheck.balanceMatch;
 
         if (balanceCheck.balanceMatch) {
-          this.logger.log(
-            `Balance match for ${tracker.awt_address} on ${network.net_symbol} (${coin.coin_symbol}): ` +
-              `onchain=${balanceCheck.onchainBalance}, db=${balanceCheck.dbBalance}. Skipping onchain fetch.`,
+          this.logger.debug(
+            `balance ok ${network.net_symbol} ${coin.coin_symbol} awt=${tracker.awt_id} on=${balanceCheck.onchainBalance} db=${balanceCheck.dbBalance}`,
           );
           finalTransactions = cachedTransactions;
         } else {
           const diff = balanceCheck.onchainBalance - balanceCheck.dbBalance;
           this.logger.warn(
-            `[balance-mismatch] awt_id=${tracker.awt_id} user=${tracker.awt_user_id} ` +
-              `network=${network.net_symbol} coin=${coin.coin_symbol} ` +
-              `onchain=${balanceCheck.onchainBalance} db=${balanceCheck.dbBalance} diff=${diff}`,
+            `balance drift awt=${tracker.awt_id} u=${tracker.awt_user_id} ${network.net_symbol} ${coin.coin_symbol} d=${diff} on=${balanceCheck.onchainBalance} db=${balanceCheck.dbBalance}`,
           );
 
           if (conflictCheck.hasConflict) {
             this.logger.warn(
-              `Conflict for ${tracker.awt_address} (${coin.coin_symbol}), fetching full history`,
+              `sync conflict → full history ${network.net_symbol} ${coin.coin_symbol} awt=${tracker.awt_id}`,
             );
             finalTransactions = await this.getAllOnchainDeposits(
               tracker.awt_address,
@@ -444,8 +420,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       }
 
       this.logger.debug(
-        `[deposit-sync] pre-save awt_id=${tracker.awt_id} coin=${coin.coin_symbol} ` +
-          `finalTxCount=${finalTransactions.length} cronBalanceSkippedFetch=${mode === 'cron' && balanceMatchForLog}`,
+        `sync presave awt=${tracker.awt_id} ${coin.coin_symbol} txs=${finalTransactions.length} skipFetch=${mode === 'cron' && balanceMatchForLog}`,
       );
 
       await this.saveTransactionsToCacheAndFile(
@@ -460,7 +435,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       onUserCoinProcessed?.(tracker.awt_user_id, coinId);
     } catch (error: any) {
       this.logger.error(
-        `Error processing tracker ${tracker.awt_id} coin ${coin.coin_symbol}: ${error.message}`,
+        `sync awt=${tracker.awt_id} ${coin.coin_symbol}: ${error.message}`,
         error.stack,
       );
     }
@@ -484,8 +459,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         timestamp: new Date(tx.timestamp),
       }));
       this.logger.debug(
-        `[tx-cache] HIT redis key=${cacheKey} count=${transactions.length} ` +
-          `addr=${this.debugShortAddr(address)}`,
+        `tx-cache redis n=${transactions.length} ${network.net_symbol}#${coinId} ${this.debugShortAddr(address)}`,
       );
       return transactions;
     }
@@ -503,14 +477,13 @@ export class WalletsSchedulerService implements OnModuleInit {
         cacheDuration,
       );
       this.logger.debug(
-        `[tx-cache] MISS redis, HIT file net=${network.net_symbol} coinId=${coinId} ` +
-          `count=${fileTransactions.length} addr=${this.debugShortAddr(address)}`,
+        `tx-cache file n=${fileTransactions.length} ${network.net_symbol}#${coinId} ${this.debugShortAddr(address)}`,
       );
       return fileTransactions;
     }
 
     this.logger.debug(
-      `[tx-cache] EMPTY redis+file key=${cacheKey} addr=${this.debugShortAddr(address)}`,
+      `tx-cache empty ${network.net_symbol}#${coinId} ${this.debugShortAddr(address)}`,
     );
     return [];
   }
@@ -577,9 +550,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         if (amountDiff > 0.00000001) {
           hasConflict = true;
           this.logger.warn(
-            `Conflict detected: Transaction ${cachedTx.hash} has different amount. ` +
-              `Amount: cache=${cachedAmount}, db=${dbAmount}, diff=${amountDiff.toFixed(8)}. ` +
-              `Timestamp: cache=${new Date(cachedTimestamp).toISOString()}, db=${new Date(dbTimestamp).toISOString()}, diff=${timestampDiff}ms (ignored)`,
+            `tx amount mismatch ${cachedTx.hash.slice(0, 10)}... cache=${cachedAmount} db=${dbAmount}`,
           );
           break;
         }
@@ -587,8 +558,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         // Log thông tin timestamp nếu khác nhau (nhưng không coi là conflict)
         if (timestampDiff > 1000) {
           this.logger.debug(
-            `Transaction ${cachedTx.hash} has different timestamp (not a conflict): ` +
-              `cache=${new Date(cachedTimestamp).toISOString()}, db=${new Date(dbTimestamp).toISOString()}, diff=${timestampDiff}ms`,
+            `tx time skew ok ${cachedTx.hash.slice(0, 10)}... dt=${timestampDiff}ms`,
           );
         }
       }
@@ -634,15 +604,13 @@ export class WalletsSchedulerService implements OnModuleInit {
     try {
       const handler = this.chainSyncRouter.resolve(network.net_symbol);
       if (!handler) {
-        this.logger.debug(
-          `No chain sync handler for network ${network.net_symbol}`,
-        );
+        this.logger.debug(`no chain handler ${network.net_symbol}`);
         return [];
       }
       return await handler.fetchAllDeposits(address, ctx);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error fetching all onchain deposits: ${msg}`);
+      this.logger.error(`fetch deposits all: ${msg}`);
       return [];
     }
   }
@@ -656,15 +624,13 @@ export class WalletsSchedulerService implements OnModuleInit {
     try {
       const handler = this.chainSyncRouter.resolve(network.net_symbol);
       if (!handler) {
-        this.logger.debug(
-          `No chain sync handler for network ${network.net_symbol}`,
-        );
+        this.logger.debug(`no chain handler ${network.net_symbol}`);
         return [];
       }
       return await handler.fetchRecentDeposits(address, ctx, blockCount);
     } catch (error: any) {
       this.logger.error(
-        `Error fetching recent onchain deposits for ${address} on ${network.net_symbol}: ${error.message}`,
+        `fetch deposits recent ${network.net_symbol}: ${error.message}`,
         error.stack,
       );
       return [];
@@ -741,8 +707,8 @@ export class WalletsSchedulerService implements OnModuleInit {
               wh_node: network.net_symbol,
             },
           );
-          this.logger.log(
-            `Updated wh_wallet_netword_id and wh_node for ${recordsWithNullNode.length} records with null wh_node (${network.net_symbol}) for user ${tracker.awt_user_id}`,
+          this.logger.debug(
+            `wh fix null_node n=${recordsWithNullNode.length} ${network.net_symbol} u=${tracker.awt_user_id}`,
           );
           // Loại bỏ các hash đã được cập nhật khỏi missingTransactions
           const updatedHashes = new Set(
@@ -782,8 +748,8 @@ export class WalletsSchedulerService implements OnModuleInit {
             wh_node: network.net_symbol, // Đảm bảo wh_node cũng được cập nhật
           },
         );
-        this.logger.log(
-          `Updated wh_wallet_netword_id and wh_node for ${recordsToUpdate.length} existing deposit records (${network.net_symbol}) for user ${tracker.awt_user_id}`,
+        this.logger.debug(
+          `wh link uwn n=${recordsToUpdate.length} ${network.net_symbol} u=${tracker.awt_user_id}`,
         );
       }
     }
@@ -827,16 +793,16 @@ export class WalletsSchedulerService implements OnModuleInit {
             });
 
             await this.walletDepositTrackerRepository.save(depositTracker);
-            this.logger.log(
-              `Created wallet_deposit_tracker for user ${tracker.awt_user_id}, network ${network.net_symbol}, address ${depositAddress}`,
+            this.logger.debug(
+              `wdt created u=${tracker.awt_user_id} ${network.net_symbol}`,
             );
           } else if (existingDepositTracker.wdt_withdraw === true) {
             existingDepositTracker.wdt_withdraw = false;
             await this.walletDepositTrackerRepository.save(
               existingDepositTracker,
             );
-            this.logger.log(
-              `Reset wallet_deposit_tracker wdt_withdraw=false for user ${tracker.awt_user_id}, network ${network.net_symbol}, address ${depositAddress} (new deposit detected)`,
+            this.logger.debug(
+              `wdt reset_withdraw u=${tracker.awt_user_id} ${network.net_symbol}`,
             );
           }
         }
@@ -855,16 +821,16 @@ export class WalletsSchedulerService implements OnModuleInit {
           }
         } catch (emailError: any) {
           this.logger.error(
-            `Error sending deposit notification email for user ${tracker.awt_user_id}: ${emailError.message}`,
+            `deposit email u=${tracker.awt_user_id}: ${emailError.message}`,
           );
         }
 
         this.logger.log(
-          `Added missing transaction ${tx.hash} (${network.net_symbol}) for user ${tracker.awt_user_id}`,
+          `deposit in u=${tracker.awt_user_id} ${network.net_symbol} +${tx.amount} ${tx.hash.slice(0, 12)}...`,
         );
       } catch (error) {
         this.logger.error(
-          `Error adding transaction ${tx.hash}: ${error.message}`,
+          `deposit save ${tx.hash.slice(0, 12)}...: ${error.message}`,
         );
       }
     }
@@ -883,7 +849,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         where: { coin_id: coinId },
       });
       if (!coin) {
-        this.logger.warn(`syncWalletBalance: coin ${coinId} not found`);
+        this.logger.warn(`syncBalance: coin ${coinId} missing`);
         return;
       }
 
@@ -896,7 +862,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       });
       if (!cn) {
         this.logger.warn(
-          `syncWalletBalance: no active coin_network for ${coin.coin_symbol} on ${network.net_symbol}`,
+          `syncBalance: no coin_network ${coin.coin_symbol}@${network.net_symbol}`,
         );
         return;
       }
@@ -904,15 +870,13 @@ export class WalletsSchedulerService implements OnModuleInit {
       const ctx = this.buildDepositAssetContext(cn, network);
       if (!ctx) {
         this.logger.warn(
-          `syncWalletBalance: invalid coin_network for ${coin.coin_symbol} / ${network.net_symbol}`,
+          `syncBalance: bad ctx ${coin.coin_symbol}/${network.net_symbol}`,
         );
         return;
       }
 
       if (!this.chainSyncRouter.resolve(network.net_symbol)) {
-        this.logger.debug(
-          `[syncWalletBalance] no chain handler for ${network.net_symbol}; skip`,
-        );
+        this.logger.debug(`syncBalance skip no handler ${network.net_symbol}`);
         return;
       }
 
@@ -926,10 +890,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       );
       await this.updateUserBalance(tracker.awt_user_id, coinId);
     } catch (error: any) {
-      this.logger.error(
-        `Error syncing wallet balance: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`syncBalance: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -1045,7 +1006,7 @@ export class WalletsSchedulerService implements OnModuleInit {
         });
         await this.userWalletRepository.save(newUserWallet);
         this.logger.log(
-          `Created new wallet for user ${userId} with balance ${newBalance}`,
+          `uw_balance new wallet u=${userId} coin=${coinId} =${newBalance}`,
         );
         return true;
       }
@@ -1078,22 +1039,18 @@ export class WalletsSchedulerService implements OnModuleInit {
         userWallet.uw_balance = newBalance as any;
         await this.userWalletRepository.save(userWallet);
         this.logger.log(
-          `Updated balance for user ${userId}: ${newBalance} (deposit: ${totalDeposit}, reward: ${totalReward}, staking: ${totalStaking}, withdraw: ${totalWithdraw})`,
+          `uw_balance u=${userId} coin=${coinId} ->${newBalance} dep=${totalDeposit} rew=${totalReward} stk=${totalStaking} wd=${totalWithdraw}`,
         );
         return true;
       }
 
       this.logger.debug(
-        `[uw-balance] skip DB write userId=${userId} coinId=${coinId} ` +
-          `uw_balance(stored)=${oldBalance} computedNew=${newBalance} ` +
-          `deposit(SUCCESS)=${totalDeposit} reward=${totalReward} staking=${totalStaking} withdraw(pending+success+checked)=${totalWithdraw} ` +
-          `shouldUpdate=false (thường là |computedNew-stored|<=tolerance; hoặc nhánh staking edge). ` +
-          `Lưu ý: API số dư dùng toàn coin (mọi network), không chỉ SOL.`,
+        `uw_balance skip u=${userId} coin=${coinId} stored=${oldBalance} new=${newBalance} dep=${totalDeposit} rew=${totalReward} wd=${totalWithdraw}`,
       );
       return false;
     } catch (error) {
       this.logger.error(
-        `Error updating balance for user ${userId}: ${error.message}`,
+        `uw_balance u=${userId}: ${error.message}`,
         error.stack,
       );
       return false;
@@ -1145,9 +1102,7 @@ export class WalletsSchedulerService implements OnModuleInit {
           ? 'native'
           : this.debugShortAddr(ctx.mintOrContract, 6, 6);
       this.logger.debug(
-        `[balance-check] user_id=${tracker.awt_user_id} network=${network.net_symbol} ` +
-          `addr=${tracker.awt_address} asset=${assetRef} ` +
-          `onchain=${onchainBalance} dbDepositNet=${dbBalance} diff=${diff} match=${balanceMatch}`,
+        `balchk u=${tracker.awt_user_id} ${network.net_symbol} ${assetRef} on=${onchainBalance} db=${dbBalance} d=${diff} ${balanceMatch ? 'ok' : 'drift'}`,
       );
 
       return {
@@ -1159,11 +1114,9 @@ export class WalletsSchedulerService implements OnModuleInit {
       const errMsg = error instanceof Error ? error.message : String(error);
       const errStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(
-        `Error checking wallet balance for ${tracker.awt_address} on ${network.net_symbol}: ${errMsg}`,
+        `balchk fail ${network.net_symbol} ${this.debugShortAddr(tracker.awt_address)}: ${errMsg}`,
       );
-      this.logger.debug(
-        `[balance-check] exception user_id=${tracker.awt_user_id} addr=${tracker.awt_address}: ${errStack || errMsg}`,
-      );
+      if (errStack) this.logger.debug(errStack);
       return {
         balanceMatch: false,
         onchainBalance: 0,
@@ -1229,16 +1182,14 @@ export class WalletsSchedulerService implements OnModuleInit {
 
       const net = totalDeposit - totalAdminDeposit;
       this.logger.debug(
-        `[deposit-balance-db] userId=${userId} coinId=${coinId} wh_node=${network.net_symbol} ` +
-          `SUM(DEPOSIT,SUCCESS)=${totalDeposit} SUM(ADMIN_DEPOSIT,SUCCESS)=${totalAdminDeposit} netDb=${net} ` +
-          `(đối chiếu số dư on-chain theo network)`,
+        `dep-db u=${userId} ${network.net_symbol}#${coinId} dep=${totalDeposit} admin=${totalAdminDeposit} net=${net}`,
       );
 
       // Trả về deposit - admin-deposit
       return net;
     } catch (error) {
       this.logger.error(
-        `Error calculating deposit balance for user ${userId} on ${network.net_symbol}: ${error.message}`,
+        `dep-db u=${userId} ${network.net_symbol}: ${error instanceof Error ? error.message : String(error)}`,
       );
       return 0;
     }

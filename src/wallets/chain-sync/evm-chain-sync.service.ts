@@ -234,14 +234,16 @@ export class EvmChainSyncService implements ChainDepositSyncPort {
 
     const explorer = this.getExplorerConfig(net);
     if (explorer) {
-      return this.fetchTokenTxsFromExplorer(
+      const fromExplorer = await this.fetchTokenTxsFromExplorer(
         explorer,
         address,
         ctx.mintOrContract,
         Math.min(100, blockWindow),
       );
+      if (fromExplorer.length > 0) return fromExplorer;
     }
-    return [];
+    // Explorer lỗi / chain không hỗ trợ free tier (vd. BSC testnet 97): quét Transfer qua RPC.
+    return this.fetchTokenDepositsViaLogs(address, ctx, null, MAX_EXPLORER_TXS);
   }
 
   private async fetchNativeTxsFromExplorer(
