@@ -142,9 +142,13 @@ export class TronChainSyncService implements ChainDepositSyncPort {
 
       const contractAddr = this.resolveContractBase58(tw, ctx.mintOrContract);
       const contract = await tw.contract().at(contractAddr);
+      // Some TRON RPC providers require owner_address for triggerSmartContract
+      // calls, even for read-only methods. Pass `from` explicitly to avoid
+      // "owner_address isn't set" runtime errors.
+      const callOptions = { from: addr };
       const [rawBalance, decimals] = await Promise.all([
-        contract.balanceOf(addr).call(),
-        contract.decimals().call(),
+        contract.balanceOf(addr).call(callOptions),
+        contract.decimals().call(callOptions),
       ]);
       const dec =
         typeof decimals === 'object' &&

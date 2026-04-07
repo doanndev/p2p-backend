@@ -150,6 +150,13 @@ export class OrderbookController {
 
   @Post()
   @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo order book' })
   @ApiBody({ type: CreateOrderbookDto })

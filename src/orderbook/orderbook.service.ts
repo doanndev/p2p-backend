@@ -14,12 +14,14 @@ import {
 import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { User } from '../users/entities/user.entity';
+import { Coin } from '../settings/entities/coin.entity';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { QueryMyOrderbooksDto, QueryOrderbooksDto } from './dto/query.dto';
 import { SettingBankOrder } from './entities/setting-bank-order.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
+import { NationalCurrency } from './entities/national-currency.entity';
 
 @Injectable()
 export class OrderbookService {
@@ -69,12 +71,37 @@ export class OrderbookService {
   }
 
   async createOrderBook(userId: number, dto: CreateOrderbookDto) {
+    const amount = this.toNumber(dto.amount);
+    const price = this.toNumber(dto.price);
+    const nationalMin =
+      dto.nationalMin === undefined
+        ? undefined
+        : this.toNumber(dto.nationalMin);
+    const nationalMax =
+      dto.nationalMax === undefined
+        ? undefined
+        : this.toNumber(dto.nationalMax);
+
     const feePercent =
       dto.option === OrderBookOption.SELL
         ? await this.adminSettingsConfigService.getEffectiveTransactionFeePercent()
         : 0;
 
     return this.dataSource.transaction(async (manager) => {
+      const [coinExists, nationalExists] = await Promise.all([
+        manager.exists(Coin, { where: { coin_id: dto.coinId } }),
+        manager.exists(NationalCurrency, {
+          where: { nc_id: dto.nationalCurrencyId },
+        }),
+      ]);
+
+      if (!coinExists) {
+        throw new BadRequestException('Invalid coinId');
+      }
+      if (!nationalExists) {
+        throw new BadRequestException('Invalid nationalCurrencyId');
+      }
+
       const wallet = await manager.findOne(UserWallet, {
         where: {
           uw_user_id: userId,
@@ -91,9 +118,9 @@ export class OrderbookService {
       const lockTotal =
         dto.option === OrderBookOption.SELL && feePercent > 0
           ? this.toNumber(
-              this.formatAmount(dto.amount + (dto.amount * feePercent) / 100),
+              this.formatAmount(amount + (amount * feePercent) / 100),
             )
-          : dto.amount;
+          : amount;
       const amountStr = this.formatAmount(lockTotal);
       // Một câu UPDATE nguyên tử: trừ khả dụng + cộng lock, chỉ khi đủ số dư (ACID, tránh lệch decimal khi save entity).
       const updateResult = await manager
@@ -127,17 +154,13 @@ export class OrderbookService {
         ob_option: dto.option,
         ob_coin_symbol: dto.coinSymbol,
         ob_national_symbol: dto.nationalSymbol,
-        ob_amount: this.formatAmount(dto.amount),
-        ob_amount_remaining: this.formatAmount(dto.amount),
-        ob_price: this.formatAmount(dto.price),
+        ob_amount: this.formatAmount(amount),
+        ob_amount_remaining: this.formatAmount(amount),
+        ob_price: this.formatAmount(price),
         ob_national_min:
-          dto.nationalMin === undefined
-            ? null
-            : this.formatAmount(dto.nationalMin),
+          nationalMin === undefined ? null : this.formatAmount(nationalMin),
         ob_national_max:
-          dto.nationalMax === undefined
-            ? null
-            : this.formatAmount(dto.nationalMax),
+          nationalMax === undefined ? null : this.formatAmount(nationalMax),
         ob_status: OrderBookStatus.PENDING,
         ob_trade_mode: dto.tradeMode ?? OrderBookTradeMode.SAFE,
       });

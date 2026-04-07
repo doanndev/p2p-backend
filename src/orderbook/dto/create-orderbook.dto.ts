@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
@@ -13,10 +14,12 @@ import { OrderBookTradeMode } from '../entities/order-book-trade-mode';
 
 export class CreateOrderbookDto {
   @ApiProperty({ example: 1 })
+  @Type(() => Number)
   @IsInt()
   coinId: number;
 
   @ApiProperty({ example: 1 })
+  @Type(() => Number)
   @IsInt()
   nationalCurrencyId: number;
 
@@ -25,23 +28,27 @@ export class CreateOrderbookDto {
   option: OrderBookOption;
 
   @ApiProperty({ example: 100.5 })
+  @Type(() => Number)
   @IsNumber()
   @Min(0.00000001)
   amount: number;
 
   @ApiProperty({ example: 2.15 })
+  @Type(() => Number)
   @IsNumber()
   @Min(0.00000001)
   price: number;
 
   @ApiProperty({ example: 1000000, required: false })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   nationalMin?: number;
 
   @ApiProperty({ example: 10000000, required: false })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   nationalMax?: number;
