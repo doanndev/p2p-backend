@@ -319,6 +319,8 @@ export class OrderbookService {
       'u.ufulllname',
       'u.uavatar',
     ]);
+    qb.leftJoinAndSelect('ob.setting_bank_orders', 'sbo');
+    qb.leftJoinAndSelect('sbo.bank_user', 'bu');
 
     if (query.status) {
       qb.andWhere('ob.ob_status = :st', { st: query.status });
@@ -372,6 +374,18 @@ export class OrderbookService {
 
     const rows = await qb.getMany();
     return rows.map((book) => ({
+      bank_infor: book.setting_bank_orders?.[0]?.bank_user
+        ? {
+            id: book.setting_bank_orders[0].bank_user.bu_id,
+            userId: book.setting_bank_orders[0].bank_user.bu_user_id,
+            bankName: book.setting_bank_orders[0].bank_user.bu_bank_name,
+            bankBranch: book.setting_bank_orders[0].bank_user.bu_bank_branch,
+            bankAccountName:
+              book.setting_bank_orders[0].bank_user.bu_bank_account_name,
+            bankAccountNumber:
+              book.setting_bank_orders[0].bank_user.bu_bank_account_number,
+          }
+        : null,
       id: book.ob_id,
       user: this.toPublicUser(book.user),
       coin: book.ob_coin,

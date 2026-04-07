@@ -103,6 +103,19 @@ const ORDERBOOK_DETAIL_RESPONSE_EXAMPLE = {
   },
 };
 
+const ORDERBOOK_MY_RESPONSE_EXAMPLE = {
+  ...ORDERBOOK_CREATE_RESPONSE_EXAMPLE,
+  created_at: '2026-03-26T01:23:45.000Z',
+  bank_infor: {
+    id: 1,
+    userId: 12,
+    bankName: 'Vietcombank',
+    bankBranch: 'Ha Noi',
+    bankAccountName: 'NGUYEN VAN A',
+    bankAccountNumber: '0123456789',
+  },
+};
+
 const TRANSACTION_RESPONSE_EXAMPLE = {
   id: 5001,
   reference_code: 'TX-1711223344556-XY98ZT',
@@ -206,7 +219,7 @@ export class OrderbookController {
   })
   @ApiOkResponse({
     description: 'Danh sách order book của tôi',
-    schema: { example: [ORDERBOOK_CREATE_RESPONSE_EXAMPLE] },
+    schema: { example: [ORDERBOOK_MY_RESPONSE_EXAMPLE] },
   })
   getMyOrderBooks(@Request() req: any, @Query() query: QueryMyOrderbooksDto) {
     return this.orderbookService.getMyOrderBooks(req.user.uid, query);
