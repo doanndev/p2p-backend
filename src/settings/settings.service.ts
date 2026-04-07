@@ -6,8 +6,9 @@ import { Coin } from './entities/coin.entity';
 import { CoinNetwork } from './entities/coin-network.entity';
 import {
   AdminSetting,
+  AdminSettingStatus,
+  AdminSettingType,
   FundType,
-  Difficulty,
 } from './entities/admin-setting.entity';
 import { AdminSettingTurn } from './entities/admin-setting-turn.entity';
 import { VideoSettingsDto } from './dto/video-settings.dto';
@@ -35,6 +36,56 @@ export class SettingsService {
     private adminLogRepository: Repository<AdminLog>,
   ) {}
 
+  private async upsertSetting(
+    name: string,
+    type: AdminSettingType,
+    value: string | number | boolean | object | null,
+    status: AdminSettingStatus = AdminSettingStatus.ACTIVE,
+  ): Promise<void> {
+    const rawValue =
+      value == null
+        ? null
+        : typeof value === 'object'
+          ? JSON.stringify(value)
+          : String(value);
+    const existing = await this.adminSettingRepository.findOne({
+      where: { setting_name: name },
+    });
+    if (!existing) {
+      await this.adminSettingRepository.save(
+        this.adminSettingRepository.create({
+          setting_name: name,
+          setting_type: type,
+          setting_value: rawValue,
+          status,
+        }),
+      );
+      return;
+    }
+    existing.setting_type = type;
+    existing.setting_value = rawValue;
+    existing.status = status;
+    await this.adminSettingRepository.save(existing);
+  }
+
+  private async getActiveSettingsMap(): Promise<Map<string, AdminSetting>> {
+    const rows = await this.adminSettingRepository.find({
+      where: { status: AdminSettingStatus.ACTIVE },
+    });
+    return new Map(rows.map((r) => [r.setting_name, r]));
+  }
+
+  private getNumberSetting(
+    map: Map<string, AdminSetting>,
+    name: string,
+    fallback: number,
+  ): number {
+    const raw = map.get(name)?.setting_value;
+    if (raw == null) return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   async updateVideoSettings(
     videoSettingsDto: VideoSettingsDto,
     adminId: number,
@@ -47,57 +98,36 @@ export class SettingsService {
       time_gap: number;
     };
   }> {
-    let adminSetting = await this.adminSettingRepository.findOne({
-      where: {},
-      order: { as_id: 'ASC' },
-    });
-
-    if (!adminSetting) {
-      adminSetting = this.adminSettingRepository.create({
-        as_turn_watch_default: 10,
-        as_devices_default: 20,
-        as_time_gap: 15,
-        as_time_lock_gift_balance: null,
-        as_percent_day: 0,
-        as_percent_week: 0,
-        as_percent_month: 0,
-        as_fund_type: FundType.GAIN_LOSS,
-        as_fund_amount: 0,
-        as_turn_withdraw_free: 5,
-        as_difficulty: Difficulty.DEFAULT,
-        as_smart_ref_level: 2,
-      });
-
-      if (videoSettingsDto.turnDefault && videoSettingsDto.turnDefault > 0) {
-        adminSetting.as_turn_watch_default = videoSettingsDto.turnDefault;
-      }
-      if (
-        videoSettingsDto.devicesDefault &&
-        videoSettingsDto.devicesDefault > 0
-      ) {
-        adminSetting.as_devices_default = videoSettingsDto.devicesDefault;
-      }
-      if (videoSettingsDto.timeGap && videoSettingsDto.timeGap > 0) {
-        adminSetting.as_time_gap = videoSettingsDto.timeGap;
-      }
-
-      await this.adminSettingRepository.save(adminSetting);
-    } else {
-      if (videoSettingsDto.turnDefault && videoSettingsDto.turnDefault > 0) {
-        adminSetting.as_turn_watch_default = videoSettingsDto.turnDefault;
-      }
-      if (
-        videoSettingsDto.devicesDefault &&
-        videoSettingsDto.devicesDefault > 0
-      ) {
-        adminSetting.as_devices_default = videoSettingsDto.devicesDefault;
-      }
-      if (videoSettingsDto.timeGap && videoSettingsDto.timeGap > 0) {
-        adminSetting.as_time_gap = videoSettingsDto.timeGap;
-      }
-
-      await this.adminSettingRepository.save(adminSetting);
+    if (videoSettingsDto.turnDefault && videoSettingsDto.turnDefault > 0) {
+      await this.upsertSetting(
+        'video.turn_watch_default',
+        AdminSettingType.NUMBER,
+        videoSettingsDto.turnDefault,
+      );
     }
+    if (videoSettingsDto.devicesDefault && videoSettingsDto.devicesDefault > 0) {
+      await this.upsertSetting(
+        'video.devices_default',
+        AdminSettingType.NUMBER,
+        videoSettingsDto.devicesDefault,
+      );
+    }
+    if (videoSettingsDto.timeGap && videoSettingsDto.timeGap > 0) {
+      await this.upsertSetting(
+        'video.time_gap',
+        AdminSettingType.NUMBER,
+        videoSettingsDto.timeGap,
+      );
+    }
+
+    const map = await this.getActiveSettingsMap();
+    const turnWatchDefault = this.getNumberSetting(
+      map,
+      'video.turn_watch_default',
+      10,
+    );
+    const devicesDefault = this.getNumberSetting(map, 'video.devices_default', 20);
+    const timeGap = this.getNumberSetting(map, 'video.time_gap', 15);
 
     await this.adminLogRepository.save({
       log_admin_id: adminId,
@@ -112,9 +142,9 @@ export class SettingsService {
       statusCode: 200,
       message: 'Video settings updated successfully',
       settings: {
-        turn_watch_default: adminSetting.as_turn_watch_default,
-        devices_default: adminSetting.as_devices_default,
-        time_gap: adminSetting.as_time_gap,
+        turn_watch_default: turnWatchDefault,
+        devices_default: devicesDefault,
+        time_gap: timeGap,
       },
     };
   }
@@ -129,39 +159,16 @@ export class SettingsService {
       turn_withdraw_free: number;
     };
   }> {
-    let adminSetting = await this.adminSettingRepository.findOne({
-      where: {},
-      order: { as_id: 'ASC' },
-    });
-
-    if (!adminSetting) {
-      adminSetting = this.adminSettingRepository.create({
-        as_turn_watch_default: 10,
-        as_devices_default: 20,
-        as_time_gap: 15,
-        as_time_lock_gift_balance: null,
-        as_percent_day: 0.2,
-        as_percent_week: 2.5,
-        as_percent_month: 20,
-        as_fund_type: FundType.GAIN_LOSS,
-        as_fund_amount: 0,
-        as_turn_withdraw_free: 5,
-        as_difficulty: Difficulty.DEFAULT,
-        as_smart_ref_level: 2,
-      });
-
-      if (withdrawSettingsDto.turnFree && withdrawSettingsDto.turnFree > 0) {
-        adminSetting.as_turn_withdraw_free = withdrawSettingsDto.turnFree;
-      }
-
-      await this.adminSettingRepository.save(adminSetting);
-    } else {
-      if (withdrawSettingsDto.turnFree && withdrawSettingsDto.turnFree > 0) {
-        adminSetting.as_turn_withdraw_free = withdrawSettingsDto.turnFree;
-      }
-
-      await this.adminSettingRepository.save(adminSetting);
+    if (withdrawSettingsDto.turnFree && withdrawSettingsDto.turnFree > 0) {
+      await this.upsertSetting(
+        'withdraw.turn_free',
+        AdminSettingType.NUMBER,
+        withdrawSettingsDto.turnFree,
+      );
     }
+
+    const map = await this.getActiveSettingsMap();
+    const turnWithdrawFree = this.getNumberSetting(map, 'withdraw.turn_free', 5);
 
     await this.adminLogRepository.save({
       log_admin_id: adminId,
@@ -176,7 +183,7 @@ export class SettingsService {
       statusCode: 200,
       message: 'Withdraw settings updated successfully',
       settings: {
-        turn_withdraw_free: adminSetting.as_turn_withdraw_free,
+        turn_withdraw_free: turnWithdrawFree,
       },
     };
   }
@@ -199,10 +206,7 @@ export class SettingsService {
       }>;
     };
   }> {
-    const adminSetting = await this.adminSettingRepository.findOne({
-      where: {},
-      order: { as_id: 'ASC' },
-    });
+    const settingMap = await this.getActiveSettingsMap();
 
     const milestones = [5, 10, 20, 35, 50, 75, 100];
     const milestoneRewards: { [key: number]: number } = {
@@ -223,41 +227,34 @@ export class SettingsService {
       reward: milestoneRewards[milestone],
     }));
 
-    if (!adminSetting) {
-      return {
-        statusCode: 200,
-        settings: {
-          turn_watch_default: 10,
-          devices_default: 20,
-          time_gap: 15,
-          percent_day: 0.2,
-          percent_week: 2.5,
-          percent_month: 20,
-          turn_free: 5,
-          max_level: 0,
-          parcentage: {},
-          reward_milestone,
-        },
-      };
-    }
-
-    const turn_watch_default = adminSetting.as_turn_watch_default ?? 10;
-    const devices_default = adminSetting.as_devices_default ?? 20;
-    const time_gap = adminSetting.as_time_gap ?? 15;
-    const percent_day =
-      typeof adminSetting.as_percent_day === 'number'
-        ? Number(adminSetting.as_percent_day)
-        : 0.2;
-    const percent_week =
-      typeof adminSetting.as_percent_week === 'number'
-        ? Number(adminSetting.as_percent_week)
-        : 2.5;
-    const percent_month =
-      typeof adminSetting.as_percent_month === 'number'
-        ? Number(adminSetting.as_percent_month)
-        : 20;
-    const turn_free = adminSetting.as_turn_withdraw_free ?? 5;
-    const max_level = adminSetting.as_smart_ref_level ?? 0;
+    const turn_watch_default = this.getNumberSetting(
+      settingMap,
+      'video.turn_watch_default',
+      10,
+    );
+    const devices_default = this.getNumberSetting(
+      settingMap,
+      'video.devices_default',
+      20,
+    );
+    const time_gap = this.getNumberSetting(settingMap, 'video.time_gap', 15);
+    const percent_day = this.getNumberSetting(settingMap, 'reward.percent_day', 0.2);
+    const percent_week = this.getNumberSetting(
+      settingMap,
+      'reward.percent_week',
+      2.5,
+    );
+    const percent_month = this.getNumberSetting(
+      settingMap,
+      'reward.percent_month',
+      20,
+    );
+    const turn_free = this.getNumberSetting(settingMap, 'withdraw.turn_free', 5);
+    const max_level = this.getNumberSetting(
+      settingMap,
+      'ref.smart_ref_level',
+      0,
+    );
     const parcentage: Record<number, number> = {};
 
     return {

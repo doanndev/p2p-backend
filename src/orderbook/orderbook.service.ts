@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { OrderBook, OrderBookStatus } from './entities/order-book.entity';
+import {
+  OrderBook,
+  OrderBookOption,
+  OrderBookStatus,
+} from './entities/order-book.entity';
 import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { User } from '../users/entities/user.entity';
@@ -15,6 +19,7 @@ import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { QueryMyOrderbooksDto, QueryOrderbooksDto } from './dto/query.dto';
 import { SettingBankOrder } from './entities/setting-bank-order.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
+import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 
 @Injectable()
 export class OrderbookService {
@@ -30,6 +35,7 @@ export class OrderbookService {
     @InjectRepository(BankUser)
     private readonly bankUserRepository: Repository<BankUser>,
     private readonly dataSource: DataSource,
+    private readonly adminSettingsConfigService: AdminSettingsConfigService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -63,6 +69,11 @@ export class OrderbookService {
   }
 
   async createOrderBook(userId: number, dto: CreateOrderbookDto) {
+    const feePercent =
+      dto.option === OrderBookOption.SELL
+        ? await this.adminSettingsConfigService.getEffectiveTransactionFeePercent()
+        : 0;
+
     return this.dataSource.transaction(async (manager) => {
       const wallet = await manager.findOne(UserWallet, {
         where: {
@@ -76,7 +87,14 @@ export class OrderbookService {
         throw new NotFoundException('Wallet not found for selected coin');
       }
 
-      const amountStr = this.formatAmount(dto.amount);
+      /** Số coin lock vào ví: lệnh bán = amount + phí (hiển thị orderbook vẫn là amount). */
+      const lockTotal =
+        dto.option === OrderBookOption.SELL && feePercent > 0
+          ? this.toNumber(
+              this.formatAmount(dto.amount + (dto.amount * feePercent) / 100),
+            )
+          : dto.amount;
+      const amountStr = this.formatAmount(lockTotal);
       // Một câu UPDATE nguyên tử: trừ khả dụng + cộng lock, chỉ khi đủ số dư (ACID, tránh lệch decimal khi save entity).
       const updateResult = await manager
         .createQueryBuilder()
@@ -500,6 +518,9 @@ export class OrderbookService {
   }
 
   async deleteOrderBook(userId: number, id: number) {
+    const feePercent =
+      await this.adminSettingsConfigService.getEffectiveTransactionFeePercent();
+
     return this.dataSource.transaction(async (manager) => {
       const orderBook = await manager.findOne(OrderBook, {
         where: { ob_id: id },
@@ -516,7 +537,15 @@ export class OrderbookService {
       }
 
       const amountRemaining = this.toNumber(orderBook.ob_amount_remaining);
-      const amountStr = this.formatAmount(amountRemaining);
+      const unlockTotal =
+        orderBook.ob_option === OrderBookOption.SELL && feePercent > 0
+          ? this.toNumber(
+              this.formatAmount(
+                amountRemaining + (amountRemaining * feePercent) / 100,
+              ),
+            )
+          : amountRemaining;
+      const amountStr = this.formatAmount(unlockTotal);
 
       const wallet = await manager.findOne(UserWallet, {
         where: {

@@ -5,6 +5,7 @@ import { EmailService } from './email.service';
 import { CacheService } from './cache.service';
 import { DatabaseInitService } from './database-init.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
+import { RedisPubSubService } from './redis-pubsub.service';
 
 @Global()
 @Module({
@@ -12,9 +13,10 @@ import { CloudinaryService } from '../common/services/cloudinary.service';
   providers: [
     EmailService,
     CacheService,
+    RedisPubSubService,
     DatabaseInitService,
     CloudinaryService,
   ],
-  exports: [EmailService, CacheService, CloudinaryService],
+  exports: [EmailService, CacheService, RedisPubSubService, CloudinaryService],
 })
 export class SystemsModule {}

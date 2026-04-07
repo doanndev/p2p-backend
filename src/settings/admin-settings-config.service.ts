@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AdminSetting } from './entities/admin-setting.entity';
+import {
+  AdminSetting,
+  AdminSettingStatus,
+  FundType,
+} from './entities/admin-setting.entity';
 
 /** Giá trị từ DB được coi là hợp lệ nếu không rỗng sau khi trim. */
 function validString(v: string | null | undefined): string | null {
@@ -17,11 +21,11 @@ function normalizeRpcUrl(url: string): string {
 }
 
 /**
- * Cấu hình RPC / Zerion: ưu tiên từ admin_settings (as_config_*), không có hoặc không hợp lệ thì fallback sang biến môi trường .env.
+ * Cấu hình RPC / Zerion: ưu tiên từ admin_settings (setting_name), không có hoặc không hợp lệ thì fallback sang biến môi trường .env.
  */
 @Injectable()
 export class AdminSettingsConfigService {
-  private cachedRow: AdminSetting | null = null;
+  private cachedMap: Map<string, AdminSetting> | null = null;
   private cachedAt = 0;
   private readonly CACHE_MS = 60_000; // 60s
 
@@ -31,53 +35,61 @@ export class AdminSettingsConfigService {
     private configService: ConfigService,
   ) {}
 
-  private async getRow(): Promise<AdminSetting | null> {
+  private async getMap(): Promise<Map<string, AdminSetting>> {
     const now = Date.now();
-    if (this.cachedRow != null && now - this.cachedAt < this.CACHE_MS) {
-      return this.cachedRow;
+    if (this.cachedMap != null && now - this.cachedAt < this.CACHE_MS) {
+      return this.cachedMap;
     }
-    // TypeORM 0.3+: findOne(options) phải có điều kiện where, nên dùng find + take(1)
     const rows = await this.adminSettingRepository.find({
-      order: { as_id: 'ASC' },
-      take: 1,
+      where: { status: AdminSettingStatus.ACTIVE },
     });
-    this.cachedRow = rows[0] ?? null;
+    this.cachedMap = new Map(rows.map((r) => [r.setting_name, r]));
     this.cachedAt = now;
-    return this.cachedRow;
+    return this.cachedMap;
   }
 
-  /** Zerion API key: as_config_zerion_key hoặc ZERION_API_KEY. */
+  private async getSettingRaw(name: string): Promise<string | null> {
+    const map = await this.getMap();
+    const row = map.get(name);
+    return validString(row?.setting_value ?? null);
+  }
+
+  private async getSettingNumber(name: string): Promise<number | null> {
+    const raw = await this.getSettingRaw(name);
+    if (raw == null) return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  }
+
+  /** Zerion API key: config.zerion_key hoặc ZERION_API_KEY. */
   async getEffectiveZerionKey(): Promise<string | null> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_zerion_key ?? null);
+    const fromDb = await this.getSettingRaw('config.zerion_key');
     if (fromDb != null) return fromDb;
     return (
       validString(this.configService.get<string>('ZERION_API_KEY')) ?? null
     );
   }
 
-  /** RPC SOL: as_config_rps_sol hoặc SOLANA_RPC_URL. */
+  /** RPC SOL: config.rpc.sol hoặc SOLANA_RPC_URL. */
   async getEffectiveRpcSol(): Promise<string | null> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_rps_sol ?? null);
+    const fromDb = await this.getSettingRaw('config.rpc.sol');
     if (fromDb != null) return fromDb;
     return (
       validString(this.configService.get<string>('SOLANA_RPC_URL')) ?? null
     );
   }
 
-  /** RPC ETH: as_config_rps_eth hoặc RPC_ETH. */
+  /** RPC ETH: config.rpc.eth hoặc RPC_ETH. */
   async getEffectiveRpcEth(): Promise<string | null> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_rps_eth ?? null);
+    const fromDb = await this.getSettingRaw('config.rpc.eth');
     if (fromDb != null) return fromDb;
     return validString(this.configService.get<string>('RPC_ETH')) ?? null;
   }
 
-  /** RPC BSC (Binance Smart Chain): as_config_rps_bnb hoặc RPC_BNB. */
+  /** RPC BSC (Binance Smart Chain): config.rpc.bsc hoặc RPC_BNB. */
   async getEffectiveRpcBsc(): Promise<string | null> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_rps_bnb ?? null);
+    const fromDb = await this.getSettingRaw('config.rpc.bsc');
     if (fromDb != null) return fromDb;
     return validString(this.configService.get<string>('RPC_BNB')) ?? null;
   }
@@ -98,8 +110,7 @@ export class AdminSettingsConfigService {
    * Khi RPC từ DB lỗi hoặc rate limit, caller có thể thử URL tiếp theo (env).
    */
   async getRpcSolUrlsToTry(): Promise<string[]> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_rps_sol ?? null);
+    const fromDb = await this.getSettingRaw('config.rpc.sol');
     const fromEnv = validString(
       this.configService.get<string>('SOLANA_RPC_URL') ?? null,
     );
@@ -111,8 +122,7 @@ export class AdminSettingsConfigService {
   }
 
   async getRpcEthUrlsToTry(): Promise<string[]> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_rps_eth ?? null);
+    const fromDb = await this.getSettingRaw('config.rpc.eth');
     const fromEnv = validString(
       this.configService.get<string>('RPC_ETH') ?? null,
     );
@@ -124,8 +134,7 @@ export class AdminSettingsConfigService {
   }
 
   async getRpcBscUrlsToTry(): Promise<string[]> {
-    const row = await this.getRow();
-    const fromDb = validString(row?.as_config_rps_bnb ?? null);
+    const fromDb = await this.getSettingRaw('config.rpc.bsc');
     const fromEnv = validString(
       this.configService.get<string>('RPC_BNB') ?? null,
     );
@@ -147,17 +156,50 @@ export class AdminSettingsConfigService {
   }
 
   /**
-   * Số lần gọi RPC tối đa mỗi giây: as_config_rps_rate_limit (DB) hoặc RPC_RATE_LIMIT_PER_SECOND (.env).
+   * Số lần gọi RPC tối đa mỗi giây: config.rpc.rate_limit (DB) hoặc RPC_RATE_LIMIT_PER_SECOND (.env).
    * Nếu DB null/không hợp lệ thì dùng env; nếu env không hợp lệ thì 50.
    */
   async getEffectiveRpcRateLimit(): Promise<number> {
-    const row = await this.getRow();
-    const fromDb = row?.as_config_rps_rate_limit;
+    const fromDb = await this.getSettingNumber('config.rpc.rate_limit');
     if (fromDb != null && Number.isInteger(fromDb) && fromDb > 0) {
       return fromDb;
     }
     const fromEnv = this.configService.get<string>('RPC_RATE_LIMIT_PER_SECOND');
     const n = fromEnv != null ? parseInt(String(fromEnv).trim(), 10) : NaN;
     return Number.isInteger(n) && n > 0 ? n : 50;
+  }
+
+  async getEffectiveTurnWithdrawFree(): Promise<number> {
+    const fromDb = await this.getSettingNumber('withdraw.turn_free');
+    if (fromDb != null && Number.isInteger(fromDb) && fromDb > 0) {
+      return fromDb;
+    }
+    return 0;
+  }
+
+  async getFundSettings(): Promise<{
+    fundType: FundType | null;
+    fundAmount: number;
+  }> {
+    const rawType = await this.getSettingRaw('withdraw.fund_type');
+    const fundType =
+      rawType === FundType.GAIN_LOSS || rawType === FundType.ALWAYS_PROFITABLE
+        ? rawType
+        : null;
+    const fundAmount =
+      (await this.getSettingNumber('withdraw.fund_amount')) ?? 0;
+    return { fundType, fundAmount };
+  }
+
+  /**
+   * Phí giao dịch P2P (orderbook), đơn vị %: `transaction.fee` (ví dụ 2 = 2%).
+   * Không cấu hình hoặc không hợp lệ → 2.
+   */
+  async getEffectiveTransactionFeePercent(): Promise<number> {
+    const fromDb = await this.getSettingNumber('transaction.fee');
+    if (fromDb == null || !Number.isFinite(fromDb) || fromDb <= 0) {
+      return 2;
+    }
+    return Math.min(fromDb, 100);
   }
 }

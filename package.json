@@ -10,6 +10,7 @@
     "rebuild": "rimraf dist && nest build",
     "gen:wallet-seed": "node scripts/generate-wallet-seed.js",
     "gen:jwt-secret": "node scripts/generate-jwt-secret.js",
+    "seed:admin-settings": "node scripts/init-admin-settings.js",
     "seed:sol-usdt-mints": "node scripts/seed-sol-usdt-mints.js",
     "seed:national-currencies": "node scripts/seed-national-currencies.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

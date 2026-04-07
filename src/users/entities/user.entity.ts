@@ -87,6 +87,21 @@ export class User {
   @Column({ name: 'ulevel', type: 'smallint' })
   ulevel: number;
 
+  @Column({
+    name: 'current_cycle_active_days',
+    type: 'integer',
+    default: 0,
+  })
+  current_cycle_active_days: number;
+
+  @Column({
+    name: 'last_actived_day',
+    type: 'date',
+    nullable: true,
+    default: null,
+  })
+  last_actived_day: Date | null;
+
   @Column({ name: 'ukol', type: 'boolean', default: false })
   ukol: boolean;
 

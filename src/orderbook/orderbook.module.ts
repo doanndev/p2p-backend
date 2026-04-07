@@ -13,9 +13,11 @@ import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { Notification } from '../users/entities/notification.entity';
 import { P2pCoinUnlockSchedulerService } from './p2p-coin-unlock.scheduler';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
+    SettingsModule,
     TypeOrmModule.forFeature([
       OrderBook,
       NationalCurrency,

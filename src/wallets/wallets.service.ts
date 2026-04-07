@@ -63,10 +63,7 @@ import {
   CoinNetwork,
   CoinNetworkStatus,
 } from '../settings/entities/coin-network.entity';
-import {
-  AdminSetting,
-  FundType,
-} from '../settings/entities/admin-setting.entity';
+import { FundType } from '../settings/entities/admin-setting.entity';
 import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { RpcRateLimitService } from '../common/rpc-rate-limit.service';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
@@ -116,8 +113,6 @@ export class WalletsService implements OnModuleInit {
     private coinRepository: Repository<Coin>,
     @InjectRepository(Network)
     private networkRepository: Repository<Network>,
-    @InjectRepository(AdminSetting)
-    private adminSettingRepository: Repository<AdminSetting>,
     @InjectRepository(CoinNetwork)
     private coinNetworkRepository: Repository<CoinNetwork>,
     @InjectRepository(User)
@@ -1261,19 +1256,9 @@ export class WalletsService implements OnModuleInit {
    * @returns max_withdraw hoặc null nếu không giới hạn
    */
   async checkMaxWithdraw(): Promise<number | null> {
-    // 1. Lấy giá trị as_fund_amount từ admin_settings
-    const adminSettings = await this.adminSettingRepository.find({
-      order: { as_id: 'ASC' }, // Lấy record đầu tiên nếu có nhiều
-      take: 1,
-    });
-    const adminSetting = adminSettings.length > 0 ? adminSettings[0] : null;
-
-    // Nếu không tồn tại hoặc as_fund_amount <= 0 thì bỏ qua
-    if (
-      !adminSetting ||
-      !adminSetting.as_fund_amount ||
-      adminSetting.as_fund_amount <= 0
-    ) {
+    const { fundAmount, fundType } =
+      await this.adminSettingsConfigService.getFundSettings();
+    if (!fundAmount || fundAmount <= 0 || !fundType) {
       return null; // Không giới hạn
     }
 
@@ -1312,15 +1297,15 @@ export class WalletsService implements OnModuleInit {
 
     const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
 
-    // 4. Tính max_withdraw dựa trên as_fund_type
+    // 4. Tính max_withdraw dựa trên withdraw.fund_type
     let maxWithdraw: number;
 
-    if (adminSetting.as_fund_type === FundType.GAIN_LOSS) {
-      // gain_loss: max_withdraw = total_deposit + as_fund_amount - total_withdraw
-      maxWithdraw = totalDeposit + adminSetting.as_fund_amount - totalWithdraw;
-    } else if (adminSetting.as_fund_type === FundType.ALWAYS_PROFITABLE) {
-      // always_profitable: max_withdraw = total_deposit - as_fund_amount - total_withdraw
-      maxWithdraw = totalDeposit - adminSetting.as_fund_amount - totalWithdraw;
+    if (fundType === FundType.GAIN_LOSS) {
+      // gain_loss: max_withdraw = total_deposit + fund_amount - total_withdraw
+      maxWithdraw = totalDeposit + fundAmount - totalWithdraw;
+    } else if (fundType === FundType.ALWAYS_PROFITABLE) {
+      // always_profitable: max_withdraw = total_deposit - fund_amount - total_withdraw
+      maxWithdraw = totalDeposit - fundAmount - totalWithdraw;
     } else {
       // Trường hợp không xác định, không giới hạn
       return null;
@@ -1358,22 +1343,8 @@ export class WalletsService implements OnModuleInit {
 
     const totalWithdrawn = parseInt(totalWithdrawnResult?.count || '0', 10);
 
-    // 2. Lấy giá trị as_turn_withdraw_free từ admin_settings
-    const adminSettings = await this.adminSettingRepository.find({
-      order: { as_id: 'ASC' },
-      take: 1,
-    });
-    const adminSetting = adminSettings.length > 0 ? adminSettings[0] : null;
-
-    let turnWithdrawFree = 0;
-    if (
-      adminSetting &&
-      adminSetting.as_turn_withdraw_free !== null &&
-      adminSetting.as_turn_withdraw_free !== undefined &&
-      adminSetting.as_turn_withdraw_free > 0
-    ) {
-      turnWithdrawFree = adminSetting.as_turn_withdraw_free;
-    }
+    const turnWithdrawFree =
+      await this.adminSettingsConfigService.getEffectiveTurnWithdrawFree();
 
     // 3. Kiểm tra xem có phải free withdraw không
     const isFree = totalWithdrawn < turnWithdrawFree;

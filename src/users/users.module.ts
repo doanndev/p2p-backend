@@ -25,6 +25,7 @@ import { BankUsersService } from './bank-users.service';
 import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entity';
 import { UserSecurityController } from './user-security.controller';
 import { UserSecurityService } from './user-security.service';
+import { UserLevelUpWorker } from './user-level-up.worker';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { UserSecurityService } from './user-security.service';
     JwtStrategy,
     BankUsersService,
     UserSecurityService,
+    UserLevelUpWorker,
   ],
   exports: [UsersService],
 })

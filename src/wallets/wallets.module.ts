@@ -19,7 +19,6 @@ import { User } from '../users/entities/user.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { Network } from '../settings/entities/network.entity';
 import { CoinNetwork } from '../settings/entities/coin-network.entity';
-import { AdminSetting } from '../settings/entities/admin-setting.entity';
 import { SystemsModule } from '../systems/systems.module';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -37,7 +36,6 @@ import { SettingsModule } from '../settings/settings.module';
       Coin,
       Network,
       CoinNetwork,
-      AdminSetting,
     ]),
     SystemsModule,
   ],

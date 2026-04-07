@@ -23,6 +23,9 @@ import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { QueryTransactionsDto } from './dto/query.dto';
 import { ChatRoom, ChatRoomStatus } from '../chat/entities/chat-room.entity';
+import { RedisPubSubService } from '../systems/redis-pubsub.service';
+import { USER_LEVELUP_CHANNEL } from '../users/user-level-up.constants';
+import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 
 @Injectable()
 export class TransactionService {
@@ -34,6 +37,8 @@ export class TransactionService {
     @InjectRepository(UserWallet)
     private readonly userWalletRepository: Repository<UserWallet>,
     private readonly dataSource: DataSource,
+    private readonly pubsub: RedisPubSubService,
+    private readonly adminSettingsConfigService: AdminSettingsConfigService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -361,7 +366,10 @@ export class TransactionService {
   }
 
   async confirmReceived(userId: number, id: number) {
-    return this.dataSource.transaction(async (manager) => {
+    const feePercent =
+      await this.adminSettingsConfigService.getEffectiveTransactionFeePercent();
+
+    const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
         where: { trans_id: id },
         lock: { mode: 'pessimistic_write' },
@@ -382,6 +390,37 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
+      const feeAmount = this.toNumber(
+        this.formatAmount((amount * feePercent) / 100),
+      );
+
+      let orderBook: OrderBook | null = null;
+      if (transaction.trans_order_book != null) {
+        orderBook = await manager.findOne(OrderBook, {
+          where: { ob_id: transaction.trans_order_book },
+          lock: { mode: 'pessimistic_write' },
+        });
+      }
+
+      const posterIsSeller =
+        orderBook != null &&
+        orderBook.ob_option === OrderBookOption.SELL &&
+        orderBook.ob_user_id === transaction.trans_user_sell;
+      const posterIsBuyer =
+        orderBook != null &&
+        orderBook.ob_option === OrderBookOption.BUY &&
+        orderBook.ob_user_id === transaction.trans_user_buy;
+
+      const sellerLockDebit =
+        posterIsSeller && feeAmount > 0
+          ? this.toNumber(this.formatAmount(amount + feeAmount))
+          : amount;
+
+      const toBuyer =
+        posterIsBuyer && feeAmount > 0
+          ? Math.max(0, this.toNumber(this.formatAmount(amount - feeAmount)))
+          : amount;
+
       const sellerWallet = await manager.findOne(UserWallet, {
         where: {
           uw_user_id: transaction.trans_user_sell,
@@ -401,13 +440,13 @@ export class TransactionService {
       if (!buyerWallet) throw new NotFoundException('Buyer wallet not found');
 
       const sellerLock = this.toNumber(sellerWallet.uw_lock_balance);
-      if (sellerLock < amount) {
+      if (sellerLock < sellerLockDebit) {
         throw new BadRequestException('Seller lock balance is not enough');
       }
 
-      sellerWallet.uw_lock_balance = sellerLock - amount;
+      sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
       buyerWallet.uw_lock_balance =
-        this.toNumber(buyerWallet.uw_lock_balance) + amount;
+        this.toNumber(buyerWallet.uw_lock_balance) + toBuyer;
 
       await manager.save(UserWallet, sellerWallet);
       await manager.save(UserWallet, buyerWallet);
@@ -443,8 +482,30 @@ export class TransactionService {
         (manager as any).getRepository(Transaction),
         saved.trans_id,
       );
-      return this.toTransactionResponse(hydrated ?? saved);
+      return {
+        response: this.toTransactionResponse(hydrated ?? saved),
+        buyerId: transaction.trans_user_buy,
+        sellerId: transaction.trans_user_sell,
+        transactionId: saved.trans_id,
+      };
     });
+
+    // Publish async (best-effort) so it doesn't block the request flow.
+    const at = new Date().toISOString();
+    void this.pubsub.publish(USER_LEVELUP_CHANNEL, {
+      userId: result.buyerId,
+      transactionId: result.transactionId,
+      at,
+    });
+    if (result.sellerId && result.sellerId !== result.buyerId) {
+      void this.pubsub.publish(USER_LEVELUP_CHANNEL, {
+        userId: result.sellerId,
+        transactionId: result.transactionId,
+        at,
+      });
+    }
+
+    return result.response;
   }
 
   async cancelTransaction(userId: number, id: number) {

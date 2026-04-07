@@ -181,6 +181,7 @@ export class WalletsController {
           wallet_type: 'main',
           coin_id: 1,
           balance: 520.75,
+          lock_balance: 120,
           balance_gift: 10,
           balance_reward: 3.15,
         },
@@ -211,6 +212,7 @@ export class WalletsController {
       wallet_type: wallet.uw_wallet_type,
       coin_id: wallet.uw_wallet_coins,
       balance: parseFloat(wallet.uw_balance.toString()),
+      lock_balance: parseFloat(wallet.uw_lock_balance.toString()),
       balance_gift: parseFloat(wallet.uw_balance_gift.toString()),
       balance_reward: parseFloat(wallet.uw_balance_reward.toString()),
     };
