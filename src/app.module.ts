@@ -15,6 +15,7 @@ import { AdminsModule } from './admins/admins.module';
 import { OrderbookModule } from './orderbook/orderbook.module';
 import { ChatModule } from './chat/chat.module';
 import { SupportChatModule } from './support-chat/support-chat.module';
+import { CurrenciesModule } from './currencies/currencies.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SupportChatModule } from './support-chat/support-chat.module';
     OrderbookModule,
     ChatModule,
     SupportChatModule,
+    CurrenciesModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
   providers: [AppService],
