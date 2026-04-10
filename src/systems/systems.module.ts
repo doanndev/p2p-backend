@@ -6,10 +6,12 @@ import { CacheService } from './cache.service';
 import { DatabaseInitService } from './database-init.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { RedisPubSubService } from './redis-pubsub.service';
+import { UploadsController } from './uploads.controller';
 
 @Global()
 @Module({
   imports: [ConfigModule, TypeOrmModule],
+  controllers: [UploadsController],
   providers: [
     EmailService,
     CacheService,

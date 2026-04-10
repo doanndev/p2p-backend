@@ -35,6 +35,9 @@ import {
   QueryTransactionsDto,
 } from './dto/query.dto';
 import { AttachBankToOrderbookDto } from './dto/attach-bank-to-orderbook.dto';
+import { CreateDisputeDto } from './dto/create-dispute.dto';
+import { QueryDisputesDto } from './dto/query-disputes.dto';
+import { AdminJwtAuthGuard } from '../admins/guards/admin-jwt-auth.guard';
 
 const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   id: 101,
@@ -152,8 +155,25 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   lock_released_at: null,
 };
 
+const DISPUTE_RESPONSE_EXAMPLE = {
+  id: 1,
+  transaction_id: 5001,
+  initiator_id: 22,
+  responder_id: 12,
+  type: 'payment_not_received',
+  reason: 'I transferred money but seller has not confirmed.',
+  evidence: 'https://cdn.example.com/evidence/payment-slip.png',
+  status: 'open',
+  admin_id: null,
+  resolution: null,
+  created_at: '2026-04-10T10:00:00.000Z',
+  updated_at: '2026-04-10T10:00:00.000Z',
+  resolved_at: null,
+};
+
 @ApiTags('Orderbook')
 @ApiCookieAuth('access_token')
+@ApiCookieAuth('admin_access_token')
 @Controller('orderbook')
 export class OrderbookController {
   constructor(
@@ -409,5 +429,76 @@ export class OrderbookController {
   })
   cancelTransaction(@Request() req: any, @Param('id') id: string) {
     return this.transactionService.cancelTransaction(req.user.uid, Number(id));
+  }
+
+  @Post('transactions/:id/disputes')
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'User tạo dispute cho transaction' })
+  @ApiBody({ type: CreateDisputeDto })
+  @ApiCreatedResponse({
+    description: 'Tạo dispute thành công',
+    schema: { example: DISPUTE_RESPONSE_EXAMPLE },
+  })
+  createDispute(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: CreateDisputeDto,
+  ) {
+    return this.transactionService.createDispute(req.user.uid, Number(id), dto);
+  }
+
+  @Get('disputes')
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @ApiOperation({ summary: 'User lấy danh sách dispute do mình tạo' })
+  @ApiOkResponse({
+    description: 'Danh sách dispute',
+    schema: { example: [DISPUTE_RESPONSE_EXAMPLE] },
+  })
+  getMyDisputes(@Request() req: any) {
+    return this.transactionService.getMyDisputes(req.user.uid);
+  }
+
+  @Get('disputes/:id')
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @ApiOperation({ summary: 'User lấy chi tiết dispute do mình tạo' })
+  @ApiOkResponse({
+    description: 'Chi tiết dispute',
+    schema: { example: DISPUTE_RESPONSE_EXAMPLE },
+  })
+  getMyDisputeDetail(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.getMyDisputeDetail(req.user.uid, Number(id));
+  }
+
+  @Get('admin/disputes')
+  @UseGuards(AdminJwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    }),
+  )
+  @ApiOperation({ summary: 'Admin lấy danh sách dispute toàn hệ thống' })
+  @ApiOkResponse({
+    description: 'Danh sách dispute toàn hệ thống',
+    schema: { example: [DISPUTE_RESPONSE_EXAMPLE] },
+  })
+  adminGetDisputes(@Request() req: any, @Query() query: QueryDisputesDto) {
+    return this.transactionService.adminGetDisputes(req.user.admin_id, query);
+  }
+
+  @Get('admin/disputes/:id')
+  @UseGuards(AdminJwtAuthGuard)
+  @ApiOperation({ summary: 'Admin lấy chi tiết dispute' })
+  @ApiOkResponse({
+    description: 'Chi tiết dispute',
+    schema: { example: DISPUTE_RESPONSE_EXAMPLE },
+  })
+  adminGetDisputeDetail(@Request() req: any, @Param('id') id: string) {
+    return this.transactionService.adminGetDisputeDetail(
+      req.user.admin_id,
+      Number(id),
+    );
   }
 }

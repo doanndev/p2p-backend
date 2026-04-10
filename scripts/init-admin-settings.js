@@ -22,6 +22,11 @@ const DEFAULT_SETTINGS = [
   { name: 'config.rpc.bsc', type: 'string', value: null },
   { name: 'config.rpc.rate_limit', type: 'number', value: '50' },
   { name: 'transaction.time_lock_balance', type: 'number', value: null },
+  {
+    name: 'transaction.lock_hours_by_level',
+    type: 'json',
+    value: '{"lv1":24,"lv2":12,"lv3":4,"lv4":3,"lv5":2,"lv6":1}',
+  },
   { name: 'transaction.fee', type: 'number', value: '2' },
 ];
 

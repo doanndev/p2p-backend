@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   OrderBook,
   OrderBookOption,
@@ -17,15 +17,18 @@ import {
   TransactionStatus,
   TransactionType,
 } from './entities/transaction.entity';
+import { Dispute, DisputeStatus, DisputeType } from './entities/dispute.entity';
 import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { User } from '../users/entities/user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { QueryTransactionsDto } from './dto/query.dto';
-import { ChatRoom, ChatRoomStatus } from '../chat/entities/chat-room.entity';
+import { CreateDisputeDto } from './dto/create-dispute.dto';
+import { QueryDisputesDto } from './dto/query-disputes.dto';
 import { RedisPubSubService } from '../systems/redis-pubsub.service';
 import { USER_LEVELUP_CHANNEL } from '../users/user-level-up.constants';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
+import { Admin } from '../admins/entities/admin.entity';
 
 @Injectable()
 export class TransactionService {
@@ -34,8 +37,12 @@ export class TransactionService {
     private readonly orderBookRepository: Repository<OrderBook>,
     @InjectRepository(Transaction)
     private readonly transactionRepository: Repository<Transaction>,
+    @InjectRepository(Dispute)
+    private readonly disputeRepository: Repository<Dispute>,
     @InjectRepository(UserWallet)
     private readonly userWalletRepository: Repository<UserWallet>,
+    @InjectRepository(Admin)
+    private readonly adminRepository: Repository<Admin>,
     private readonly dataSource: DataSource,
     private readonly pubsub: RedisPubSubService,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
@@ -53,25 +60,35 @@ export class TransactionService {
     return `TX-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   }
 
+  private static readonly DEFAULT_P2P_LOCK_HOURS_BY_LEVEL = {
+    lv1: 24,
+    lv2: 12,
+    lv3: 4,
+    lv4: 3,
+    lv5: 2,
+    lv6: 1,
+  } as const;
+
   /** Hours of buyer lock after trade completes (confirmReceived). */
-  static getP2pLockHours(
+  private async getP2pLockHours(
     tradeMode: OrderBookTradeMode | null,
     buyerLevel: number,
-  ): number {
+  ): Promise<number> {
     const mode = tradeMode ?? OrderBookTradeMode.SAFE;
     if (mode === OrderBookTradeMode.SAFE) {
       return 24;
     }
-    switch (buyerLevel) {
-      case 1:
-        return 24;
-      case 2:
-        return 12;
-      case 3:
-        return 4;
-      default:
-        return 24;
-    }
+
+    const lockHoursMap =
+      await this.adminSettingsConfigService.getP2pLockHoursByLevel();
+    const level = Number.isFinite(buyerLevel) ? Math.floor(buyerLevel) : 1;
+    const key = `lv${level}`;
+
+    return (
+      lockHoursMap[key] ??
+      TransactionService.DEFAULT_P2P_LOCK_HOURS_BY_LEVEL[key] ??
+      TransactionService.DEFAULT_P2P_LOCK_HOURS_BY_LEVEL.lv1
+    );
   }
 
   private toPublicUser(user: User | null | undefined) {
@@ -226,22 +243,6 @@ export class TransactionService {
       });
 
       const saved = await manager.save(Transaction, transaction);
-
-      // Create chat room for this transaction (pending 30 minutes window).
-      const existingRoom = await manager.findOne(ChatRoom, {
-        where: { room_transaction_id: saved.trans_id },
-      });
-      if (!existingRoom) {
-        const room = manager.create(ChatRoom, {
-          room_transaction_id: saved.trans_id,
-          room_buyer_id: saved.trans_user_buy,
-          room_seller_id: saved.trans_user_sell,
-          room_status: ChatRoomStatus.ACTIVE,
-          room_created_at: new Date(),
-          room_closed_at: null,
-        });
-        await manager.save(ChatRoom, room);
-      }
 
       const hydrated = await this.loadTransactionWithUsers(
         (manager as any).getRepository(Transaction),
@@ -459,7 +460,7 @@ export class TransactionService {
         throw new NotFoundException('Buyer user not found');
       }
 
-      const lockHours = TransactionService.getP2pLockHours(
+      const lockHours = await this.getP2pLockHours(
         transaction.trans_trade_mode,
         buyerUser.ulevel,
       );
@@ -468,15 +469,6 @@ export class TransactionService {
       );
       transaction.trans_status = TransactionStatus.EXECUTED;
       const saved = await manager.save(Transaction, transaction);
-
-      // Close chat room when completed
-      await manager
-        .createQueryBuilder()
-        .update(ChatRoom)
-        .set({ room_status: ChatRoomStatus.CLOSED, room_closed_at: new Date() })
-        .where('room_transaction_id = :txId', { txId: saved.trans_id })
-        .andWhere('room_status = :status', { status: ChatRoomStatus.ACTIVE })
-        .execute();
 
       const hydrated = await this.loadTransactionWithUsers(
         (manager as any).getRepository(Transaction),
@@ -574,20 +566,133 @@ export class TransactionService {
       transaction.trans_status = TransactionStatus.CANCELLED;
       const saved = await manager.save(Transaction, transaction);
 
-      // Close chat room when cancelled
-      await manager
-        .createQueryBuilder()
-        .update(ChatRoom)
-        .set({ room_status: ChatRoomStatus.CLOSED, room_closed_at: new Date() })
-        .where('room_transaction_id = :txId', { txId: saved.trans_id })
-        .andWhere('room_status = :status', { status: ChatRoomStatus.ACTIVE })
-        .execute();
-
       const hydrated = await this.loadTransactionWithUsers(
         (manager as any).getRepository(Transaction),
         saved.trans_id,
       );
       return this.toTransactionResponse(hydrated ?? saved);
     });
+  }
+
+  private toDisputeResponse(d: Dispute) {
+    return {
+      id: d.dispute_id,
+      transaction_id: d.dispute_transaction_id,
+      initiator_id: d.dispute_initiator_id,
+      responder_id: d.dispute_responder_id,
+      type: d.dispute_type,
+      reason: d.dispute_reason,
+      evidence: d.dispute_evidence,
+      status: d.dispute_status,
+      admin_id: d.dispute_admin_id,
+      resolution: d.dispute_resolution,
+      created_at: d.dispute_created_at,
+      updated_at: d.dispute_updated_at,
+      resolved_at: d.dispute_resolved_at,
+    };
+  }
+
+  async createDispute(
+    userId: number,
+    transactionId: number,
+    dto: CreateDisputeDto,
+  ) {
+    const tx = await this.transactionRepository.findOne({
+      where: { trans_id: transactionId },
+    });
+    if (!tx) throw new NotFoundException('Transaction not found');
+
+    const isBuyer = tx.trans_user_buy === userId;
+    const isSeller = tx.trans_user_sell === userId;
+    if (!isBuyer && !isSeller) {
+      throw new ForbiddenException(
+        'You are not a participant in this transaction',
+      );
+    }
+
+    const existingActive = await this.disputeRepository.findOne({
+      where: {
+        dispute_transaction_id: transactionId,
+        dispute_status: In([DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW]),
+      },
+    });
+    if (existingActive) {
+      throw new BadRequestException(
+        'An active dispute already exists for this transaction',
+      );
+    }
+
+    const dispute = this.disputeRepository.create({
+      dispute_transaction_id: transactionId,
+      dispute_initiator_id: userId,
+      dispute_responder_id: isBuyer ? tx.trans_user_sell : tx.trans_user_buy,
+      dispute_type: dto.type as DisputeType,
+      dispute_reason: dto.reason,
+      dispute_evidence: dto.evidence ?? null,
+      dispute_status: DisputeStatus.OPEN,
+      dispute_admin_id: null,
+      dispute_resolution: null,
+      dispute_resolved_at: null,
+    });
+
+    const saved = await this.disputeRepository.save(dispute);
+
+    if (!tx.trans_dispute_status) {
+      tx.trans_dispute_status = true;
+      await this.transactionRepository.save(tx);
+    }
+
+    return this.toDisputeResponse(saved);
+  }
+
+  async getMyDisputes(userId: number) {
+    const rows = await this.disputeRepository.find({
+      where: { dispute_initiator_id: userId },
+      order: { dispute_created_at: 'DESC' },
+    });
+    return rows.map((d) => this.toDisputeResponse(d));
+  }
+
+  async getMyDisputeDetail(userId: number, disputeId: number) {
+    const d = await this.disputeRepository.findOne({
+      where: { dispute_id: disputeId },
+    });
+    if (!d) throw new NotFoundException('Dispute not found');
+    if (d.dispute_initiator_id !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to view this dispute',
+      );
+    }
+    return this.toDisputeResponse(d);
+  }
+
+  async adminGetDisputes(adminId: number, query: QueryDisputesDto) {
+    const admin = await this.adminRepository.findOne({
+      where: { admin_id: adminId },
+    });
+    if (!admin) throw new ForbiddenException('Admin not found');
+
+    const qb = this.disputeRepository
+      .createQueryBuilder('d')
+      .orderBy('d.dispute_created_at', 'DESC');
+    if (query.status) {
+      qb.andWhere('d.dispute_status = :status', { status: query.status });
+    }
+
+    const rows = await qb.getMany();
+    return rows.map((d) => this.toDisputeResponse(d));
+  }
+
+  async adminGetDisputeDetail(adminId: number, disputeId: number) {
+    const admin = await this.adminRepository.findOne({
+      where: { admin_id: adminId },
+    });
+    if (!admin) throw new ForbiddenException('Admin not found');
+
+    const d = await this.disputeRepository.findOne({
+      where: { dispute_id: disputeId },
+    });
+    if (!d) throw new NotFoundException('Dispute not found');
+    return this.toDisputeResponse(d);
   }
 }

@@ -60,3 +60,8 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Super admin module (local only, ignore from git)
 src/super-admin/
+
+
+#documents
+documents/
+index.html

@@ -9,10 +9,15 @@ import {
 } from '@nestjs/websockets';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
+import { Admin, AdminStatus } from '../admins/entities/admin.entity';
 
-type AuthedSocket = Socket & { userId?: number };
+type ChatSocket = Socket & {
+  actor?: { type: 'user' | 'admin'; id: number };
+};
 
 function parseCookie(header: string | undefined): Record<string, string> {
   if (!header) return {};
@@ -44,16 +49,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @InjectRepository(Admin)
+    private readonly adminRepository: Repository<Admin>,
   ) {}
 
-  async handleConnection(client: AuthedSocket) {
+  async handleConnection(client: ChatSocket) {
     try {
       const cookieHeader =
         (client.handshake.headers?.cookie as string | undefined) ?? undefined;
       const cookies = parseCookie(cookieHeader);
-      const token =
+      const adminToken =
+        (client.handshake.auth?.admin_access_token as string | undefined) ||
+        cookies['admin_access_token'];
+      const userToken =
         (client.handshake.auth?.access_token as string | undefined) ||
         cookies['access_token'];
+      const token = adminToken || userToken;
       if (!token) {
         client.disconnect(true);
         return;
@@ -68,33 +79,44 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      client.userId = userId;
+      if (adminToken) {
+        const admin = await this.adminRepository.findOne({
+          where: { admin_id: userId },
+        });
+        if (!admin || admin.admin_status !== AdminStatus.ACTIVE) {
+          client.disconnect(true);
+          return;
+        }
+        client.actor = { type: 'admin', id: userId };
+      } else {
+        client.actor = { type: 'user', id: userId };
+      }
     } catch {
       client.disconnect(true);
     }
   }
 
-  handleDisconnect(client: AuthedSocket) {
+  handleDisconnect(client: ChatSocket) {
     // no-op
     void client;
   }
 
   @SubscribeMessage('join')
   async join(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: ChatSocket,
     @MessageBody()
     body: {
       transaction_id: number;
     },
   ) {
-    const userId = client.userId;
-    if (!userId) return { ok: false, error: 'unauthorized' };
+    const actor = client.actor;
+    if (!actor) return { ok: false, error: 'unauthorized' };
 
     const transactionId = Number(body?.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
 
-    await this.chatService.assertUserCanAccessTransactionChat(
-      userId,
+    await this.chatService.assertActorCanAccessTransactionChat(
+      actor,
       transactionId,
     );
 
@@ -102,17 +124,73 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { ok: true };
   }
 
+  @SubscribeMessage('admin_create_room')
+  async adminCreateRoom(
+    @ConnectedSocket() client: ChatSocket,
+    @MessageBody()
+    body: {
+      transaction_id: number;
+    },
+  ) {
+    const actor = client.actor;
+    if (!actor) return { ok: false, error: 'unauthorized' };
+
+    const transactionId = Number(body?.transaction_id);
+    if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
+
+    try {
+      const room = await this.chatService.createChatRoomByAdmin(
+        actor,
+        transactionId,
+      );
+      await client.join(roomName(transactionId));
+      this.server.to(roomName(transactionId)).emit('room_opened', {
+        transaction_id: transactionId,
+      });
+      return { ok: true, room };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? 'create_room_failed' };
+    }
+  }
+
+  @SubscribeMessage('admin_close_room')
+  async adminCloseRoom(
+    @ConnectedSocket() client: ChatSocket,
+    @MessageBody()
+    body: {
+      transaction_id: number;
+      reason?: string;
+    },
+  ) {
+    const actor = client.actor;
+    if (!actor) return { ok: false, error: 'unauthorized' };
+
+    const transactionId = Number(body?.transaction_id);
+    if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
+
+    try {
+      await this.chatService.closeChatRoomByAdmin(actor, transactionId);
+      this.server.to(roomName(transactionId)).emit('room_closed', {
+        transaction_id: transactionId,
+        reason: body?.reason || 'closed_by_admin',
+      });
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? 'close_room_failed' };
+    }
+  }
+
   @SubscribeMessage('send_message')
   async sendMessage(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: ChatSocket,
     @MessageBody()
     body: {
       transaction_id: number;
       content: string;
     },
   ) {
-    const userId = client.userId;
-    if (!userId) return { ok: false, error: 'unauthorized' };
+    const actor = client.actor;
+    if (!actor) return { ok: false, error: 'unauthorized' };
 
     const transactionId = Number(body?.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
@@ -122,7 +200,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const msg = await this.chatService.saveTextMessage(
-        userId,
+        actor,
         transactionId,
         body?.content,
       );

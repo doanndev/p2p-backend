@@ -9,6 +9,7 @@ import { User } from '../users/entities/user.entity';
 import { ChatGateway } from './chat.gateway';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { Admin } from '../admins/entities/admin.entity';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         secret: configService.get<string>('JWT_SECRET') || 'your-secret-key',
       }),
     }),
-    TypeOrmModule.forFeature([ChatRoom, ChatMessage, Transaction, User]),
+    TypeOrmModule.forFeature([ChatRoom, ChatMessage, Transaction, User, Admin]),
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

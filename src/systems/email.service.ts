@@ -1,12 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import { getDepositSuccessEmailHtml } from '../email/deposit-usdt-success.template';
+import { join } from 'path';
+import { getNewDepositNotificationEmailHtml } from '../email/new-deposit-notification.template';
+import { getNewWithdrawNotificationEmailHtml } from '../email/new-withdraw-notification.template';
 import { getVerifyEmailCodeHtml } from '../email/verify-email-code.template';
 
 @Injectable()
 export class EmailService {
   private transporter: nodemailer.Transporter;
+  private readonly emailAssetAttachments = [
+    {
+      filename: 'OptIn_Hero.png',
+      path: join(process.cwd(), 'src/email/assets/OptIn_Hero.png'),
+      cid: 'OptIn_Hero',
+    },
+    {
+      filename: 'Grey_BG_01.png',
+      path: join(process.cwd(), 'src/email/assets/Grey_BG_01.png'),
+      cid: 'Grey_BG_01',
+    },
+  ];
 
   constructor(private configService: ConfigService) {
     this.transporter = nodemailer.createTransport({
@@ -80,17 +94,57 @@ export class EmailService {
     }
   }
 
-  /**
-   * Gửi email thông báo nạp USDT thành công
-   */
-  async sendDepositNotification(to: string, amount: number): Promise<void> {
+  async sendDepositNotification(
+    to: string,
+    payload: {
+      amount: number;
+      asset?: string;
+      network?: string;
+      txHash?: string;
+      walletAddress?: string;
+      createdAt?: Date | string;
+    },
+  ): Promise<void> {
+    const asset = payload.asset || 'USDT';
     const mailOptions = {
       from:
         this.configService.get<string>('SMTP_FROM') ||
         this.configService.get<string>('SMTP_USER'),
       to,
-      subject: 'USDT Deposit Successful',
-      html: getDepositSuccessEmailHtml(amount),
+      subject: `New ${asset} Deposit`,
+      html: getNewDepositNotificationEmailHtml(payload),
+      attachments: this.emailAssetAttachments,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending deposit notification email:', error);
+      throw error;
+    }
+  }
+
+  async sendWithdrawNotification(
+    to: string,
+    payload: {
+      amount: number;
+      asset?: string;
+      network?: string;
+      txHash?: string;
+      destinationAddress?: string;
+      createdAt?: Date | string;
+      status?: 'pending' | 'processing' | 'completed' | 'failed' | string;
+    },
+  ): Promise<void> {
+    const asset = payload.asset || 'USDT';
+    const mailOptions = {
+      from:
+        this.configService.get<string>('SMTP_FROM') ||
+        this.configService.get<string>('SMTP_USER'),
+      to,
+      subject: `New ${asset} Withdrawal`,
+      html: getNewWithdrawNotificationEmailHtml(payload),
+      attachments: this.emailAssetAttachments,
     };
 
     try {

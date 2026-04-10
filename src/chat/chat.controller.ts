@@ -1,24 +1,34 @@
 import {
+  Delete,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiCreatedResponse,
   ApiCookieAuth,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AdminJwtAuthGuard } from '../admins/guards/admin-jwt-auth.guard';
+import { ChatRoomStatus } from './entities/chat-room.entity';
 
 @ApiTags('Chat')
 @ApiCookieAuth('access_token')
+@ApiCookieAuth('admin_access_token')
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
@@ -45,9 +55,28 @@ export class ChatController {
       '```json',
       '{ "ok": true }',
       '```',
-      '- **Validate**: user phải là buyer/seller của transaction, room phải tồn tại.',
+      '- **Validate**:',
+      '  - User: phải là buyer/seller của transaction',
+      '  - Admin: bypass buyer/seller validation',
+      '  - Room phải tồn tại',
       '',
-      '### 2) send_message',
+      '### 2) admin_create_room',
+      '- **Client(Admin) → WS**: `admin_create_room`',
+      '```json',
+      '{ "transaction_id": 123 }',
+      '```',
+      '- **Quyền**: chỉ admin active được tạo/reopen room.',
+      '- **WS → Room (emit)**: `room_opened`',
+      '',
+      '### 3) admin_close_room',
+      '- **Client(Admin) → WS**: `admin_close_room`',
+      '```json',
+      '{ "transaction_id": 123, "reason": "manual_close" }',
+      '```',
+      '- **Quyền**: chỉ admin active được đóng room.',
+      '- **WS → Room (emit)**: `room_closed`',
+      '',
+      '### 4) send_message',
       '- **Client → WS**: `send_message`',
       '```json',
       '{ "transaction_id": 123, "content": "hello" }',
@@ -59,15 +88,9 @@ export class ChatController {
       '{ "ok": true, "message": { "id": 1, "transaction_id": 123, "room_id": 10, "sender_id": 100, "type": "text", "content": "hello", "created_at": "2026-03-25T08:00:00.000Z" } }',
       '```',
       '- **Validate**:',
-      '  - user thuộc transaction',
-      '  - room `ACTIVE`',
-      '  - transaction status phải `pending`',
-      '',
-      '### 3) room_closed (server emit)',
-      '- **WS → Room**: `room_closed`',
-      '```json',
-      '{ "transaction_id": 123, "reason": "expired" }',
-      '```',
+      '  - Buyer/Seller: vẫn phải thuộc transaction',
+      '  - Admin: được bypass buyer/seller validation',
+      '  - Room phải `ACTIVE`',
       '',
       '## Flow',
       '',
@@ -95,9 +118,9 @@ export class ChatController {
       '- **Client → API**: `GET /api/v1/chat/transactions/{id}/messages`',
       '- **Client → WS**: reconnect + `join` lại room (rejoin idempotent).',
       '',
-      '## TTL 30 phút',
-      '- Chat room được tạo khi tạo transaction.',
-      '- Sau **30 phút** nếu transaction vẫn `pending` → set `failed` và room `closed`.',
+      '## Room lifecycle',
+      '- Transaction tạo mới **không tự tạo chat room**.',
+      '- Chat room chỉ được **admin tạo/đóng thủ công**.',
     ].join('\n'),
   })
   @ApiOkResponse({
@@ -106,6 +129,34 @@ export class ChatController {
   })
   realtimeDoc() {
     return { ok: true };
+  }
+
+  @Get('rooms/active')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Lấy danh sách chat room đang mở của user hiện tại',
+    description:
+      'Trả về các room có status active mà user là buyer hoặc seller. Nếu không có room nào thì trả về mảng rỗng.',
+  })
+  @ApiOkResponse({
+    description: 'Danh sách room active của user (có thể rỗng)',
+    schema: {
+      example: [
+        {
+          room_id: 12,
+          transaction_id: 123,
+          buyer_id: 101,
+          seller_id: 202,
+          status: 'active',
+          created_at: '2026-04-10T08:00:00.000Z',
+          closed_at: null,
+        },
+      ],
+    },
+  })
+  getActiveRooms(@Request() req: any) {
+    return this.chatService.getActiveRoomsByUser(req.user.uid);
   }
 
   /**
@@ -147,5 +198,127 @@ export class ChatController {
       req.user.uid,
       Number(id),
     );
+  }
+
+  @Get('admin/rooms')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin: list chat rooms' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ChatRoomStatus,
+    example: ChatRoomStatus.ACTIVE,
+  })
+  @ApiQuery({ name: 'userId', required: false, example: 1001 })
+  @ApiQuery({ name: 'transactionId', required: false, example: 123 })
+  @ApiOkResponse({
+    description: 'Danh sách chat rooms',
+    schema: {
+      example: [
+        {
+          room_id: 12,
+          transaction_id: 123,
+          buyer_id: 1001,
+          seller_id: 1002,
+          status: 'active',
+          created_at: '2026-04-10T08:00:00.000Z',
+          closed_at: null,
+        },
+      ],
+    },
+  })
+  adminListRooms(
+    @Query('status') status?: ChatRoomStatus,
+    @Query('userId') userId?: string,
+    @Query('transactionId') transactionId?: string,
+  ) {
+    return this.chatService.adminListRooms({
+      status,
+      userId: userId ? Number(userId) : undefined,
+      transactionId: transactionId ? Number(transactionId) : undefined,
+    });
+  }
+
+  @Get('admin/rooms/:transactionId')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin: get chat room detail by transaction' })
+  @ApiParam({ name: 'transactionId', required: true, example: 123 })
+  @ApiOkResponse({ description: 'Chi tiết room' })
+  adminGetRoomDetail(
+    @Param('transactionId', ParseIntPipe) transactionId: number,
+  ) {
+    return this.chatService.adminGetRoomDetail(transactionId);
+  }
+
+  @Get('admin/rooms/:transactionId/messages')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin: get messages by room(transaction)' })
+  @ApiParam({ name: 'transactionId', required: true, example: 123 })
+  @ApiOkResponse({ description: 'Danh sách messages của room' })
+  adminGetRoomMessages(
+    @Param('transactionId', ParseIntPipe) transactionId: number,
+  ) {
+    return this.chatService.adminGetRoomMessages(transactionId);
+  }
+
+  @Post('admin/rooms/:transactionId')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Admin: create or reopen chat room' })
+  @ApiParam({ name: 'transactionId', required: true, example: 123 })
+  @ApiCreatedResponse({ description: 'Tạo/reopen room thành công' })
+  adminCreateOrReopenRoom(
+    @Request() req: any,
+    @Param('transactionId', ParseIntPipe) transactionId: number,
+  ) {
+    return this.chatService.adminCreateOrReopenRoom(
+      req.user.admin_id,
+      transactionId,
+    );
+  }
+
+  @Patch('admin/rooms/:transactionId/close')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin: close chat room' })
+  @ApiParam({ name: 'transactionId', required: true, example: 123 })
+  @ApiOkResponse({ description: 'Đóng room thành công' })
+  adminCloseRoom(
+    @Request() req: any,
+    @Param('transactionId', ParseIntPipe) transactionId: number,
+  ) {
+    return this.chatService.adminCloseRoom(req.user.admin_id, transactionId);
+  }
+
+  @Patch('admin/rooms/:transactionId/archive')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin: archive chat room' })
+  @ApiParam({ name: 'transactionId', required: true, example: 123 })
+  @ApiOkResponse({ description: 'Archive room thành công' })
+  adminArchiveRoom(
+    @Request() req: any,
+    @Param('transactionId', ParseIntPipe) transactionId: number,
+  ) {
+    return this.chatService.adminArchiveRoom(req.user.admin_id, transactionId);
+  }
+
+  @Delete('admin/messages/:messageId')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin: delete chat message' })
+  @ApiParam({ name: 'messageId', required: true, example: 10001 })
+  @ApiOkResponse({
+    description: 'Xóa message thành công',
+    schema: { example: { message: 'Message deleted successfully', id: 10001 } },
+  })
+  adminDeleteMessage(
+    @Request() req: any,
+    @Param('messageId', ParseIntPipe) messageId: number,
+  ) {
+    return this.chatService.adminDeleteMessage(req.user.admin_id, messageId);
   }
 }

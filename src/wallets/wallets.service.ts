@@ -69,6 +69,7 @@ import { RpcRateLimitService } from '../common/rpc-rate-limit.service';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 import { CacheService } from '../systems/cache.service';
+import { EmailService } from '../systems/email.service';
 
 /** Thông báo lỗi chung trả về frontend khi rút tiền thất bại (ví main thiếu dư, RPC lỗi, simulation fail, ...). */
 const WITHDRAW_ERROR_MESSAGE =
@@ -124,6 +125,7 @@ export class WalletsService implements OnModuleInit {
     private rpcRateLimitService: RpcRateLimitService,
     private adminSettingsConfigService: AdminSettingsConfigService,
     private cacheService: CacheService,
+    private emailService: EmailService,
   ) {}
 
   onModuleInit(): void {
@@ -1765,7 +1767,7 @@ export class WalletsService implements OnModuleInit {
     // 0. Kiểm tra user đã xác minh danh tính và status = active
     const user = await this.userRepository.findOne({
       where: { uid: userId },
-      select: ['uid', 'uverify', 'ustatus', 'u_active_ggauth', 'uggauth'],
+      select: ['uid', 'uverify', 'ustatus', 'u_active_ggauth', 'uggauth', 'uemail'],
     });
 
     if (!user) {
@@ -2003,6 +2005,24 @@ export class WalletsService implements OnModuleInit {
       }
       userWallet.uw_balance = newBalance as any; // TypeORM decimal type
       await this.userWalletRepository.save(userWallet);
+
+      if (user.uemail) {
+        try {
+          await this.emailService.sendWithdrawNotification(user.uemail, {
+            amount,
+            asset: coin.coin_symbol,
+            network: network.net_symbol,
+            txHash,
+            destinationAddress: address,
+            createdAt: savedHistory.updated_at || new Date(),
+            status: 'completed',
+          });
+        } catch (emailError: any) {
+          this.logger.error(
+            `[withdraw] send email failed userId=${userId}: ${emailError?.message || emailError}`,
+          );
+        }
+      }
 
       return {
         message: 'Withdraw successful',

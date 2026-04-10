@@ -8,14 +8,11 @@ import {
   Res,
   Request,
   UseGuards,
-  UseInterceptors,
-  UploadedFiles,
   Query,
   HttpException,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { UsersService } from './users.service';
 import { RegisterDto } from './dto/register.dto';
@@ -23,6 +20,7 @@ import { LoginDto } from './dto/login.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { KycDto } from './dto/kyc.dto';
+import { KycPaperDto } from './dto/kyc-paper.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SetNewPasswordDto } from './dto/set-new-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -30,12 +28,10 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RegisterKolDto } from './dto/register-kol.dto';
 import { SubmitKolArticleDto } from './dto/submit-kol-article.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { multerConfig } from './multer.config';
 import {
   ApiBadRequestResponse,
   ApiBody,
   ApiCreatedResponse,
-  ApiConsumes,
   ApiCookieAuth,
   ApiOkResponse,
   ApiOperation,
@@ -455,24 +451,9 @@ export class UsersController {
   @Post('kyc')
   @ApiOperation({
     summary:
-      'Bước 1 KYC: ảnh CCCD mặt trước & mặt sau (thứ tự file: [0]=trước, [1]=sau). Trả về mã để viết lên giấy và gửi ảnh cầm giấy ở POST /users/kyc-paper.',
+      'Bước 1 KYC: gửi URL ảnh CCCD mặt trước & mặt sau (đã upload trực tiếp Cloudinary).',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        idCardNumber: { type: 'string', example: '079123456789' },
-        images: {
-          type: 'array',
-          items: { type: 'string', format: 'binary' },
-          minItems: 2,
-          maxItems: 2,
-        },
-      },
-      required: ['idCardNumber', 'images'],
-    },
-  })
+  @ApiBody({ type: KycDto })
   @ApiCreatedResponse({
     description:
       'Đã lưu CCCD; cần gửi thêm ảnh cầm giấy (challenge_code, challenge_expires_at)',
@@ -491,39 +472,19 @@ export class UsersController {
     },
   })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FilesInterceptor('images', 2, multerConfig))
   @HttpCode(HttpStatus.CREATED)
-  async submitKyc(
-    @Request() req: any,
-    @Body() kycDto: KycDto,
-    @UploadedFiles() files: Express.Multer.File[],
-  ) {
+  async submitKyc(@Request() req: any, @Body() kycDto: KycDto) {
     const user = req.user; // User from JWT token
-    const result = await this.usersService.submitKyc(user.uid, kycDto, files);
+    const result = await this.usersService.submitKyc(user.uid, kycDto);
     return result.response;
   }
 
   @Post('kyc-retry')
   @ApiOperation({
     summary:
-      'Gửi lại CCCD sau retry admin; thứ tự ảnh [0]=trước [1]=sau. Trả về mã mới cho bước kyc-paper.',
+      'Gửi lại CCCD sau retry admin bằng URL ảnh đã upload trực tiếp.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        idCardNumber: { type: 'string', example: '079123456789' },
-        images: {
-          type: 'array',
-          items: { type: 'string', format: 'binary' },
-          minItems: 2,
-          maxItems: 2,
-        },
-      },
-      required: ['idCardNumber', 'images'],
-    },
-  })
+  @ApiBody({ type: KycDto })
   @ApiOkResponse({
     description: 'CCCD cập nhật; cần gửi ảnh cầm giấy',
     schema: {
@@ -536,33 +497,19 @@ export class UsersController {
     },
   })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FilesInterceptor('images', 2, multerConfig))
   @HttpCode(HttpStatus.OK)
-  async retryKyc(
-    @Request() req: any,
-    @Body() kycDto: KycDto,
-    @UploadedFiles() files: Express.Multer.File[],
-  ) {
+  async retryKyc(@Request() req: any, @Body() kycDto: KycDto) {
     const user = req.user; // User from JWT token
-    const result = await this.usersService.retryKyc(user.uid, kycDto, files);
+    const result = await this.usersService.retryKyc(user.uid, kycDto);
     return result.response;
   }
 
   @Post('kyc-paper')
   @ApiOperation({
     summary:
-      'Bước 2 KYC: một ảnh cầm giấy ghi đúng mã challenge (multipart field: image)',
+      'Bước 2 KYC: gửi URL ảnh cầm giấy challenge (đã upload trực tiếp Cloudinary).',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        image: { type: 'string', format: 'binary' },
-      },
-      required: ['image'],
-    },
-  })
+  @ApiBody({ type: KycPaperDto })
   @ApiOkResponse({
     description: 'Đã nhận ảnh minh chứng; chờ admin duyệt',
     schema: {
@@ -574,14 +521,13 @@ export class UsersController {
     },
   })
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FilesInterceptor('image', 1, multerConfig))
   @HttpCode(HttpStatus.OK)
-  async submitKycPaper(
-    @Request() req: any,
-    @UploadedFiles() files: Express.Multer.File[],
-  ) {
+  async submitKycPaper(@Request() req: any, @Body() dto: KycPaperDto) {
     const user = req.user;
-    const result = await this.usersService.submitKycPaper(user.uid, files);
+    const result = await this.usersService.submitKycPaper(
+      user.uid,
+      dto.paperImageUrl,
+    );
     return result.response;
   }
 

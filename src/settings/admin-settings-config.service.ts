@@ -28,6 +28,14 @@ export class AdminSettingsConfigService {
   private cachedMap: Map<string, AdminSetting> | null = null;
   private cachedAt = 0;
   private readonly CACHE_MS = 60_000; // 60s
+  private readonly DEFAULT_LOCK_HOURS_BY_LEVEL: Record<string, number> = {
+    lv1: 24,
+    lv2: 12,
+    lv3: 4,
+    lv4: 3,
+    lv5: 2,
+    lv6: 1,
+  };
 
   constructor(
     @InjectRepository(AdminSetting)
@@ -60,6 +68,36 @@ export class AdminSettingsConfigService {
     const n = Number(raw);
     if (!Number.isFinite(n)) return null;
     return n;
+  }
+
+  private toLockHoursMap(raw: string | null): Record<string, number> {
+    if (!raw) return { ...this.DEFAULT_LOCK_HOURS_BY_LEVEL };
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { ...this.DEFAULT_LOCK_HOURS_BY_LEVEL };
+      }
+
+      const next: Record<string, number> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        const key = String(k).toLowerCase().trim();
+        if (!/^lv\d+$/.test(key)) continue;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) continue;
+        next[key] = Math.floor(n);
+      }
+
+      if (Object.keys(next).length === 0) {
+        return { ...this.DEFAULT_LOCK_HOURS_BY_LEVEL };
+      }
+
+      return {
+        ...this.DEFAULT_LOCK_HOURS_BY_LEVEL,
+        ...next,
+      };
+    } catch {
+      return { ...this.DEFAULT_LOCK_HOURS_BY_LEVEL };
+    }
   }
 
   /** Zerion API key: config.zerion_key hoặc ZERION_API_KEY. */
@@ -201,5 +239,11 @@ export class AdminSettingsConfigService {
       return 2;
     }
     return Math.min(fromDb, 100);
+  }
+
+  /** Lock giờ theo level cho P2P: `transaction.lock_hours_by_level`. */
+  async getP2pLockHoursByLevel(): Promise<Record<string, number>> {
+    const raw = await this.getSettingRaw('transaction.lock_hours_by_level');
+    return this.toLockHoursMap(raw);
   }
 }

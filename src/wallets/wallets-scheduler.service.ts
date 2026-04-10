@@ -643,6 +643,11 @@ export class WalletsSchedulerService implements OnModuleInit {
     network: Network,
     coinId: number,
   ): Promise<void> {
+    const coin = await this.coinRepository.findOne({
+      where: { coin_id: coinId },
+      select: ['coin_symbol'],
+    });
+
     // Lấy danh sách transaction đã có trong database - CHỈ của network cụ thể này
     const existingTransactions = await this.walletHistoryRepository.find({
       where: {
@@ -814,10 +819,14 @@ export class WalletsSchedulerService implements OnModuleInit {
           });
 
           if (user && user.uemail) {
-            await this.emailService.sendDepositNotification(
-              user.uemail,
-              tx.amount,
-            );
+            await this.emailService.sendDepositNotification(user.uemail, {
+              amount: tx.amount,
+              asset: coin?.coin_symbol || 'USDT',
+              network: network.net_symbol,
+              txHash: tx.hash,
+              walletAddress: tracker.awt_address,
+              createdAt: tx.timestamp,
+            });
           }
         } catch (emailError: any) {
           this.logger.error(

@@ -41,7 +41,6 @@ import { SubmitKolArticleDto } from './dto/submit-kol-article.dto';
 import { EmailService } from '../systems/email.service';
 import { CacheService } from '../systems/cache.service';
 import { StorageService } from './storage.service';
-import { CloudinaryService } from '../common/services/cloudinary.service';
 import { UserVerifyStatus } from './entities/user-verify.entity';
 import { UserWallet, WalletType } from '../wallets/entities/user-wallet.entity';
 import { Coin } from '../settings/entities/coin.entity';
@@ -75,7 +74,6 @@ export class UsersService {
     private emailService: EmailService,
     private cacheService: CacheService,
     private storageService: StorageService,
-    private cloudinaryService: CloudinaryService,
     private configService: ConfigService,
     private googleAuthService: GoogleAuthService,
   ) {}
@@ -1270,7 +1268,6 @@ export class UsersService {
   async submitKyc(
     userId: number,
     kycDto: KycDto,
-    files: Express.Multer.File[],
   ): Promise<{
     verification: UserVerify;
     response: {
@@ -1292,22 +1289,10 @@ export class UsersService {
       throw new BadRequestException('ID card number is required');
     }
 
-    // Validate files
-    if (!files || files.length !== 2) {
+    if (!kycDto.frontImageUrl || !kycDto.backsideImageUrl) {
       throw new BadRequestException(
-        'Please upload both front and backside images',
+        'frontImageUrl and backsideImageUrl are required',
       );
-    }
-
-    const frontImage = files[0];
-    const backsideImage = files[1];
-
-    // Validate image files
-    if (
-      !frontImage.mimetype.startsWith('image/') ||
-      !backsideImage.mimetype.startsWith('image/')
-    ) {
-      throw new BadRequestException('Files must be images');
     }
 
     // Check if user already has a KYC record
@@ -1321,56 +1306,6 @@ export class UsersService {
       );
     }
 
-    let frontImageUrl: string;
-    let backsideImageUrl: string;
-    let frontImagePublicId: string;
-    let backsideImagePublicId: string;
-    let frontImageResult: { url: string; public_id: string };
-    let backsideImageResult: { url: string; public_id: string };
-
-    try {
-      // Upload front image to Cloudinary
-      frontImagePublicId = this.cloudinaryService.generatePublicId(
-        `kyc_front_${userId}`,
-      );
-      frontImageResult = await this.cloudinaryService.uploadImage(
-        frontImage,
-        'kyc',
-        frontImagePublicId,
-      );
-      frontImageUrl = frontImageResult.url;
-    } catch (error) {
-      throw new InternalServerErrorException(
-        `Failed to upload front image to Cloudinary: ${error.message || 'Unknown error'}`,
-      );
-    }
-
-    try {
-      // Upload backside image to Cloudinary
-      backsideImagePublicId = this.cloudinaryService.generatePublicId(
-        `kyc_back_${userId}`,
-      );
-      backsideImageResult = await this.cloudinaryService.uploadImage(
-        backsideImage,
-        'kyc',
-        backsideImagePublicId,
-      );
-      backsideImageUrl = backsideImageResult.url;
-    } catch (error) {
-      // Rollback: Delete front image if backside upload fails
-      try {
-        await this.cloudinaryService.deleteImage(frontImageResult.public_id);
-      } catch (deleteError) {
-        console.error(
-          'Failed to delete front image after backside upload failure:',
-          deleteError,
-        );
-      }
-      throw new InternalServerErrorException(
-        `Failed to upload backside image to Cloudinary: ${error.message || 'Unknown error'}`,
-      );
-    }
-
     const challengeCode = this.generateKycChallengeCode();
     const challengeExpiresAt = this.getKycChallengeExpiresAt();
 
@@ -1380,8 +1315,8 @@ export class UsersService {
       const userVerify = this.userVerifyRepository.create({
         uv_user_id: userId,
         uv_id_card_number: kycDto.idCardNumber.trim(),
-        uv_front_image: frontImageUrl,
-        uv_backside_image: backsideImageUrl,
+        uv_front_image: kycDto.frontImageUrl.trim(),
+        uv_backside_image: kycDto.backsideImageUrl.trim(),
         uv_status: UserVerifyStatus.CHALLENGE_PENDING,
         uv_challenge_code: challengeCode,
         uv_challenge_expires_at: challengeExpiresAt,
@@ -1390,16 +1325,6 @@ export class UsersService {
 
       savedVerify = await this.userVerifyRepository.save(userVerify);
     } catch (error) {
-      // Rollback: Delete both images if database save fails
-      try {
-        await this.cloudinaryService.deleteImage(frontImageResult.public_id);
-        await this.cloudinaryService.deleteImage(backsideImageResult.public_id);
-      } catch (deleteError) {
-        console.error(
-          'Failed to delete images after database save failure:',
-          deleteError,
-        );
-      }
       throw new InternalServerErrorException(
         `Failed to save KYC verification record: ${error.message || 'Unknown error'}`,
       );
@@ -1429,7 +1354,6 @@ export class UsersService {
   async retryKyc(
     userId: number,
     kycDto: KycDto,
-    files: Express.Multer.File[],
   ): Promise<{
     verification: UserVerify;
     response: {
@@ -1451,22 +1375,10 @@ export class UsersService {
       throw new BadRequestException('ID card number is required');
     }
 
-    // Validate files
-    if (!files || files.length !== 2) {
+    if (!kycDto.frontImageUrl || !kycDto.backsideImageUrl) {
       throw new BadRequestException(
-        'Please upload both front and backside images',
+        'frontImageUrl and backsideImageUrl are required',
       );
-    }
-
-    const frontImage = files[0];
-    const backsideImage = files[1];
-
-    // Validate image files
-    if (
-      !frontImage.mimetype.startsWith('image/') ||
-      !backsideImage.mimetype.startsWith('image/')
-    ) {
-      throw new BadRequestException('Files must be images');
     }
 
     // Check if user has a KYC record with status = 'retry'
@@ -1483,68 +1395,14 @@ export class UsersService {
       );
     }
 
-    // Store old image URLs for rollback if needed
-    const oldFrontImageUrl = existingVerify.uv_front_image;
-    const oldBacksideImageUrl = existingVerify.uv_backside_image;
-
-    let frontImageUrl: string;
-    let backsideImageUrl: string;
-    let frontImagePublicId: string;
-    let backsideImagePublicId: string;
-    let frontImageResult: { url: string; public_id: string };
-    let backsideImageResult: { url: string; public_id: string };
-
-    try {
-      // Upload front image to Cloudinary
-      frontImagePublicId = this.cloudinaryService.generatePublicId(
-        `kyc_front_${userId}`,
-      );
-      frontImageResult = await this.cloudinaryService.uploadImage(
-        frontImage,
-        'kyc',
-        frontImagePublicId,
-      );
-      frontImageUrl = frontImageResult.url;
-    } catch (error) {
-      throw new InternalServerErrorException(
-        `Failed to upload front image to Cloudinary: ${error.message || 'Unknown error'}`,
-      );
-    }
-
-    try {
-      // Upload backside image to Cloudinary
-      backsideImagePublicId = this.cloudinaryService.generatePublicId(
-        `kyc_back_${userId}`,
-      );
-      backsideImageResult = await this.cloudinaryService.uploadImage(
-        backsideImage,
-        'kyc',
-        backsideImagePublicId,
-      );
-      backsideImageUrl = backsideImageResult.url;
-    } catch (error) {
-      // Rollback: Delete front image if backside upload fails
-      try {
-        await this.cloudinaryService.deleteImage(frontImageResult.public_id);
-      } catch (deleteError) {
-        console.error(
-          'Failed to delete front image after backside upload failure:',
-          deleteError,
-        );
-      }
-      throw new InternalServerErrorException(
-        `Failed to upload backside image to Cloudinary: ${error.message || 'Unknown error'}`,
-      );
-    }
-
     const challengeCode = this.generateKycChallengeCode();
     const challengeExpiresAt = this.getKycChallengeExpiresAt();
 
     let savedVerify: UserVerify;
     try {
       existingVerify.uv_id_card_number = kycDto.idCardNumber.trim();
-      existingVerify.uv_front_image = frontImageUrl;
-      existingVerify.uv_backside_image = backsideImageUrl;
+      existingVerify.uv_front_image = kycDto.frontImageUrl.trim();
+      existingVerify.uv_backside_image = kycDto.backsideImageUrl.trim();
       existingVerify.uv_status = UserVerifyStatus.CHALLENGE_PENDING;
       existingVerify.uv_challenge_code = challengeCode;
       existingVerify.uv_challenge_expires_at = challengeExpiresAt;
@@ -1552,16 +1410,6 @@ export class UsersService {
 
       savedVerify = await this.userVerifyRepository.save(existingVerify);
     } catch (error) {
-      // Rollback: Delete both new images if database save fails
-      try {
-        await this.cloudinaryService.deleteImage(frontImageResult.public_id);
-        await this.cloudinaryService.deleteImage(backsideImageResult.public_id);
-      } catch (deleteError) {
-        console.error(
-          'Failed to delete images after database save failure:',
-          deleteError,
-        );
-      }
       throw new InternalServerErrorException(
         `Failed to update KYC verification record: ${error.message || 'Unknown error'}`,
       );
@@ -1590,7 +1438,7 @@ export class UsersService {
 
   async submitKycPaper(
     userId: number,
-    files: Express.Multer.File[],
+    paperImageUrl: string,
   ): Promise<{
     verification: UserVerify;
     response: {
@@ -1606,15 +1454,8 @@ export class UsersService {
       };
     };
   }> {
-    if (!files || files.length !== 1) {
-      throw new BadRequestException(
-        'Please upload one image holding the paper with the challenge code',
-      );
-    }
-
-    const paperFile = files[0];
-    if (!paperFile.mimetype.startsWith('image/')) {
-      throw new BadRequestException('File must be an image');
+    if (!paperImageUrl || !paperImageUrl.trim()) {
+      throw new BadRequestException('paperImageUrl is required');
     }
 
     const existingVerify = await this.userVerifyRepository.findOne({
@@ -1640,24 +1481,8 @@ export class UsersService {
       );
     }
 
-    const paperPublicId = this.cloudinaryService.generatePublicId(
-      `kyc_paper_${userId}`,
-    );
-    let paperResult: { url: string; public_id: string };
     try {
-      paperResult = await this.cloudinaryService.uploadImage(
-        paperFile,
-        'kyc',
-        paperPublicId,
-      );
-    } catch (error) {
-      throw new InternalServerErrorException(
-        `Failed to upload paper proof image: ${error.message || 'Unknown error'}`,
-      );
-    }
-
-    try {
-      existingVerify.uv_paper_image = paperResult.url;
+      existingVerify.uv_paper_image = paperImageUrl.trim();
       existingVerify.uv_status = UserVerifyStatus.PENDING;
       const savedVerify = await this.userVerifyRepository.save(existingVerify);
 
@@ -1676,14 +1501,6 @@ export class UsersService {
 
       return { verification: savedVerify, response };
     } catch (error) {
-      try {
-        await this.cloudinaryService.deleteImage(paperResult.public_id);
-      } catch (deleteError) {
-        this.logger.error(
-          'Failed to delete paper image after DB error',
-          deleteError,
-        );
-      }
       throw new InternalServerErrorException(
         `Failed to save KYC paper proof: ${error.message || 'Unknown error'}`,
       );

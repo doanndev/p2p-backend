@@ -3,6 +3,19 @@ import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
 
+type SignedDirectUploadInput = {
+  filename: string;
+  file_size_bytes: number;
+  folder: string;
+  content_type: string;
+};
+
+type SignedDirectUploadResult = {
+  upload_url: string;
+  http_method: 'POST';
+  form_fields: Record<string, string>;
+};
+
 @Injectable()
 export class CloudinaryService {
   constructor(private configService: ConfigService) {
@@ -89,5 +102,67 @@ export class CloudinaryService {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 15);
     return `${prefix}_${timestamp}_${random}`;
+  }
+
+  private normalizeFolder(folder: string): string {
+    return (folder || 'uploads')
+      .trim()
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/[^a-zA-Z0-9/_-]/g, '');
+  }
+
+  private getSafeExtension(filename: string, contentType: string): string {
+    const fromName = filename?.split('.').pop()?.toLowerCase() || '';
+    const allow = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
+    if (allow.has(fromName)) return fromName;
+
+    const fromTypeMap: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+    };
+    return fromTypeMap[contentType] || 'jpg';
+  }
+
+  generateSignedDirectUpload(
+    input: SignedDirectUploadInput,
+  ): SignedDirectUploadResult {
+    const cloudName =
+      this.configService.get<string>('CLOUDINARY_CLOUD_NAME') || '';
+    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY') || '';
+    const apiSecret =
+      this.configService.get<string>('CLOUDINARY_API_SECRET') || '';
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new Error('Cloudinary credentials are not configured');
+    }
+
+    const folder = this.normalizeFolder(input.folder || 'uploads');
+    const uniqueId = this.generatePublicId('upload');
+    const publicId = uniqueId;
+
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Cloudinary signed-upload parameters (frontend sends these with file upload request).
+    const signParams = {
+      timestamp,
+      public_id: publicId,
+      folder,
+    };
+    const signature = cloudinary.utils.api_sign_request(signParams, apiSecret);
+
+    return {
+      upload_url: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      http_method: 'POST',
+      form_fields: {
+        api_key: apiKey,
+        timestamp: String(timestamp),
+        signature,
+        folder,
+        public_id: publicId,
+      },
+    };
   }
 }
