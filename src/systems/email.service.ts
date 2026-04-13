@@ -4,6 +4,8 @@ import * as nodemailer from 'nodemailer';
 import { join } from 'path';
 import { getNewDepositNotificationEmailHtml } from '../email/new-deposit-notification.template';
 import { getNewWithdrawNotificationEmailHtml } from '../email/new-withdraw-notification.template';
+import { getTransactionExecutedNotificationEmailHtml } from '../email/transaction-executed-notification.template';
+import { getTransactionPaymentConfirmedNotificationEmailHtml } from '../email/transaction-payment-confirmed-notification.template';
 import { getVerifyEmailCodeHtml } from '../email/verify-email-code.template';
 
 @Injectable()
@@ -151,6 +153,67 @@ export class EmailService {
       await this.transporter.sendMail(mailOptions);
     } catch (error) {
       console.error('Error sending deposit notification email:', error);
+      throw error;
+    }
+  }
+
+  async sendTransactionPaymentConfirmedNotification(
+    to: string,
+    payload: {
+      referenceCode: string;
+      amount: number | string;
+      coinSymbol: string;
+      totalPrice: number | string;
+      nationalSymbol: string;
+      createdAt?: Date | string;
+    },
+  ): Promise<void> {
+    const mailOptions = {
+      from:
+        this.configService.get<string>('SMTP_FROM') ||
+        this.configService.get<string>('SMTP_USER'),
+      to,
+      subject: `Buyer has paid for transaction ${payload.referenceCode}`,
+      html: getTransactionPaymentConfirmedNotificationEmailHtml(payload),
+      attachments: this.emailAssetAttachments,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error(
+        'Error sending transaction payment confirmed notification:',
+        error,
+      );
+      throw error;
+    }
+  }
+
+  async sendTransactionExecutedNotification(
+    to: string,
+    payload: {
+      referenceCode: string;
+      amount: number | string;
+      coinSymbol: string;
+      totalPrice: number | string;
+      nationalSymbol: string;
+      createdAt?: Date | string;
+    },
+  ): Promise<void> {
+    const mailOptions = {
+      from:
+        this.configService.get<string>('SMTP_FROM') ||
+        this.configService.get<string>('SMTP_USER'),
+      to,
+      subject: `Transaction ${payload.referenceCode} completed successfully`,
+      html: getTransactionExecutedNotificationEmailHtml(payload),
+      attachments: this.emailAssetAttachments,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending transaction executed notification:', error);
       throw error;
     }
   }

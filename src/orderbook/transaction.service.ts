@@ -30,6 +30,7 @@ import { RedisPubSubService } from '../systems/redis-pubsub.service';
 import { USER_LEVELUP_CHANNEL } from '../users/user-level-up.constants';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { Admin } from '../admins/entities/admin.entity';
+import { EmailService } from '../systems/email.service';
 
 @Injectable()
 export class TransactionService {
@@ -44,9 +45,12 @@ export class TransactionService {
     private readonly userWalletRepository: Repository<UserWallet>,
     @InjectRepository(Admin)
     private readonly adminRepository: Repository<Admin>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
     private readonly pubsub: RedisPubSubService,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
+    private readonly emailService: EmailService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -102,7 +106,25 @@ export class TransactionService {
     };
   }
 
+  private toBankUserResponse(bankUser: BankUser | null | undefined) {
+    if (!bankUser) return null;
+    return {
+      id: bankUser.bu_id,
+      userId: bankUser.bu_user_id,
+      bankName: bankUser.bu_bank_name,
+      bankBranch: bankUser.bu_bank_branch,
+      bankAccountName: bankUser.bu_bank_account_name,
+      bankAccountNumber: bankUser.bu_bank_account_number,
+    };
+  }
+
   private toTransactionResponse(t: Transaction) {
+    const orderBook = (t as any).order_book as OrderBook | null | undefined;
+    const bankUser = (t as any).bank_user as BankUser | null | undefined;
+    const shouldIncludeBankUser =
+      orderBook?.ob_option === OrderBookOption.BUY ||
+      (!orderBook && t.trans_bu_id != null);
+
     return {
       id: t.trans_id,
       reference_code: t.transs_reference_code,
@@ -127,6 +149,9 @@ export class TransactionService {
       message: t.trans_message,
       created_at: t.trans_created_at,
       trade_mode: t.trans_trade_mode,
+      bank_user: shouldIncludeBankUser
+        ? this.toBankUserResponse(bankUser)
+        : null,
       coin_unlock_at: t.trans_coin_unlock_at
         ? t.trans_coin_unlock_at.toISOString()
         : null,
@@ -134,6 +159,51 @@ export class TransactionService {
         ? t.trans_lock_released_at.toISOString()
         : null,
     };
+  }
+
+  private async sendPaymentConfirmedEmailToSeller(
+    transaction: Transaction,
+  ): Promise<void> {
+    const seller = await this.userRepository.findOne({
+      where: { uid: transaction.trans_user_sell },
+      select: ['uid', 'uemail'],
+    });
+
+    if (!seller?.uemail) {
+      return;
+    }
+
+    await this.emailService.sendTransactionPaymentConfirmedNotification(
+      seller.uemail,
+      {
+        referenceCode: transaction.transs_reference_code,
+        amount: transaction.trans_amount,
+        coinSymbol: transaction.trans_coin_symbol,
+        totalPrice: transaction.trans_total_price,
+        nationalSymbol: transaction.trans_national_symbol,
+      },
+    );
+  }
+
+  private async sendExecutedEmailToBuyer(
+    transaction: Transaction,
+  ): Promise<void> {
+    const buyer = await this.userRepository.findOne({
+      where: { uid: transaction.trans_user_buy },
+      select: ['uid', 'uemail'],
+    });
+
+    if (!buyer?.uemail) {
+      return;
+    }
+
+    await this.emailService.sendTransactionExecutedNotification(buyer.uemail, {
+      referenceCode: transaction.transs_reference_code,
+      amount: transaction.trans_amount,
+      coinSymbol: transaction.trans_coin_symbol,
+      totalPrice: transaction.trans_total_price,
+      nationalSymbol: transaction.trans_national_symbol,
+    });
   }
 
   private async loadTransactionWithUsers(
@@ -150,6 +220,17 @@ export class TransactionService {
       .addSelect(['ub.uid', 'ub.uname', 'ub.ufulllname', 'ub.uavatar'])
       .leftJoin('t.user_sell', 'us')
       .addSelect(['us.uid', 'us.uname', 'us.ufulllname', 'us.uavatar'])
+      .leftJoin('t.order_book', 'ob')
+      .addSelect(['ob.ob_id', 'ob.ob_option'])
+      .leftJoin('t.bank_user', 'bu')
+      .addSelect([
+        'bu.bu_id',
+        'bu.bu_user_id',
+        'bu.bu_bank_name',
+        'bu.bu_bank_branch',
+        'bu.bu_bank_account_name',
+        'bu.bu_bank_account_number',
+      ])
       .where('t.trans_id = :id', { id })
       .getOne();
   }
@@ -294,6 +375,15 @@ export class TransactionService {
       'us.ufulllname',
       'us.uavatar',
     ]);
+    qb.leftJoin('t.order_book', 'ob').addSelect(['ob.ob_id', 'ob.ob_option']);
+    qb.leftJoin('t.bank_user', 'bu').addSelect([
+      'bu.bu_id',
+      'bu.bu_user_id',
+      'bu.bu_bank_name',
+      'bu.bu_bank_branch',
+      'bu.bu_bank_account_name',
+      'bu.bu_bank_account_number',
+    ]);
 
     if (query.status) {
       qb.andWhere('t.trans_status = :st', { st: query.status });
@@ -357,6 +447,17 @@ export class TransactionService {
       .addSelect(['ub.uid', 'ub.uname', 'ub.ufulllname', 'ub.uavatar'])
       .leftJoin('t.user_sell', 'us')
       .addSelect(['us.uid', 'us.uname', 'us.ufulllname', 'us.uavatar'])
+      .leftJoin('t.order_book', 'ob')
+      .addSelect(['ob.ob_id', 'ob.ob_option'])
+      .leftJoin('t.bank_user', 'bu')
+      .addSelect([
+        'bu.bu_id',
+        'bu.bu_user_id',
+        'bu.bu_bank_name',
+        'bu.bu_bank_branch',
+        'bu.bu_bank_account_name',
+        'bu.bu_bank_account_number',
+      ])
       .where('t.trans_id = :id', { id })
       .getOne();
     if (!transaction) throw new NotFoundException('Transaction not found');
@@ -392,6 +493,12 @@ export class TransactionService {
     transaction.trans_status = TransactionStatus.PAYMENT_CONFIRMED;
     transaction.trans_time_bank = new Date();
     const saved = await this.transactionRepository.save(transaction);
+    void this.sendPaymentConfirmedEmailToSeller(saved).catch((error) => {
+      console.error(
+        `Failed to send payment_confirmed email for transaction ${saved.trans_id}:`,
+        error,
+      );
+    });
     const hydrated = await this.loadTransactionWithUsers(
       this.transactionRepository,
       saved.trans_id,
@@ -527,6 +634,18 @@ export class TransactionService {
         userId: result.sellerId,
         transactionId: result.transactionId,
         at,
+      });
+    }
+
+    const executedTransaction = await this.transactionRepository.findOne({
+      where: { trans_id: result.transactionId },
+    });
+    if (executedTransaction) {
+      void this.sendExecutedEmailToBuyer(executedTransaction).catch((error) => {
+        console.error(
+          `Failed to send executed email for transaction ${executedTransaction.trans_id}:`,
+          error,
+        );
       });
     }
 

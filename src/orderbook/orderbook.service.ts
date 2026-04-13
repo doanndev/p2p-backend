@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import {
   OrderBook,
   OrderBookOption,
@@ -59,6 +59,18 @@ export class OrderbookService {
       username: user.uname,
       fullName: user.ufulllname,
       avatar: user.uavatar,
+    };
+  }
+
+  private toBankUserResponse(bankUser: BankUser | null | undefined) {
+    if (!bankUser) return null;
+    return {
+      id: bankUser.bu_id,
+      userId: bankUser.bu_user_id,
+      bankName: bankUser.bu_bank_name,
+      bankBranch: bankUser.bu_bank_branch,
+      bankAccountName: bankUser.bu_bank_account_name,
+      bankAccountNumber: bankUser.bu_bank_account_number,
     };
   }
 
@@ -279,6 +291,19 @@ export class OrderbookService {
     qb.skip((page - 1) * limit).take(limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const orderBookIds = rows.map((row) => row.ob_id);
+    const bankSettingRows = orderBookIds.length
+      ? await this.settingBankOrderRepository.find({
+          where: { sbo_order_book: In(orderBookIds) },
+          relations: ['bank_user'],
+        })
+      : [];
+    const bankByOrderBookId = new Map<number, BankUser>();
+    for (const setting of bankSettingRows) {
+      if (!bankByOrderBookId.has(setting.sbo_order_book) && setting.bank_user) {
+        bankByOrderBookId.set(setting.sbo_order_book, setting.bank_user);
+      }
+    }
 
     // Stats: tổng số orderbook & count theo status của user tạo orderbook
     const userIds = Array.from(new Set(rows.map((r) => r.ob_user_id)));
@@ -338,6 +363,10 @@ export class OrderbookService {
         national_max: book.ob_national_max,
         status: book.ob_status,
         trade_mode: book.ob_trade_mode,
+        bank_user:
+          book.ob_option === OrderBookOption.SELL
+            ? this.toBankUserResponse(bankByOrderBookId.get(book.ob_id))
+            : null,
         created_at: book.ob_created_at,
       })),
       meta: {
@@ -462,16 +491,8 @@ export class OrderbookService {
       relations: ['bank_user'],
     });
 
-    const bankInfor = setting?.bank_user
-      ? {
-          id: setting.bank_user.bu_id,
-          userId: setting.bank_user.bu_user_id,
-          bankName: setting.bank_user.bu_bank_name,
-          bankBranch: setting.bank_user.bu_bank_branch,
-          bankAccountName: setting.bank_user.bu_bank_account_name,
-          bankAccountNumber: setting.bank_user.bu_bank_account_number,
-        }
-      : null;
+    const bankInfor = this.toBankUserResponse(setting?.bank_user);
+    const shouldIncludeBankUser = orderBook.ob_option === OrderBookOption.SELL;
 
     return {
       id: orderBook.ob_id,
@@ -490,6 +511,7 @@ export class OrderbookService {
       status: orderBook.ob_status,
       trade_mode: orderBook.ob_trade_mode,
       bank_infor: bankInfor,
+      bank_user: shouldIncludeBankUser ? bankInfor : null,
     };
   }
 
