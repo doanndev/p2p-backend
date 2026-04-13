@@ -14,6 +14,7 @@ export enum UserCodeType {
   ACTIVE_EMAIL = 'active-email',
   RESET_PASSWORD = 'reset-password',
   WITHDRAW = 'withdraw',
+  BANK_MUTATION = 'bank-mutation',
 }
 
 export enum UserCodePlace {

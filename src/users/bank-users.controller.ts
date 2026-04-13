@@ -22,7 +22,9 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { BankUsersService } from './bank-users.service';
 import { CreateBankUserDto } from './dto/create-bank-user.dto';
-import { UpdateBankUserDto } from './dto/update-bank-user.dto';
+import { RequestBankMutationVerifyCodeDto } from './dto/request-bank-mutation-verify-code.dto';
+import { UpdateBankUserSecureDto } from './dto/update-bank-user-secure.dto';
+import { BankMutationSecurityDto } from './dto/bank-mutation-security.dto';
 
 @ApiTags('BankUser')
 @ApiCookieAuth('access_token')
@@ -47,18 +49,32 @@ export class BankUsersController {
     return this.bankUsersService.createMyBank(req.user.uid, dto);
   }
 
+  @Post('verify-code')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Gửi email verification code cho thao tác update/delete bank',
+  })
+  @ApiBody({ type: RequestBankMutationVerifyCodeDto, required: false })
+  requestBankMutationVerifyCode(
+    @Request() req: any,
+    @Body() _dto: RequestBankMutationVerifyCodeDto,
+  ) {
+    return this.bankUsersService.sendBankMutationVerifyCode(req.user.uid);
+  }
+
   @Put(':id')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cập nhật bank của user' })
   @ApiParam({ name: 'id', example: '1' })
-  @ApiBody({ type: UpdateBankUserDto })
+  @ApiBody({ type: UpdateBankUserSecureDto })
   updateMyBank(
     @Request() req: any,
     @Param('id') id: string,
-    @Body() dto: UpdateBankUserDto,
+    @Body() dto: UpdateBankUserSecureDto,
   ) {
-    return this.bankUsersService.updateMyBank(req.user.uid, Number(id), dto);
+    return this.bankUsersService.updateMyBankSecure(req.user.uid, Number(id), dto);
   }
 
   @Delete(':id')
@@ -66,11 +82,16 @@ export class BankUsersController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xóa bank của user' })
   @ApiParam({ name: 'id', example: '1' })
+  @ApiBody({ type: BankMutationSecurityDto })
   @ApiOkResponse({
     schema: { example: { message: 'Bank deleted successfully' } },
   })
-  deleteMyBank(@Request() req: any, @Param('id') id: string) {
-    return this.bankUsersService.deleteMyBank(req.user.uid, Number(id));
+  deleteMyBank(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: BankMutationSecurityDto,
+  ) {
+    return this.bankUsersService.deleteMyBankSecure(req.user.uid, Number(id), dto);
   }
 }
 
