@@ -23,6 +23,7 @@ import { User } from '../users/entities/user.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { QueryTransactionsDto } from './dto/query.dto';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { QueryDisputesDto } from './dto/query-disputes.dto';
@@ -163,6 +164,7 @@ export class TransactionService {
       lock_released_at: t.trans_lock_released_at
         ? t.trans_lock_released_at.toISOString()
         : null,
+      payment_proof_urls: t.trans_payment_proof_urls ?? [],
     };
   }
 
@@ -426,6 +428,7 @@ export class TransactionService {
           trans_coin_unlock_at: null,
           trans_lock_released_at: null,
           trans_expired_at: expiresAt,
+          trans_payment_proof_urls: null,
         });
 
         const saved = await manager.save(Transaction, transaction);
@@ -571,7 +574,7 @@ export class TransactionService {
     return this.toTransactionResponse(transaction);
   }
 
-  async confirmPayment(userId: number, id: number) {
+  async confirmPayment(userId: number, id: number, dto: ConfirmPaymentDto) {
     const transaction = await this.transactionRepository.findOne({
       where: { trans_id: id },
     });
@@ -588,6 +591,7 @@ export class TransactionService {
     }
     transaction.trans_status = TransactionStatus.PAYMENT_CONFIRMED;
     transaction.trans_time_bank = new Date();
+    transaction.trans_payment_proof_urls = [...dto.proofUrls];
     transaction.trans_expired_at = new Date(
       Date.now() + TRANSACTION_EXPIRY_DELAY_MS,
     );

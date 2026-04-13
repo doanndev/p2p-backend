@@ -29,6 +29,7 @@ import { VerifiedUserGuard } from '../common/guards/verified-user.guard';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import {
   QueryMyOrderbooksDto,
   QueryOrderbooksDto,
@@ -155,6 +156,7 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   coin_unlock_at: null,
   lock_released_at: null,
   expired_at: '2026-03-25T09:00:00.000Z',
+  payment_proof_urls: ['https://cdn.example.com/proof/slip-1.jpg'],
 };
 
 const DISPUTE_RESPONSE_EXAMPLE = {
@@ -397,9 +399,19 @@ export class OrderbookController {
 
   @Post('transactions/:id/confirm-payment')
   @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
   @ApiOperation({
     summary: 'Xác nhận đã chuyển tiền (pending -> payment_confirmed)',
+    description:
+      'Buyer gửi danh sách URL ảnh chứng từ; người bán xem qua API chi tiết / list transaction.',
   })
+  @ApiBody({ type: ConfirmPaymentDto })
   @ApiOkResponse({
     description: 'Transaction đã chuyển sang payment_confirmed',
     schema: {
@@ -410,8 +422,16 @@ export class OrderbookController {
       },
     },
   })
-  confirmPayment(@Request() req: any, @Param('id') id: string) {
-    return this.transactionService.confirmPayment(req.user.uid, Number(id));
+  confirmPayment(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: ConfirmPaymentDto,
+  ) {
+    return this.transactionService.confirmPayment(
+      req.user.uid,
+      Number(id),
+      dto,
+    );
   }
 
   @Post('transactions/:id/confirm-received')

@@ -131,6 +131,10 @@ export class Transaction {
   @Column({ name: 'trans_expired_at', type: 'timestamptz', nullable: true })
   trans_expired_at: Date | null;
 
+  /** URLs of payment proof images (set when buyer confirms payment). */
+  @Column({ name: 'trans_payment_proof_urls', type: 'jsonb', nullable: true })
+  trans_payment_proof_urls: string[] | null;
+
   @ManyToOne(() => User)
   @JoinColumn({ name: 'trans_user_buy' })
   user_buy: User;
