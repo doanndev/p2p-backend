@@ -195,6 +195,10 @@ export class OrderbookService {
           nationalMax === undefined ? null : this.formatAmount(nationalMax),
         ob_status: OrderBookStatus.PENDING,
         ob_trade_mode: dto.tradeMode ?? OrderBookTradeMode.SAFE,
+        ob_description:
+          dto.description === undefined || dto.description === null
+            ? null
+            : dto.description.trim() || null,
       });
 
       const saved = await manager.save(OrderBook, orderBook);
@@ -223,6 +227,7 @@ export class OrderbookService {
         national_max: saved.ob_national_max,
         status: saved.ob_status,
         trade_mode: saved.ob_trade_mode,
+        description: saved.ob_description,
       };
     });
   }
@@ -372,6 +377,7 @@ export class OrderbookService {
         national_max: book.ob_national_max,
         status: book.ob_status,
         trade_mode: book.ob_trade_mode,
+        description: book.ob_description,
         bank_user:
           book.ob_option === OrderBookOption.SELL
             ? this.toBankUserResponse(bankByOrderBookId.get(book.ob_id))
@@ -479,6 +485,7 @@ export class OrderbookService {
       national_max: book.ob_national_max,
       status: book.ob_status,
       trade_mode: book.ob_trade_mode,
+      description: book.ob_description,
       created_at: book.ob_created_at,
     }));
   }
@@ -519,6 +526,7 @@ export class OrderbookService {
       national_max: orderBook.ob_national_max,
       status: orderBook.ob_status,
       trade_mode: orderBook.ob_trade_mode,
+      description: orderBook.ob_description,
       bank_infor: bankInfor,
       bank_user: shouldIncludeBankUser ? bankInfor : null,
     };
@@ -625,6 +633,7 @@ export class OrderbookService {
       national_max: saved.ob_national_max,
       status: saved.ob_status,
       trade_mode: saved.ob_trade_mode,
+      description: saved.ob_description,
     };
   }
 

@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { OrderBookOption } from '../entities/order-book.entity';
@@ -66,7 +67,8 @@ export class CreateOrderbookDto {
   @ApiProperty({
     enum: OrderBookTradeMode,
     required: false,
-    description: 'fast = khóa coin theo level buyer khi hoàn tất; safe = khóa 24h',
+    description:
+      'fast = khóa coin theo level buyer khi hoàn tất; safe = khóa 24h',
   })
   @IsOptional()
   @IsEnum(OrderBookTradeMode)
@@ -83,4 +85,14 @@ export class CreateOrderbookDto {
   @IsInt()
   @Min(1)
   buId?: number;
+
+  @ApiProperty({
+    example: 'Chỉ giao dịch trong giờ hành chính',
+    required: false,
+    description: 'Ghi chú / mô tả hiển thị cho người xem orderbook.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string | null;
 }

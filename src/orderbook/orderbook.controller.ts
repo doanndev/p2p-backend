@@ -61,6 +61,7 @@ const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   national_max: '2000000.00000000',
   status: 'pending',
   trade_mode: 'safe',
+  description: 'Giao dịch trong giờ hành chính',
 };
 
 const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
@@ -92,6 +93,7 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
   national_max: '2000000.00000000',
   status: 'pending',
   trade_mode: 'safe',
+  description: 'Giao dịch trong giờ hành chính',
   created_at: '2026-03-26T01:23:45.000Z',
 };
 

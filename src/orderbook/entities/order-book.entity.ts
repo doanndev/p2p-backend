@@ -85,6 +85,9 @@ export class OrderBook {
   })
   ob_trade_mode: OrderBookTradeMode;
 
+  @Column({ name: 'ob_description', type: 'text', nullable: true })
+  ob_description: string | null;
+
   @CreateDateColumn({ name: 'ob_created_at', type: 'timestamptz' })
   ob_created_at: Date;
 
