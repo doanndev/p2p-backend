@@ -1010,8 +1010,6 @@ export class WalletsSchedulerService implements OnModuleInit {
           uw_wallet_type: 'crypto' as any,
           uw_wallet_coins: coinId,
           uw_balance: newBalance,
-          uw_balance_gift: 0,
-          uw_balance_reward: 0,
         });
         await this.userWalletRepository.save(newUserWallet);
         this.logger.log(

@@ -18,7 +18,6 @@ import { CreateWalletDto } from './dto/create-wallet.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
 import { InternalExchangeDto } from './dto/internal-exchange.dto';
 import { RequestInternalExchangeVerifyCodeDto } from './dto/request-internal-exchange-verify-code.dto';
-import { TransferRewardDto } from './dto/transfer-reward.dto';
 import { TransactionHistoryDto } from './dto/transaction-history.dto';
 import { TransferRewardsHistoryDto } from './dto/transfer-rewards-history.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -184,8 +183,6 @@ export class WalletsController {
           coin_id: 1,
           balance: 520.75,
           lock_balance: 120,
-          balance_gift: 10,
-          balance_reward: 3.15,
         },
       },
     },
@@ -215,8 +212,6 @@ export class WalletsController {
       coin_id: wallet.uw_wallet_coins,
       balance: parseFloat(wallet.uw_balance.toString()),
       lock_balance: parseFloat(wallet.uw_lock_balance.toString()),
-      balance_gift: parseFloat(wallet.uw_balance_gift.toString()),
-      balance_reward: parseFloat(wallet.uw_balance_reward.toString()),
     };
 
     return {
@@ -336,96 +331,6 @@ export class WalletsController {
       data: {
         address: address,
         qr_code: qrCode,
-      },
-    };
-  }
-
-  @Post('transfer-reward')
-  @ApiOperation({
-    summary: 'Chuyển số dư reward sang ví chính',
-    description:
-      'Gửi `Content-Type: application/json`. User **chưa bật 2FA**: body `{}` hoặc bỏ qua field. ' +
-      'User **đã bật 2FA**: bắt buộc `twoFactorCode` (6 chữ số từ Google Authenticator).',
-  })
-  @ApiBody({
-    type: TransferRewardDto,
-    examples: {
-      khong2FA: {
-        summary: 'Không bật 2FA',
-        value: {},
-      },
-      co2FA: {
-        summary: 'Đã bật 2FA',
-        value: { twoFactorCode: '123456' },
-      },
-    },
-  })
-  @ApiOkResponse({
-    description:
-      'Chuyển reward thành công. **data.new_balance_reward**: số reward vừa gộp (sau xử lý thường 0). **data.updated_coins**: danh sách coin_id đã cập nhật.',
-    schema: {
-      example: {
-        statusCode: 200,
-        message: 'Reward transferred to main balance successfully',
-        data: {
-          new_balance_reward: 12.5,
-          updated_coins: [1, 2, 3],
-        },
-      },
-    },
-  })
-  @ApiBadRequestResponse({
-    description:
-      'Thiếu/sai mã 2FA (khi đã bật), hoặc lỗi nghiệp vụ (reward ≤ 0, không có ví, …)',
-    schema: {
-      oneOf: [
-        {
-          example: {
-            statusCode: 400,
-            message:
-              'Two-factor authentication code is required for this action',
-            error: 'Bad Request',
-          },
-        },
-        {
-          example: {
-            statusCode: 400,
-            message: 'Invalid two-factor authentication code',
-            error: 'Bad Request',
-          },
-        },
-        {
-          example: {
-            statusCode: 400,
-            message:
-              'Cannot transfer reward: calculated balance is 0 (must be > 0)',
-            error: 'Bad Request',
-          },
-        },
-      ],
-    },
-  })
-  @UseGuards(JwtAuthGuard)
-  @UsePipes(
-    new ValidationPipe({
-      transform: true,
-      whitelist: true,
-      forbidNonWhitelisted: true,
-    }),
-  )
-  @HttpCode(HttpStatus.OK)
-  async transferReward(@Body() body: TransferRewardDto, @Request() req: any) {
-    const user = req.user; // User from JWT token
-    const result = await this.walletsService.transferReward(
-      user.uid,
-      body.twoFactorCode,
-    );
-    return {
-      statusCode: HttpStatus.OK,
-      message: result.message,
-      data: {
-        new_balance_reward: result.newBalanceReward,
-        updated_coins: result.updatedCoins,
       },
     };
   }

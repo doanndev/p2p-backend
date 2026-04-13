@@ -787,8 +787,6 @@ export class AdminsWalletOpsService implements OnModuleInit {
         coin_name: string | null;
         coin_symbol: string | null;
         balance: number;
-        balance_gift: number;
-        balance_reward: number;
       }>;
       wallet_networks: Array<{
         uwn_id: number;
@@ -842,10 +840,6 @@ export class AdminsWalletOpsService implements OnModuleInit {
           coin_name: coinName,
           coin_symbol: coinSymbol,
           balance: parseFloat(wallet.uw_balance?.toString() || '0'),
-          balance_gift: parseFloat(wallet.uw_balance_gift?.toString() || '0'),
-          balance_reward: parseFloat(
-            wallet.uw_balance_reward?.toString() || '0',
-          ),
         };
       }),
     );

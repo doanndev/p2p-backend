@@ -1812,8 +1812,6 @@ export class WalletsService implements OnModuleInit {
           uw_wallet_type: 'crypto' as any,
           uw_wallet_coins: coinId,
           uw_balance: expectedBalance,
-          uw_balance_gift: 0,
-          uw_balance_reward: 0,
         });
         await this.userWalletRepository.save(newWallet);
         return;
@@ -2036,111 +2034,6 @@ export class WalletsService implements OnModuleInit {
   }
 
   /**
-   * Tổng uw_balance_reward trên các ví của user (không còn nguồn mission/staking/referral).
-   */
-  async calculateBalanceReward(userId: number): Promise<number> {
-    const rows = await this.userWalletRepository.find({
-      where: { uw_user_id: userId },
-    });
-    const sum = rows.reduce(
-      (s, r) => s + parseFloat(String(r.uw_balance_reward ?? 0)),
-      0,
-    );
-    return sum < 0 ? 0 : sum;
-  }
-
-  /**
-   * Transfer reward balance to main balance
-   * Tính toán số dư reward thực và cộng vào uw_balance
-   * Sử dụng hàm calculateBalanceReward để đảm bảo tính nhất quán
-   */
-  async transferReward(
-    userId: number,
-    twoFactorCode?: string,
-  ): Promise<{
-    message: string;
-    newBalanceReward: number;
-    updatedCoins: number[];
-  }> {
-    const user2fa = await this.userRepository.findOne({
-      where: { uid: userId },
-      select: ['uid', 'u_active_ggauth', 'uggauth'],
-    });
-    if (!user2fa) {
-      throw new BadRequestException('User not found');
-    }
-    requireTotpIfEnabled(user2fa, twoFactorCode);
-
-    // 1. Tính newBalanceReward từ hàm helper để đảm bảo tính nhất quán
-    const newBalanceReward = await this.calculateBalanceReward(userId);
-
-    // 5. Kiểm tra newBalanceReward > 0
-    if (newBalanceReward <= 0) {
-      throw new BadRequestException(
-        `Cannot transfer reward: calculated balance is ${newBalanceReward} (must be > 0)`,
-      );
-    }
-
-    // 6. Lấy tất cả coins của user
-    const userWallets = await this.userWalletRepository.find({
-      where: {
-        uw_user_id: userId,
-      },
-    });
-
-    if (userWallets.length === 0) {
-      throw new BadRequestException('User has no wallets');
-    }
-
-    // 7. Đồng bộ uw_balance_reward với newBalanceReward trước khi transfer
-    // Đảm bảo uw_balance_reward trong database khớp với giá trị tính toán
-    // Sau đó cộng newBalanceReward vào uw_balance và set uw_balance_reward = 0
-    const updatedCoins: number[] = [];
-    for (const userWallet of userWallets) {
-      const oldBalance = parseFloat(userWallet.uw_balance.toString());
-      const currentBalanceReward = parseFloat(
-        userWallet.uw_balance_reward?.toString() || '0',
-      );
-
-      // Đồng bộ uw_balance_reward với newBalanceReward nếu có sự khác biệt
-      // Điều này đảm bảo tính nhất quán giữa giá trị trong database và giá trị tính toán
-      if (Math.abs(currentBalanceReward - newBalanceReward) > 0.00000001) {
-        // Nếu có sự khác biệt, cập nhật uw_balance_reward = newBalanceReward
-        // Điều này đảm bảo số tiền transfer chính xác
-        userWallet.uw_balance_reward = newBalanceReward;
-      }
-
-      const newBalance = oldBalance + newBalanceReward;
-
-      userWallet.uw_balance = newBalance as any;
-      userWallet.uw_balance_reward = 0;
-
-      await this.userWalletRepository.save(userWallet);
-
-      if (userWallet.uw_wallet_coins) {
-        updatedCoins.push(userWallet.uw_wallet_coins);
-      }
-    }
-
-    // 8. Tạo record trong wallet_transfers để ghi nhận việc transfer từ reward sang main
-    const walletTransfer = this.walletTransferRepository.create({
-      wt_user_id: userId,
-      wt_from: WalletTransferFrom.REWARD,
-      wt_to: WalletTransferTo.MAIN,
-      wt_amount: newBalanceReward,
-      wt_status: WalletTransferStatus.SUCCESS,
-    });
-
-    await this.walletTransferRepository.save(walletTransfer);
-
-    return {
-      message: 'Reward transferred to main balance successfully',
-      newBalanceReward,
-      updatedCoins,
-    };
-  }
-
-  /**
    * Lấy lịch sử các giao dịch chuyển từ ví reward sang ví main
    * @param userId - User ID
    * @param status - Filter theo wt_status (optional)
@@ -2272,8 +2165,6 @@ export class WalletsService implements OnModuleInit {
         uw_wallet_coins: coinId,
         uw_balance: 0 as any,
         uw_lock_balance: 0 as any,
-        uw_balance_gift: 0 as any,
-        uw_balance_reward: 0 as any,
       });
       await manager.save(UserWallet, created);
       row = await manager

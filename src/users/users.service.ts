@@ -1979,8 +1979,6 @@ export class UsersService {
         uw_wallet_type: WalletType.CRYPTO,
         uw_wallet_coins: coin.coin_id,
         uw_balance: 0,
-        uw_balance_gift: 10, // Default gift balance = 10
-        uw_balance_reward: 0,
       });
 
       walletsToCreate.push(wallet);

@@ -40,7 +40,6 @@ export class AdminsStatisticsService {
       total_withdraw: number;
       total_reward: number;
       total_balance: number;
-      total_balance_gift: number;
       total_transfer_main: number;
     };
   }> {
@@ -73,10 +72,15 @@ export class AdminsStatisticsService {
       .getRawOne();
     const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
 
-    // 7. Tổng số tiền reward (tổng uw_balance_reward trên hệ thống)
-    const totalRewardResult = await this.userWalletRepository
-      .createQueryBuilder('uw')
-      .select('COALESCE(SUM(uw.uw_balance_reward), 0)', 'total')
+    // 7. Tổng số tiền đã chuyển từ reward sang main (wallet_transfers, lịch sử)
+    const totalRewardResult = await this.walletTransferRepository
+      .createQueryBuilder('wt')
+      .select('COALESCE(SUM(wt.wt_amount), 0)', 'total')
+      .where('wt.wt_from = :from', { from: WalletTransferFrom.REWARD })
+      .andWhere('wt.wt_to = :to', { to: WalletTransferTo.MAIN })
+      .andWhere('wt.wt_status = :status', {
+        status: WalletTransferStatus.SUCCESS,
+      })
       .getRawOne();
     const totalReward = parseFloat(totalRewardResult?.total || '0');
 
@@ -87,14 +91,7 @@ export class AdminsStatisticsService {
       .getRawOne();
     const totalBalance = parseFloat(totalBalanceResult?.total || '0');
 
-    // 9. Tổng số tiền gift trong hệ thống
-    const totalBalanceGiftResult = await this.userWalletRepository
-      .createQueryBuilder('uw')
-      .select('COALESCE(SUM(uw.uw_balance_gift), 0)', 'total')
-      .getRawOne();
-    const totalBalanceGift = parseFloat(totalBalanceGiftResult?.total || '0');
-
-    // 10. Tổng số tiền chuyển từ gift sang main (wallet_transfers)
+    // 9. Tổng số tiền chuyển từ gift sang main (wallet_transfers)
     const totalTransferMainResult = await this.walletTransferRepository
       .createQueryBuilder('wt')
       .select('COALESCE(SUM(wt.wt_amount), 0)', 'total')
@@ -118,7 +115,6 @@ export class AdminsStatisticsService {
         total_withdraw: totalWithdraw,
         total_reward: totalReward,
         total_balance: totalBalance,
-        total_balance_gift: totalBalanceGift,
         total_transfer_main: totalTransferMain,
       },
     };
@@ -136,7 +132,6 @@ export class AdminsStatisticsService {
       total_withdraw: number;
       total_reward: number;
       total_balance: number;
-      total_balance_gift: number;
       total_transfer_main: number;
     };
   }> {

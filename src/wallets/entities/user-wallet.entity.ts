@@ -53,24 +53,6 @@ export class UserWallet {
   })
   uw_lock_balance: number;
 
-  @Column({
-    name: 'uw_balance_gift',
-    type: 'decimal',
-    precision: 18,
-    scale: 8,
-    default: 0,
-  })
-  uw_balance_gift: number;
-
-  @Column({
-    name: 'uw_balance_reward',
-    type: 'decimal',
-    precision: 18,
-    scale: 8,
-    default: 0,
-  })
-  uw_balance_reward: number;
-
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   created_at: Date;
 
