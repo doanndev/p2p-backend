@@ -20,6 +20,7 @@ import {
 import { Dispute, DisputeStatus, DisputeType } from './entities/dispute.entity';
 import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { User } from '../users/entities/user.entity';
+import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { QueryTransactionsDto } from './dto/query.dto';
@@ -110,6 +111,7 @@ export class TransactionService {
       coin: t.trans_coin,
       national: t.trans_national,
       order_book: t.trans_order_book,
+      bu_id: t.trans_bu_id,
       option: t.trans_option,
       type: t.trans_type,
       coin_symbol: t.trans_coin_symbol,
@@ -183,6 +185,24 @@ export class TransactionService {
           ? orderBook.ob_user_id
           : userId;
 
+      let transactionBuId: number | null = null;
+      if (orderBook.ob_option === OrderBookOption.BUY) {
+        if (!dto.buId) {
+          throw new BadRequestException(
+            'buId is required when creating transaction for buy orderbook',
+          );
+        }
+        const bankUser = await manager.findOne(BankUser, {
+          where: { bu_id: dto.buId, bu_user_id: sellerId },
+        });
+        if (!bankUser) {
+          throw new BadRequestException(
+            'Invalid buId: bank user does not belong to seller',
+          );
+        }
+        transactionBuId = dto.buId;
+      }
+
       if (orderBook.ob_option === OrderBookOption.BUY) {
         const sellerWallet = await manager.findOne(UserWallet, {
           where: { uw_user_id: sellerId, uw_wallet_coins: orderBook.ob_coin },
@@ -221,6 +241,7 @@ export class TransactionService {
         trans_coin: orderBook.ob_coin,
         trans_national: orderBook.ob_national,
         trans_order_book: orderBook.ob_id,
+        trans_bu_id: transactionBuId,
         trans_option:
           orderBook.ob_option === OrderBookOption.SELL
             ? TransactionOption.BUY
@@ -253,6 +274,8 @@ export class TransactionService {
   }
 
   async getTransactions(userId: number, query: QueryTransactionsDto) {
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 100);
     const qb = this.transactionRepository
       .createQueryBuilder('t')
       .where('(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)', {
@@ -312,9 +335,19 @@ export class TransactionService {
     } else {
       qb.orderBy('t.trans_id', 'DESC');
     }
+    qb.skip((page - 1) * limit).take(limit);
 
-    const rows = await qb.getMany();
-    return rows.map((t) => this.toTransactionResponse(t));
+    const [rows, total] = await qb.getManyAndCount();
+    return {
+      statusCode: 200,
+      data: rows.map((t) => this.toTransactionResponse(t)),
+      meta: {
+        page,
+        limit,
+        total,
+        total_pages: Math.ceil(total / limit) || 1,
+      },
+    };
   }
 
   async getTransactionDetail(userId: number, id: number) {

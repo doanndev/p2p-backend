@@ -7,6 +7,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { BankUser } from '../../users/entities/bank-user.entity';
 import { Coin } from '../../settings/entities/coin.entity';
 import { NationalCurrency } from './national-currency.entity';
 import { OrderBook } from './order-book.entity';
@@ -53,6 +54,9 @@ export class Transaction {
 
   @Column({ name: 'trans_order_book', type: 'integer', nullable: true })
   trans_order_book: number | null;
+
+  @Column({ name: 'trans_bu_id', type: 'integer', nullable: true })
+  trans_bu_id: number | null;
 
   @Column({
     name: 'trans_option',
@@ -150,4 +154,8 @@ export class Transaction {
   })
   @JoinColumn({ name: 'trans_order_book' })
   order_book: OrderBook | null;
+
+  @ManyToOne(() => BankUser, { nullable: true })
+  @JoinColumn({ name: 'trans_bu_id' })
+  bank_user: BankUser | null;
 }

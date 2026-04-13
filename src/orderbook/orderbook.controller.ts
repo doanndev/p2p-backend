@@ -137,6 +137,7 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   coin: 1,
   national: 2,
   order_book: 101,
+  bu_id: 10,
   option: 'buy',
   type: 'banking',
   coin_symbol: 'USDT',
@@ -216,7 +217,13 @@ export class OrderbookController {
   })
   @ApiOkResponse({
     description: 'Danh sách order book đang pending',
-    schema: { example: [ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE] },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE],
+        meta: { page: 1, limit: 20, total: 120, total_pages: 6 },
+      },
+    },
   })
   getOrderBooks(@Query() query: QueryOrderbooksDto) {
     return this.orderbookService.getOrderBooks(query);
@@ -262,7 +269,13 @@ export class OrderbookController {
   })
   @ApiOkResponse({
     description: 'Danh sách transaction',
-    schema: { example: [TRANSACTION_RESPONSE_EXAMPLE] },
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [TRANSACTION_RESPONSE_EXAMPLE],
+        meta: { page: 1, limit: 20, total: 45, total_pages: 3 },
+      },
+    },
   })
   getTransactions(@Request() req: any, @Query() query: QueryTransactionsDto) {
     return this.transactionService.getTransactions(req.user.uid, query);

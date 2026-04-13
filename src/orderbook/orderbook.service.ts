@@ -88,6 +88,15 @@ export class OrderbookService {
         : 0;
 
     return this.dataSource.transaction(async (manager) => {
+      if (dto.option === OrderBookOption.SELL && !dto.buId) {
+        throw new BadRequestException('buId is required when option is sell');
+      }
+      if (dto.option === OrderBookOption.BUY && dto.buId) {
+        throw new BadRequestException(
+          'buId must not be provided when option is buy',
+        );
+      }
+
       const [coinExists, nationalExists] = await Promise.all([
         manager.exists(Coin, { where: { coin_id: dto.coinId } }),
         manager.exists(NationalCurrency, {
@@ -100,6 +109,17 @@ export class OrderbookService {
       }
       if (!nationalExists) {
         throw new BadRequestException('Invalid nationalCurrencyId');
+      }
+
+      if (dto.option === OrderBookOption.SELL) {
+        const bankUser = await manager.findOne(BankUser, {
+          where: { bu_id: dto.buId, bu_user_id: userId },
+        });
+        if (!bankUser) {
+          throw new BadRequestException(
+            'Invalid buId: bank user does not belong to user',
+          );
+        }
       }
 
       const wallet = await manager.findOne(UserWallet, {
@@ -166,6 +186,14 @@ export class OrderbookService {
       });
 
       const saved = await manager.save(OrderBook, orderBook);
+      if (dto.option === OrderBookOption.SELL && dto.buId) {
+        const setting = manager.create(SettingBankOrder, {
+          sbo_order_book: saved.ob_id,
+          sbo_bank_id: dto.buId,
+        });
+        await manager.save(SettingBankOrder, setting);
+      }
+
       const user = await this.getPublicUserById(saved.ob_user_id);
       return {
         id: saved.ob_id,
@@ -188,6 +216,8 @@ export class OrderbookService {
   }
 
   async getOrderBooks(query: QueryOrderbooksDto) {
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 100);
     const qb = this.orderBookRepository
       .createQueryBuilder('ob')
       .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING });
@@ -246,8 +276,9 @@ export class OrderbookService {
     } else {
       qb.orderBy('ob.ob_id', 'DESC');
     }
+    qb.skip((page - 1) * limit).take(limit);
 
-    const rows = await qb.getMany();
+    const [rows, total] = await qb.getManyAndCount();
 
     // Stats: tổng số orderbook & count theo status của user tạo orderbook
     const userIds = Array.from(new Set(rows.map((r) => r.ob_user_id)));
@@ -278,35 +309,44 @@ export class OrderbookService {
       }
     }
 
-    return rows.map((book) => ({
-      id: book.ob_id,
-      user: book.user
-        ? {
-            id: book.user.uid,
-            username: book.user.uname,
-            fullName: book.user.ufulllname,
-            avatar: book.user.uavatar,
-          }
-        : null,
-      user_orderbook_stats: {
-        total: statsByUserId.get(book.ob_user_id)?.total ?? 0,
-        by_status: statsByUserId.get(book.ob_user_id)?.byStatus ?? {},
+    return {
+      statusCode: 200,
+      data: rows.map((book) => ({
+        id: book.ob_id,
+        user: book.user
+          ? {
+              id: book.user.uid,
+              username: book.user.uname,
+              fullName: book.user.ufulllname,
+              avatar: book.user.uavatar,
+            }
+          : null,
+        user_orderbook_stats: {
+          total: statsByUserId.get(book.ob_user_id)?.total ?? 0,
+          by_status: statsByUserId.get(book.ob_user_id)?.byStatus ?? {},
+        },
+        coin: book.ob_coin,
+        national: book.ob_national,
+        adv_code: book.ob_adv_code,
+        option: book.ob_option,
+        coin_symbol: book.ob_coin_symbol,
+        national_symbol: book.ob_national_symbol,
+        amount: book.ob_amount,
+        amount_remaining: book.ob_amount_remaining,
+        price: book.ob_price,
+        national_min: book.ob_national_min,
+        national_max: book.ob_national_max,
+        status: book.ob_status,
+        trade_mode: book.ob_trade_mode,
+        created_at: book.ob_created_at,
+      })),
+      meta: {
+        page,
+        limit,
+        total,
+        total_pages: Math.ceil(total / limit) || 1,
       },
-      coin: book.ob_coin,
-      national: book.ob_national,
-      adv_code: book.ob_adv_code,
-      option: book.ob_option,
-      coin_symbol: book.ob_coin_symbol,
-      national_symbol: book.ob_national_symbol,
-      amount: book.ob_amount,
-      amount_remaining: book.ob_amount_remaining,
-      price: book.ob_price,
-      national_min: book.ob_national_min,
-      national_max: book.ob_national_max,
-      status: book.ob_status,
-      trade_mode: book.ob_trade_mode,
-      created_at: book.ob_created_at,
-    }));
+    };
   }
 
   async getMyOrderBooks(userId: number, query: QueryMyOrderbooksDto) {
@@ -468,6 +508,9 @@ export class OrderbookService {
         throw new ForbiddenException(
           'You can only attach bank to your own order book',
         );
+      }
+      if (orderBook.ob_option === OrderBookOption.BUY) {
+        throw new BadRequestException('Cannot attach bank to buy orderbook');
       }
 
       const bankUser = await manager.findOne(BankUser, {

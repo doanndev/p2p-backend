@@ -24,6 +24,28 @@ export enum AmountSortOrder {
 
 export class QueryOrderbooksDto {
   @ApiPropertyOptional({
+    description: 'Trang hiện tại',
+    example: 1,
+    default: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({
+    description: 'Số bản ghi mỗi trang (max 100)',
+    example: 20,
+    default: 20,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  limit?: number = 20;
+
+  @ApiPropertyOptional({
     description: 'Lọc từ ngày (ISO 8601), theo thời điểm tạo orderbook',
     example: '2026-01-01T00:00:00.000Z',
   })
@@ -118,6 +140,28 @@ export class QueryMyOrderbooksDto extends QueryOrderbooksDto {
 }
 
 export class QueryTransactionsDto {
+  @ApiPropertyOptional({
+    description: 'Trang hiện tại',
+    example: 1,
+    default: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({
+    description: 'Số bản ghi mỗi trang (max 100)',
+    example: 20,
+    default: 20,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  limit?: number = 20;
+
   @ApiPropertyOptional({ enum: TransactionStatus })
   @IsOptional()
   @IsEnum(TransactionStatus)
@@ -180,4 +224,3 @@ export class QueryTransactionsDto {
   @Min(1)
   nationalCurrencyId?: number;
 }
-

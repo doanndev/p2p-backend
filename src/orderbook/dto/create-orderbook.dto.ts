@@ -71,4 +71,16 @@ export class CreateOrderbookDto {
   @IsOptional()
   @IsEnum(OrderBookTradeMode)
   tradeMode?: OrderBookTradeMode;
+
+  @ApiProperty({
+    example: 1,
+    required: false,
+    description:
+      'Bank user id. Bắt buộc khi option=sell; không dùng khi option=buy.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  buId?: number;
 }
