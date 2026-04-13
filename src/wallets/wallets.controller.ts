@@ -16,6 +16,8 @@ import {
 import { WalletsService } from './wallets.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
+import { InternalExchangeDto } from './dto/internal-exchange.dto';
+import { RequestInternalExchangeVerifyCodeDto } from './dto/request-internal-exchange-verify-code.dto';
 import { TransferRewardDto } from './dto/transfer-reward.dto';
 import { TransactionHistoryDto } from './dto/transaction-history.dto';
 import { TransferRewardsHistoryDto } from './dto/transfer-rewards-history.dto';
@@ -581,6 +583,122 @@ export class WalletsController {
       data: {
         transaction_hash: result.transaction_hash,
         history_id: result.history_id,
+      },
+    };
+  }
+
+  @Post('exchange/internal/verify-code')
+  @ApiOperation({
+    summary: 'Gửi mã email xác nhận chuyển nội bộ',
+    description:
+      'Gửi mã 6 ký tự tới email đăng ký (template Verify Email Code, bảng `user_codes`, loại `internal-exchange`). ' +
+      'Dùng mã trong `POST /wallets/exchange/internal` (field `emailCode`).',
+  })
+  @ApiBody({ type: RequestInternalExchangeVerifyCodeDto, required: false })
+  @ApiOkResponse({
+    description: 'Đã gửi email',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Verification code has been sent to your email',
+        data: { expires_at: '2026-04-13T12:03:00.000Z' },
+      },
+    },
+  })
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
+  @HttpCode(HttpStatus.OK)
+  async requestInternalExchangeVerifyCode(@Request() req: any) {
+    const result = await this.walletsService.sendInternalExchangeVerifyCode(
+      req.user.uid,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: result.message,
+      data: { expires_at: result.expires_at },
+    };
+  }
+
+  @Post('exchange/internal')
+  @ApiOperation({
+    summary: 'Chuyển coin nội bộ sàn (exchange)',
+    description:
+      'Trừ số dư người gửi và cộng cho người nhận trong một giao dịch DB (ACID). ' +
+      'Bắt buộc `emailCode` (lấy qua `POST /wallets/exchange/internal/verify-code`). ' +
+      'Kiểm tra KYC, 2FA, số dư, phí rút (1 đơn vị coin khi hết lượt free), max withdraw giống `POST /wallets/withdraw`.',
+  })
+  @ApiBody({
+    type: InternalExchangeDto,
+    examples: {
+      example: {
+        summary: 'Chuyển USDT nội bộ',
+        value: {
+          recipientUserId: 42,
+          coinId: 2,
+          amount: 10.5,
+          emailCode: 'A1B2C3',
+          twoFactorCode: '123456',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Chuyển thành công',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Internal transfer successful',
+        data: {
+          sender_history_id: 301,
+          receiver_history_id: 302,
+          amount_debited: 10.5,
+          amount_credited: 9.5,
+          is_free_withdraw: false,
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'KYC, 2FA, emailCode sai/hết hạn, số dư, user nhận không tồn tại, chuyển cho chính mình, vượt max withdraw, …',
+  })
+  @UseGuards(JwtAuthGuard)
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
+  @HttpCode(HttpStatus.OK)
+  async internalExchange(
+    @Body() dto: InternalExchangeDto,
+    @Request() req: any,
+  ) {
+    const user = req.user;
+    const result = await this.walletsService.internalExchangeTransfer(
+      user.uid,
+      dto.recipientUserId,
+      dto.coinId,
+      dto.amount,
+      dto.emailCode,
+      dto.twoFactorCode,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: result.message,
+      data: {
+        sender_history_id: result.sender_history_id,
+        receiver_history_id: result.receiver_history_id,
+        amount_debited: result.amount_debited,
+        amount_credited: result.amount_credited,
+        is_free_withdraw: result.is_free_withdraw,
       },
     };
   }

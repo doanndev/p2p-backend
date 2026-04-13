@@ -19,6 +19,7 @@ import { User } from '../users/entities/user.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { Network } from '../settings/entities/network.entity';
 import { CoinNetwork } from '../settings/entities/coin-network.entity';
+import { UserCode } from '../users/entities/user-code.entity';
 import { SystemsModule } from '../systems/systems.module';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -36,6 +37,7 @@ import { SettingsModule } from '../settings/settings.module';
       Coin,
       Network,
       CoinNetwork,
+      UserCode,
     ]),
     SystemsModule,
   ],

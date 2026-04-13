@@ -15,6 +15,8 @@ export enum UserCodeType {
   RESET_PASSWORD = 'reset-password',
   WITHDRAW = 'withdraw',
   BANK_MUTATION = 'bank-mutation',
+  /** Mã email xác nhận chuyển coin nội bộ sàn (`POST /wallets/exchange/internal`). */
+  INTERNAL_EXCHANGE = 'internal-exchange',
 }
 
 export enum UserCodePlace {

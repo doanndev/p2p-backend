@@ -3,11 +3,12 @@ import {
   Injectable,
   BadRequestException,
   Logger,
+  NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import axios from 'axios';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, EntityManager, Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bip39 from 'bip39';
 import * as bip32 from 'bip32';
@@ -42,7 +43,7 @@ import { TronWeb } from 'tronweb';
 import { createEvmJsonRpcProvider } from '../common/evm-json-rpc-provider.factory';
 import * as QRCode from 'qrcode';
 import { UserWalletNetwork } from './entities/user-wallet-network.entity';
-import { UserWallet } from './entities/user-wallet.entity';
+import { UserWallet, WalletType } from './entities/user-wallet.entity';
 import {
   WalletHistory,
   WalletHistoryType,
@@ -56,6 +57,11 @@ import {
   WalletTransferStatus,
 } from './entities/wallet-transfer.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
+import {
+  UserCode,
+  UserCodePlace,
+  UserCodeType,
+} from '../users/entities/user-code.entity';
 import { ActiveWalletTracker } from './entities/active-wallet-tracker.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { Network } from '../settings/entities/network.entity';
@@ -107,6 +113,8 @@ export class WalletsService implements OnModuleInit {
   }
 
   constructor(
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     @InjectRepository(UserWalletNetwork)
     private useWalletNetworkRepository: Repository<UserWalletNetwork>,
     @InjectRepository(UserWallet)
@@ -125,6 +133,8 @@ export class WalletsService implements OnModuleInit {
     private userRepository: Repository<User>,
     @InjectRepository(WalletTransfer)
     private walletTransferRepository: Repository<WalletTransfer>,
+    @InjectRepository(UserCode)
+    private readonly userCodeRepository: Repository<UserCode>,
     private configService: ConfigService,
     private walletsSchedulerService: WalletsSchedulerService,
     private rpcRateLimitService: RpcRateLimitService,
@@ -2155,6 +2165,337 @@ export class WalletsService implements OnModuleInit {
     }
 
     return await queryBuilder.getMany();
+  }
+
+  private generateInternalExchangeEmailCode(): string {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+      result += characters.charAt(
+        Math.floor(Math.random() * characters.length),
+      );
+    }
+    return result;
+  }
+
+  private async verifyInternalExchangeEmailCode(
+    userId: number,
+    emailCode: string,
+  ): Promise<void> {
+    const normalized = emailCode.trim().toUpperCase();
+    const userCode = await this.userCodeRepository.findOne({
+      where: {
+        uc_user_id: userId,
+        uc_type: UserCodeType.INTERNAL_EXCHANGE,
+        uc_value: normalized,
+        uc_life: true,
+      },
+      order: { created_at: 'DESC' },
+    });
+    if (!userCode) {
+      throw new BadRequestException('Invalid verification code');
+    }
+
+    if (userCode.uc_code_time < new Date()) {
+      userCode.uc_life = false;
+      await this.userCodeRepository.save(userCode);
+      throw new BadRequestException('Verification code has expired');
+    }
+
+    userCode.uc_life = false;
+    await this.userCodeRepository.save(userCode);
+  }
+
+  /**
+   * Gửi mã 6 ký tự qua email (template `getVerifyEmailCodeHtml`) để dùng khi gọi `internalExchangeTransfer`.
+   */
+  async sendInternalExchangeVerifyCode(userId: number): Promise<{
+    message: string;
+    expires_at: string;
+  }> {
+    const user = await this.userRepository.findOne({
+      where: { uid: userId },
+      select: ['uid', 'uemail'],
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (!user.uemail) {
+      throw new BadRequestException('User email is missing');
+    }
+
+    await this.userCodeRepository.update(
+      {
+        uc_user_id: userId,
+        uc_type: UserCodeType.INTERNAL_EXCHANGE,
+        uc_life: true,
+      },
+      { uc_life: false },
+    );
+
+    const code = this.generateInternalExchangeEmailCode();
+    const expiresAt = new Date(Date.now() + 3 * 60 * 1000);
+    const userCode = this.userCodeRepository.create({
+      uc_value: code,
+      uc_type: UserCodeType.INTERNAL_EXCHANGE,
+      uc_place: UserCodePlace.EMAIL,
+      uc_code_time: expiresAt,
+      uc_life: true,
+      uc_user_id: userId,
+    });
+    await this.userCodeRepository.save(userCode);
+    await this.emailService.sendEmailVerificationCode(user.uemail, code);
+
+    return {
+      message: 'Verification code has been sent to your email',
+      expires_at: expiresAt.toISOString(),
+    };
+  }
+
+  private async getUserWalletPessimisticOrCreate(
+    manager: EntityManager,
+    userId: number,
+    coinId: number,
+  ): Promise<UserWallet> {
+    let row = await manager
+      .getRepository(UserWallet)
+      .createQueryBuilder('uw')
+      .setLock('pessimistic_write')
+      .where('uw.uw_user_id = :uid', { uid: userId })
+      .andWhere('uw.uw_wallet_coins = :cid', { cid: coinId })
+      .getOne();
+
+    if (!row) {
+      const created = manager.create(UserWallet, {
+        uw_user_id: userId,
+        uw_wallet_type: WalletType.CRYPTO,
+        uw_wallet_coins: coinId,
+        uw_balance: 0 as any,
+        uw_lock_balance: 0 as any,
+        uw_balance_gift: 0 as any,
+        uw_balance_reward: 0 as any,
+      });
+      await manager.save(UserWallet, created);
+      row = await manager
+        .getRepository(UserWallet)
+        .createQueryBuilder('uw')
+        .setLock('pessimistic_write')
+        .where('uw.uw_user_id = :uid', { uid: userId })
+        .andWhere('uw.uw_wallet_coins = :cid', { cid: coinId })
+        .getOne();
+    }
+
+    if (!row) {
+      throw new BadRequestException('Wallet row could not be loaded');
+    }
+    return row;
+  }
+
+  /**
+   * Chuyển coin nội bộ giữa hai user. Kiểm tra giống rút on-chain (KYC, 2FA, phí, max),
+   * cập nhật số dư trong một transaction DB với khóa pessimistic (thứ tự user id để tránh deadlock).
+   */
+  async internalExchangeTransfer(
+    senderUserId: number,
+    recipientUserId: number,
+    coinId: number,
+    amount: number,
+    emailCode: string,
+    twoFactorCode?: string,
+  ): Promise<{
+    message: string;
+    sender_history_id: number;
+    receiver_history_id: number;
+    amount_debited: number;
+    amount_credited: number;
+    is_free_withdraw: boolean;
+  }> {
+    this.logger.debug(
+      `[internalExchange] sender=${senderUserId} recipient=${recipientUserId} coin=${coinId} amount=${amount}`,
+    );
+
+    if (recipientUserId === senderUserId) {
+      throw new BadRequestException('Cannot transfer to yourself');
+    }
+
+    const sender = await this.userRepository.findOne({
+      where: { uid: senderUserId },
+      select: [
+        'uid',
+        'uverify',
+        'ustatus',
+        'u_active_ggauth',
+        'uggauth',
+        'uemail',
+      ],
+    });
+
+    if (!sender) {
+      throw new BadRequestException('User not found');
+    }
+
+    requireTotpIfEnabled(sender, twoFactorCode);
+
+    await this.verifyInternalExchangeEmailCode(senderUserId, emailCode);
+
+    if (!sender.uverify) {
+      throw new BadRequestException('Identity not verified');
+    }
+
+    if (sender.ustatus !== UserStatus.ACTIVE) {
+      throw new BadRequestException(
+        'System is overloaded! Please try again later',
+      );
+    }
+
+    const recipient = await this.userRepository.findOne({
+      where: { uid: recipientUserId },
+      select: ['uid', 'uverify', 'ustatus'],
+    });
+
+    if (!recipient) {
+      throw new BadRequestException('Recipient user not found');
+    }
+
+    if (!recipient.uverify) {
+      throw new BadRequestException('Recipient identity not verified');
+    }
+
+    if (recipient.ustatus !== UserStatus.ACTIVE) {
+      throw new BadRequestException('Recipient account is not active');
+    }
+
+    const coin = await this.coinRepository.findOne({
+      where: { coin_id: coinId },
+    });
+
+    if (!coin) {
+      throw new BadRequestException('Coin not found');
+    }
+
+    const coinNetwork = await this.coinNetworkRepository.findOne({
+      where: {
+        cn_coin_id: coin.coin_id,
+        cn_status: CoinNetworkStatus.ACTIVE,
+      },
+    });
+
+    if (!coinNetwork) {
+      throw new BadRequestException(
+        `Coin ${coin.coin_symbol} is not available for transfer`,
+      );
+    }
+
+    const network = await this.networkRepository.findOne({
+      where: { net_id: coinNetwork.cn_network_id },
+    });
+
+    if (!network) {
+      throw new BadRequestException('Network not found for coin');
+    }
+
+    await this.checkAndSyncBalance(senderUserId, coin.coin_id, network);
+
+    const freeWithdrawInfo = await this.checkFreeWithdraw(senderUserId);
+    const WITHDRAW_FEE = 1;
+    let creditAmount = amount;
+    const isFreeWithdraw = freeWithdrawInfo.isFree;
+
+    if (!isFreeWithdraw) {
+      creditAmount = amount - WITHDRAW_FEE;
+      if (creditAmount <= 0) {
+        throw new BadRequestException(
+          `Transfer amount must be greater than withdrawal fee (${WITHDRAW_FEE})`,
+        );
+      }
+    }
+
+    const maxWithdraw = await this.checkMaxWithdraw();
+    if (maxWithdraw !== null && amount > maxWithdraw) {
+      throw new BadRequestException(
+        `Transfer amount exceeds maximum allowed. Maximum withdraw: ${maxWithdraw}`,
+      );
+    }
+
+    const uLow =
+      senderUserId < recipientUserId ? senderUserId : recipientUserId;
+    const uHigh =
+      senderUserId < recipientUserId ? recipientUserId : senderUserId;
+
+    const { sender_history_id, receiver_history_id } =
+      await this.dataSource.transaction(async (manager) => {
+        const wLow = await this.getUserWalletPessimisticOrCreate(
+          manager,
+          uLow,
+          coinId,
+        );
+        const wHigh = await this.getUserWalletPessimisticOrCreate(
+          manager,
+          uHigh,
+          coinId,
+        );
+
+        const senderWallet = senderUserId === uLow ? wLow : wHigh;
+        const receiverWallet = recipientUserId === uLow ? wLow : wHigh;
+
+        const senderBal = parseFloat(senderWallet.uw_balance.toString());
+        if (senderBal < amount) {
+          throw new BadRequestException('Insufficient balance');
+        }
+
+        const receiverBal = parseFloat(receiverWallet.uw_balance.toString());
+        let newSenderBal = senderBal - amount;
+        if (newSenderBal <= 0) {
+          newSenderBal = 0;
+        }
+        const newReceiverBal = receiverBal + creditAmount;
+
+        senderWallet.uw_balance = newSenderBal as any;
+        receiverWallet.uw_balance = newReceiverBal as any;
+        await manager.save(UserWallet, [senderWallet, receiverWallet]);
+
+        const whSend = manager.create(WalletHistory, {
+          wh_wallet_netword_id: null,
+          wh_type: WalletHistoryType.CRYPTO,
+          wh_option: WalletHistoryOption.WITHDRAW,
+          wh_coins: coin.coin_id,
+          wh_amount: amount,
+          wh_hash: null,
+          wh_imnage_veryfy: null,
+          wh_status: WalletHistoryStatus.SUCCESS,
+          wh_node: `internal-to:${recipientUserId}`,
+          wh_user: senderUserId,
+        });
+
+        const whRecv = manager.create(WalletHistory, {
+          wh_wallet_netword_id: null,
+          wh_type: WalletHistoryType.CRYPTO,
+          wh_option: WalletHistoryOption.DEPOSIT,
+          wh_coins: coin.coin_id,
+          wh_amount: creditAmount,
+          wh_hash: null,
+          wh_imnage_veryfy: null,
+          wh_status: WalletHistoryStatus.SUCCESS,
+          wh_node: `internal-from:${senderUserId}`,
+          wh_user: recipientUserId,
+        });
+
+        const savedSend = await manager.save(WalletHistory, whSend);
+        const savedRecv = await manager.save(WalletHistory, whRecv);
+        return {
+          sender_history_id: savedSend.wh_id,
+          receiver_history_id: savedRecv.wh_id,
+        };
+      });
+
+    return {
+      message: 'Internal transfer successful',
+      sender_history_id,
+      receiver_history_id,
+      amount_debited: amount,
+      amount_credited: creditAmount,
+      is_free_withdraw: isFreeWithdraw,
+    };
   }
 
   async withdraw(
