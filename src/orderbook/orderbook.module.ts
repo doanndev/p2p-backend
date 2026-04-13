@@ -16,10 +16,13 @@ import { Notification } from '../users/entities/notification.entity';
 import { P2pCoinUnlockSchedulerService } from './p2p-coin-unlock.scheduler';
 import { SettingsModule } from '../settings/settings.module';
 import { Admin } from '../admins/entities/admin.entity';
+import { TransactionExpiryQueueService } from './transaction-expiry-queue.service';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     SettingsModule,
+    UsersModule,
     TypeOrmModule.forFeature([
       OrderBook,
       NationalCurrency,
@@ -38,6 +41,7 @@ import { Admin } from '../admins/entities/admin.entity';
   providers: [
     OrderbookService,
     TransactionService,
+    TransactionExpiryQueueService,
     P2pCoinUnlockSchedulerService,
   ],
   exports: [OrderbookService, TransactionService],

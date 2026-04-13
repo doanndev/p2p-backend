@@ -1,29 +1,14 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { RedisPubSubService } from '../systems/redis-pubsub.service';
 import { User } from './entities/user.entity';
-import { USER_LEVELUP_CHANNEL } from './user-level-up.constants';
-
-type TransactionSuccessEvent = {
-  userId: number;
-  at?: string; // ISO timestamp (optional)
-  transactionId?: number;
-};
 
 @Injectable()
-export class UserLevelUpWorker implements OnModuleInit {
-  constructor(
-    private readonly dataSource: DataSource,
-    private readonly pubsub: RedisPubSubService,
-  ) {}
+export class UserLevelUpWorker {
+  constructor(private readonly dataSource: DataSource) {}
 
-  async onModuleInit() {
-    await this.pubsub.subscribe(USER_LEVELUP_CHANNEL, async (evt) => {
-      const payload = evt as TransactionSuccessEvent;
-      const userId = Number(payload?.userId);
-      if (!Number.isFinite(userId) || userId <= 0) return;
-      await this.applyLevelUpLogic(userId);
-    });
+  async handleTransactionSuccess(userId: number): Promise<void> {
+    if (!Number.isFinite(userId) || userId <= 0) return;
+    await this.applyLevelUpLogic(userId);
   }
 
   private async applyLevelUpLogic(userId: number): Promise<void> {

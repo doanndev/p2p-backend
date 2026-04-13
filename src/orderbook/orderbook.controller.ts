@@ -154,6 +154,7 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   trade_mode: 'safe',
   coin_unlock_at: null,
   lock_released_at: null,
+  expired_at: '2026-03-25T09:00:00.000Z',
 };
 
 const DISPUTE_RESPONSE_EXAMPLE = {
@@ -265,7 +266,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách transaction theo user hiện tại',
     description:
-      'Lọc theo status, ngày tạo, option, coin, national currency, khoảng amount; sort theo amount.',
+      'Lọc theo status, ngày tạo, option, coin, national currency, khoảng amount; sort theo amount. Mỗi item có `expired_at` (ISO 8601 hoặc null) để frontend đếm ngược thời hạn.',
   })
   @ApiOkResponse({
     description: 'Danh sách transaction',
@@ -283,7 +284,11 @@ export class OrderbookController {
 
   @Get('transactions/:id')
   @UseGuards(JwtAuthGuard, VerifiedUserGuard)
-  @ApiOperation({ summary: 'Lấy chi tiết transaction' })
+  @ApiOperation({
+    summary: 'Lấy chi tiết transaction',
+    description:
+      'Trả về `expired_at` (ISO 8601 hoặc null) — thời điểm hết hạn cho bước hiện tại (pending / payment_confirmed).',
+  })
   @ApiOkResponse({
     description: 'Chi tiết transaction',
     schema: { example: TRANSACTION_RESPONSE_EXAMPLE },

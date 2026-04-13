@@ -26,11 +26,14 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { QueryTransactionsDto } from './dto/query.dto';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { QueryDisputesDto } from './dto/query-disputes.dto';
-import { RedisPubSubService } from '../systems/redis-pubsub.service';
-import { USER_LEVELUP_CHANNEL } from '../users/user-level-up.constants';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { Admin } from '../admins/entities/admin.entity';
 import { EmailService } from '../systems/email.service';
+import { UserLevelUpWorker } from '../users/user-level-up.worker';
+import {
+  TransactionExpiryQueueService,
+  TRANSACTION_EXPIRY_DELAY_MS,
+} from './transaction-expiry-queue.service';
 
 @Injectable()
 export class TransactionService {
@@ -48,9 +51,10 @@ export class TransactionService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
-    private readonly pubsub: RedisPubSubService,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
     private readonly emailService: EmailService,
+    private readonly transactionExpiryQueue: TransactionExpiryQueueService,
+    private readonly userLevelUpWorker: UserLevelUpWorker,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -148,6 +152,7 @@ export class TransactionService {
       status: t.trans_status,
       message: t.trans_message,
       created_at: t.trans_created_at,
+      expired_at: t.trans_expired_at ? t.trans_expired_at.toISOString() : null,
       trade_mode: t.trans_trade_mode,
       bank_user: shouldIncludeBankUser
         ? this.toBankUserResponse(bankUser)
@@ -159,6 +164,80 @@ export class TransactionService {
         ? t.trans_lock_released_at.toISOString()
         : null,
     };
+  }
+
+  /**
+   * Called by BullMQ worker: if status still matches `expectedStatus`, mark failed and revert order book / locks (same as cancel).
+   */
+  async applyExpirationJob(
+    transactionId: number,
+    expectedStatus: TransactionStatus,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const transaction = await manager.findOne(Transaction, {
+        where: { trans_id: transactionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!transaction) return;
+      if (transaction.trans_status !== expectedStatus) return;
+
+      const orderBook = await manager.findOne(OrderBook, {
+        where: { ob_id: transaction.trans_order_book ?? 0 },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!orderBook) {
+        transaction.trans_status = TransactionStatus.FAILED;
+        transaction.trans_message =
+          transaction.trans_message ?? 'Expired (order book missing)';
+        await manager.save(Transaction, transaction);
+        return;
+      }
+
+      const amount = this.toNumber(transaction.trans_amount);
+      const remaining = this.toNumber(orderBook.ob_amount_remaining);
+      orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
+      if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
+        orderBook.ob_status = OrderBookStatus.PENDING;
+      }
+      await manager.save(OrderBook, orderBook);
+
+      if (orderBook.ob_option === OrderBookOption.BUY) {
+        const sellerWallet = await manager.findOne(UserWallet, {
+          where: {
+            uw_user_id: transaction.trans_user_sell,
+            uw_wallet_coins: transaction.trans_coin,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!sellerWallet) {
+          transaction.trans_status = TransactionStatus.FAILED;
+          transaction.trans_message =
+            transaction.trans_message ?? 'Expired (seller wallet missing)';
+          await manager.save(Transaction, transaction);
+          return;
+        }
+
+        const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
+        if (lockBalance < amount) {
+          transaction.trans_status = TransactionStatus.FAILED;
+          transaction.trans_message =
+            transaction.trans_message ?? 'Expired (insufficient lock balance)';
+          await manager.save(Transaction, transaction);
+          return;
+        }
+
+        sellerWallet.uw_lock_balance = lockBalance - amount;
+        sellerWallet.uw_balance =
+          this.toNumber(sellerWallet.uw_balance) + amount;
+        await manager.save(UserWallet, sellerWallet);
+      }
+
+      transaction.trans_status = TransactionStatus.FAILED;
+      transaction.trans_message =
+        transaction.trans_message ??
+        'Expired: no action within the allowed time window';
+      await manager.save(Transaction, transaction);
+    });
   }
 
   private async sendPaymentConfirmedEmailToSeller(
@@ -236,122 +315,142 @@ export class TransactionService {
   }
 
   async createTransaction(userId: number, dto: CreateTransactionDto) {
-    return this.dataSource.transaction(async (manager) => {
-      const orderBook = await manager.findOne(OrderBook, {
-        where: { ob_id: dto.orderBookId },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!orderBook) throw new NotFoundException('Order book not found');
-      if (orderBook.ob_status !== OrderBookStatus.PENDING) {
-        throw new BadRequestException('Order book is not available');
-      }
-      if (orderBook.ob_user_id === userId) {
-        throw new BadRequestException(
-          'You cannot trade with your own order book',
-        );
-      }
-
-      const remaining = this.toNumber(orderBook.ob_amount_remaining);
-      if (dto.amount <= 0 || dto.amount > remaining) {
-        throw new BadRequestException('Invalid transaction amount');
-      }
-
-      const buyerId =
-        orderBook.ob_option === OrderBookOption.SELL
-          ? userId
-          : orderBook.ob_user_id;
-      const sellerId =
-        orderBook.ob_option === OrderBookOption.SELL
-          ? orderBook.ob_user_id
-          : userId;
-
-      let transactionBuId: number | null = null;
-      if (orderBook.ob_option === OrderBookOption.BUY) {
-        if (!dto.buId) {
-          throw new BadRequestException(
-            'buId is required when creating transaction for buy orderbook',
-          );
-        }
-        const bankUser = await manager.findOne(BankUser, {
-          where: { bu_id: dto.buId, bu_user_id: sellerId },
-        });
-        if (!bankUser) {
-          throw new BadRequestException(
-            'Invalid buId: bank user does not belong to seller',
-          );
-        }
-        transactionBuId = dto.buId;
-      }
-
-      if (orderBook.ob_option === OrderBookOption.BUY) {
-        const sellerWallet = await manager.findOne(UserWallet, {
-          where: { uw_user_id: sellerId, uw_wallet_coins: orderBook.ob_coin },
+    const { response, transactionId } = await this.dataSource.transaction(
+      async (manager) => {
+        const orderBook = await manager.findOne(OrderBook, {
+          where: { ob_id: dto.orderBookId },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!sellerWallet)
-          throw new NotFoundException('Seller wallet not found');
 
-        const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
-        if (sellerAvailableBalance < dto.amount) {
+        if (!orderBook) throw new NotFoundException('Order book not found');
+        if (orderBook.ob_status !== OrderBookStatus.PENDING) {
+          throw new BadRequestException('Order book is not available');
+        }
+        if (orderBook.ob_user_id === userId) {
           throw new BadRequestException(
-            'Seller does not have enough available balance',
+            'You cannot trade with your own order book',
           );
         }
 
-        sellerWallet.uw_balance = sellerAvailableBalance - dto.amount;
-        sellerWallet.uw_lock_balance =
-          this.toNumber(sellerWallet.uw_lock_balance) + dto.amount;
-        await manager.save(UserWallet, sellerWallet);
-      }
+        const remaining = this.toNumber(orderBook.ob_amount_remaining);
+        if (dto.amount <= 0 || dto.amount > remaining) {
+          throw new BadRequestException('Invalid transaction amount');
+        }
 
-      orderBook.ob_amount_remaining = this.formatAmount(remaining - dto.amount);
-      if (this.toNumber(orderBook.ob_amount_remaining) <= 0) {
-        orderBook.ob_status = OrderBookStatus.EXECUTED;
-      }
-      await manager.save(OrderBook, orderBook);
-
-      const amount = dto.amount;
-      const price = this.toNumber(orderBook.ob_price);
-      const total = amount * price;
-
-      const transaction = manager.create(Transaction, {
-        transs_reference_code: this.generateReferenceCode(),
-        trans_user_buy: buyerId,
-        trans_user_sell: sellerId,
-        trans_coin: orderBook.ob_coin,
-        trans_national: orderBook.ob_national,
-        trans_order_book: orderBook.ob_id,
-        trans_bu_id: transactionBuId,
-        trans_option:
+        const buyerId =
           orderBook.ob_option === OrderBookOption.SELL
-            ? TransactionOption.BUY
-            : TransactionOption.SELL,
-        trans_type: dto.type ?? TransactionType.BANKING,
-        trans_coin_symbol: orderBook.ob_coin_symbol,
-        trans_national_symbol: orderBook.ob_national_symbol,
-        trans_amount: this.formatAmount(amount),
-        trans_price: this.formatAmount(price),
-        trans_price_usd: this.formatAmount(price),
-        trans_total_price: this.formatAmount(total),
-        trans_total_usd: this.formatAmount(total),
-        trans_dispute_status: false,
-        trans_time_bank: null,
-        trans_status: TransactionStatus.PENDING,
-        trans_message: null,
-        trans_trade_mode: orderBook.ob_trade_mode,
-        trans_coin_unlock_at: null,
-        trans_lock_released_at: null,
+            ? userId
+            : orderBook.ob_user_id;
+        const sellerId =
+          orderBook.ob_option === OrderBookOption.SELL
+            ? orderBook.ob_user_id
+            : userId;
+
+        let transactionBuId: number | null = null;
+        if (orderBook.ob_option === OrderBookOption.BUY) {
+          if (!dto.buId) {
+            throw new BadRequestException(
+              'buId is required when creating transaction for buy orderbook',
+            );
+          }
+          const bankUser = await manager.findOne(BankUser, {
+            where: { bu_id: dto.buId, bu_user_id: sellerId },
+          });
+          if (!bankUser) {
+            throw new BadRequestException(
+              'Invalid buId: bank user does not belong to seller',
+            );
+          }
+          transactionBuId = dto.buId;
+        }
+
+        if (orderBook.ob_option === OrderBookOption.BUY) {
+          const sellerWallet = await manager.findOne(UserWallet, {
+            where: { uw_user_id: sellerId, uw_wallet_coins: orderBook.ob_coin },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!sellerWallet)
+            throw new NotFoundException('Seller wallet not found');
+
+          const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
+          if (sellerAvailableBalance < dto.amount) {
+            throw new BadRequestException(
+              'Seller does not have enough available balance',
+            );
+          }
+
+          sellerWallet.uw_balance = sellerAvailableBalance - dto.amount;
+          sellerWallet.uw_lock_balance =
+            this.toNumber(sellerWallet.uw_lock_balance) + dto.amount;
+          await manager.save(UserWallet, sellerWallet);
+        }
+
+        orderBook.ob_amount_remaining = this.formatAmount(
+          remaining - dto.amount,
+        );
+        if (this.toNumber(orderBook.ob_amount_remaining) <= 0) {
+          orderBook.ob_status = OrderBookStatus.EXECUTED;
+        }
+        await manager.save(OrderBook, orderBook);
+
+        const amount = dto.amount;
+        const price = this.toNumber(orderBook.ob_price);
+        const total = amount * price;
+
+        const expiresAt = new Date(Date.now() + TRANSACTION_EXPIRY_DELAY_MS);
+        const transaction = manager.create(Transaction, {
+          transs_reference_code: this.generateReferenceCode(),
+          trans_user_buy: buyerId,
+          trans_user_sell: sellerId,
+          trans_coin: orderBook.ob_coin,
+          trans_national: orderBook.ob_national,
+          trans_order_book: orderBook.ob_id,
+          trans_bu_id: transactionBuId,
+          trans_option:
+            orderBook.ob_option === OrderBookOption.SELL
+              ? TransactionOption.BUY
+              : TransactionOption.SELL,
+          trans_type: dto.type ?? TransactionType.BANKING,
+          trans_coin_symbol: orderBook.ob_coin_symbol,
+          trans_national_symbol: orderBook.ob_national_symbol,
+          trans_amount: this.formatAmount(amount),
+          trans_price: this.formatAmount(price),
+          trans_price_usd: this.formatAmount(price),
+          trans_total_price: this.formatAmount(total),
+          trans_total_usd: this.formatAmount(total),
+          trans_dispute_status: false,
+          trans_time_bank: null,
+          trans_status: TransactionStatus.PENDING,
+          trans_message: null,
+          trans_trade_mode: orderBook.ob_trade_mode,
+          trans_coin_unlock_at: null,
+          trans_lock_released_at: null,
+          trans_expired_at: expiresAt,
+        });
+
+        const saved = await manager.save(Transaction, transaction);
+
+        const hydrated = await this.loadTransactionWithUsers(
+          (manager as any).getRepository(Transaction),
+          saved.trans_id,
+        );
+        return {
+          response: this.toTransactionResponse(hydrated ?? saved),
+          transactionId: saved.trans_id,
+        };
+      },
+    );
+
+    void this.transactionExpiryQueue
+      .scheduleExpiry(transactionId, TransactionStatus.PENDING)
+      .catch((err) => {
+        console.error(
+          `Failed to schedule pending expiry job for transaction ${transactionId}:`,
+          err,
+        );
       });
 
-      const saved = await manager.save(Transaction, transaction);
-
-      const hydrated = await this.loadTransactionWithUsers(
-        (manager as any).getRepository(Transaction),
-        saved.trans_id,
-      );
-      return this.toTransactionResponse(hydrated ?? saved);
-    });
+    return response;
   }
 
   async getTransactions(userId: number, query: QueryTransactionsDto) {
@@ -477,12 +576,9 @@ export class TransactionService {
       where: { trans_id: id },
     });
     if (!transaction) throw new NotFoundException('Transaction not found');
-    if (
-      transaction.trans_user_buy !== userId &&
-      transaction.trans_user_sell !== userId
-    ) {
+    if (transaction.trans_user_buy !== userId) {
       throw new ForbiddenException(
-        'You are not a participant in this transaction',
+        'Only the buyer can confirm payment for this transaction',
       );
     }
     if (transaction.trans_status !== TransactionStatus.PENDING) {
@@ -492,6 +588,9 @@ export class TransactionService {
     }
     transaction.trans_status = TransactionStatus.PAYMENT_CONFIRMED;
     transaction.trans_time_bank = new Date();
+    transaction.trans_expired_at = new Date(
+      Date.now() + TRANSACTION_EXPIRY_DELAY_MS,
+    );
     const saved = await this.transactionRepository.save(transaction);
     void this.sendPaymentConfirmedEmailToSeller(saved).catch((error) => {
       console.error(
@@ -499,6 +598,14 @@ export class TransactionService {
         error,
       );
     });
+    void this.transactionExpiryQueue
+      .scheduleExpiry(saved.trans_id, TransactionStatus.PAYMENT_CONFIRMED)
+      .catch((err) => {
+        console.error(
+          `Failed to schedule payment_confirmed expiry job for transaction ${saved.trans_id}:`,
+          err,
+        );
+      });
     const hydrated = await this.loadTransactionWithUsers(
       this.transactionRepository,
       saved.trans_id,
@@ -622,19 +729,24 @@ export class TransactionService {
       };
     });
 
-    // Publish async (best-effort) so it doesn't block the request flow.
-    const at = new Date().toISOString();
-    void this.pubsub.publish(USER_LEVELUP_CHANNEL, {
-      userId: result.buyerId,
-      transactionId: result.transactionId,
-      at,
-    });
-    if (result.sellerId && result.sellerId !== result.buyerId) {
-      void this.pubsub.publish(USER_LEVELUP_CHANNEL, {
-        userId: result.sellerId,
-        transactionId: result.transactionId,
-        at,
+    // Fire-and-forget level-up checks after executed.
+    void this.userLevelUpWorker
+      .handleTransactionSuccess(result.buyerId)
+      .catch((error) => {
+        console.error(
+          `Failed level-up check for buyer ${result.buyerId} on tx ${result.transactionId}:`,
+          error,
+        );
       });
+    if (result.sellerId && result.sellerId !== result.buyerId) {
+      void this.userLevelUpWorker
+        .handleTransactionSuccess(result.sellerId)
+        .catch((error) => {
+          console.error(
+            `Failed level-up check for seller ${result.sellerId} on tx ${result.transactionId}:`,
+            error,
+          );
+        });
     }
 
     const executedTransaction = await this.transactionRepository.findOne({

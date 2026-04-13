@@ -67,6 +67,6 @@ import { UserLevelUpWorker } from './user-level-up.worker';
     UserSecurityService,
     UserLevelUpWorker,
   ],
-  exports: [UsersService],
+  exports: [UsersService, UserLevelUpWorker],
 })
 export class UsersModule {}

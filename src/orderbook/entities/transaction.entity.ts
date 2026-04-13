@@ -20,8 +20,6 @@ export enum TransactionOption {
 
 export enum TransactionType {
   BANKING = 'banking',
-  WALLET = 'wallet',
-  EXCHANGE = 'exchange',
 }
 
 export enum TransactionStatus {
@@ -129,6 +127,9 @@ export class Transaction {
 
   @CreateDateColumn({ name: 'trans_created_at', type: 'timestamptz' })
   trans_created_at: Date;
+
+  @Column({ name: 'trans_expired_at', type: 'timestamptz', nullable: true })
+  trans_expired_at: Date | null;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'trans_user_buy' })

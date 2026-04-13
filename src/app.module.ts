@@ -16,11 +16,13 @@ import { OrderbookModule } from './orderbook/orderbook.module';
 import { ChatModule } from './chat/chat.module';
 import { SupportChatModule } from './support-chat/support-chat.module';
 import { CurrenciesModule } from './currencies/currencies.module';
+import { BullMqModule } from './infrastructure/bullmq/bullmq.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    BullMqModule,
     RpcRateLimitModule,
     TypeOrmModule.forRootAsync({
       useFactory: (configService: ConfigService) =>
