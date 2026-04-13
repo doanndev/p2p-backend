@@ -63,7 +63,8 @@ export class QueryOrderbooksDto {
 
   @ApiPropertyOptional({
     enum: AmountSortOrder,
-    description: 'Sắp xếp theo amount',
+    description:
+      'Sắp xếp theo amount (chủ yếu dùng cho API my orderbooks; API public tự sort theo option/price).',
   })
   @IsOptional()
   @IsEnum(AmountSortOrder)
@@ -74,14 +75,18 @@ export class QueryOrderbooksDto {
   @IsEnum(OrderBookOption)
   option?: OrderBookOption;
 
-  @ApiPropertyOptional({ description: 'Số coin tối thiểu (ob_amount)' })
+  @ApiPropertyOptional({
+    description: 'Số coin tối thiểu theo amount_remaining',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   amountMin?: number;
 
-  @ApiPropertyOptional({ description: 'Số coin tối đa (ob_amount)' })
+  @ApiPropertyOptional({
+    description: 'Số coin tối đa theo amount_remaining',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

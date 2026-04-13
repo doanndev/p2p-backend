@@ -261,12 +261,12 @@ export class OrderbookService {
       qb.andWhere('ob.ob_trade_mode = :tm', { tm: query.tradeMode });
     }
     if (query.amountMin !== undefined) {
-      qb.andWhere('ob.ob_amount >= :amin', {
+      qb.andWhere('ob.ob_amount_remaining >= :amin', {
         amin: this.formatAmount(query.amountMin),
       });
     }
     if (query.amountMax !== undefined) {
-      qb.andWhere('ob.ob_amount <= :amax', {
+      qb.andWhere('ob.ob_amount_remaining <= :amax', {
         amax: this.formatAmount(query.amountMax),
       });
     }
@@ -281,12 +281,21 @@ export class OrderbookService {
       });
     }
 
-    if (query.sortAmount === 'asc') {
-      qb.orderBy('ob.ob_amount', 'ASC').addOrderBy('ob.ob_id', 'DESC');
-    } else if (query.sortAmount === 'desc') {
-      qb.orderBy('ob.ob_amount', 'DESC').addOrderBy('ob.ob_id', 'DESC');
+    if (query.option === OrderBookOption.SELL) {
+      qb.orderBy('ob.ob_price', 'ASC').addOrderBy('ob.ob_id', 'DESC');
+    } else if (query.option === OrderBookOption.BUY) {
+      qb.orderBy('ob.ob_price', 'DESC').addOrderBy('ob.ob_id', 'DESC');
     } else {
-      qb.orderBy('ob.ob_id', 'DESC');
+      // Mixed options: SELL books first by price ASC, BUY books by price DESC.
+      qb.orderBy(
+        `CASE WHEN ob.ob_option = '${OrderBookOption.SELL}' THEN ob.ob_price END`,
+        'ASC',
+      )
+        .addOrderBy(
+          `CASE WHEN ob.ob_option = '${OrderBookOption.BUY}' THEN ob.ob_price END`,
+          'DESC',
+        )
+        .addOrderBy('ob.ob_id', 'DESC');
     }
     qb.skip((page - 1) * limit).take(limit);
 

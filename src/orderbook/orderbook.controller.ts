@@ -216,7 +216,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách order book',
     description:
-      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, tradeMode (fast|safe), khoảng amount / amount_remaining, sort theo amount.',
+      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, tradeMode (fast|safe), khoảng amount (áp vào amount_remaining). Sort giá tự động: option sell từ thấp lên cao, option buy từ cao xuống thấp.',
   })
   @ApiOkResponse({
     description: 'Danh sách order book đang pending',
