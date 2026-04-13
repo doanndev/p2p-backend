@@ -12,10 +12,6 @@ import type { OnchainTransaction } from './onchain-transaction.types';
 export class SolChainSyncService implements ChainDepositSyncPort {
   private readonly logger = new Logger(SolChainSyncService.name);
 
-  static normalizeRpcUrl(url: string): string {
-    return url.replace(/\/+$/, '').trim();
-  }
-
   constructor(
     private readonly configService: ConfigService,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
@@ -106,17 +102,7 @@ export class SolChainSyncService implements ChainDepositSyncPort {
       return [];
     }
 
-    const fallbackRpcUrls = [
-      'https://api.mainnet-beta.solana.com',
-      'https://solana-api.projectserum.com',
-    ];
-    const primarySet = new Set(
-      primaryUrls.map(SolChainSyncService.normalizeRpcUrl),
-    );
-    const extraFallbacks = fallbackRpcUrls.filter(
-      (f) => !primarySet.has(SolChainSyncService.normalizeRpcUrl(f)),
-    );
-    const rpcUrls = [...primaryUrls, ...extraFallbacks];
+    const rpcUrls = primaryUrls;
 
     for (let rpcIndex = 0; rpcIndex < rpcUrls.length; rpcIndex++) {
       const rpcUrl = rpcUrls[rpcIndex];
@@ -359,17 +345,7 @@ export class SolChainSyncService implements ChainDepositSyncPort {
       throw new Error('SOLANA_RPC_URL not configured (admin_settings or .env)');
     }
 
-    const fallbackRpcUrls = [
-      'https://api.mainnet-beta.solana.com',
-      'https://solana-api.projectserum.com',
-    ];
-    const primarySet = new Set(
-      primaryUrls.map(SolChainSyncService.normalizeRpcUrl),
-    );
-    const extraFallbacks = fallbackRpcUrls.filter(
-      (f) => !primarySet.has(SolChainSyncService.normalizeRpcUrl(f)),
-    );
-    const rpcUrls = [...primaryUrls, ...extraFallbacks];
+    const rpcUrls = primaryUrls;
 
     const walletPk = new PublicKey(address);
 
@@ -501,17 +477,7 @@ export class SolChainSyncService implements ChainDepositSyncPort {
     if (!primaryUrls.length) {
       throw new Error('SOLANA_RPC_URL not configured');
     }
-    const fallbackRpcUrls = [
-      'https://api.mainnet-beta.solana.com',
-      'https://solana-api.projectserum.com',
-    ];
-    const primarySet = new Set(
-      primaryUrls.map(SolChainSyncService.normalizeRpcUrl),
-    );
-    const extraFallbacks = fallbackRpcUrls.filter(
-      (f) => !primarySet.has(SolChainSyncService.normalizeRpcUrl(f)),
-    );
-    const rpcUrls = [...primaryUrls, ...extraFallbacks];
+    const rpcUrls = primaryUrls;
     const pk = new PublicKey(address);
 
     for (const rpcUrl of rpcUrls) {
@@ -838,17 +804,7 @@ export class SolChainSyncService implements ChainDepositSyncPort {
       if (!primaryUrls.length) {
         throw new Error('SOLANA_RPC_URL is not configured');
       }
-      const fallbackRpcUrls = [
-        'https://api.mainnet-beta.solana.com',
-        'https://solana-api.projectserum.com',
-      ];
-      const primarySet = new Set(
-        primaryUrls.map(SolChainSyncService.normalizeRpcUrl),
-      );
-      const extraFallbacks = fallbackRpcUrls.filter(
-        (f) => !primarySet.has(SolChainSyncService.normalizeRpcUrl(f)),
-      );
-      const rpcUrls = [...primaryUrls, ...extraFallbacks];
+      const rpcUrls = primaryUrls;
 
       for (let rpcIndex = 0; rpcIndex < rpcUrls.length; rpcIndex++) {
         const rpcUrl = rpcUrls[rpcIndex];
@@ -906,12 +862,6 @@ export class SolChainSyncService implements ChainDepositSyncPort {
                 `uiAmountString=${tokenAccountInfo.value.uiAmountString ?? 'n/a'} parsed=${balance}`,
             );
 
-            if (!isPrimary) {
-              this.logger.log(
-                `Successfully got USDT balance using fallback RPC for ${address} on SOL`,
-              );
-            }
-
             return balance;
           } catch (error: any) {
             // Token account không tồn tại = balance = 0
@@ -929,10 +879,10 @@ export class SolChainSyncService implements ChainDepositSyncPort {
               return 0;
             }
 
-            // Nếu không phải lỗi "account not found", throw để thử RPC tiếp theo
+            // Nếu không phải lỗi "account not found", throw để thử RPC tiếp theo (nếu có)
             if (isPrimary) {
               this.logger.warn(
-                `Primary RPC failed for USDT balance check on SOL: ${error.message}. Trying fallback...`,
+                `SOL RPC failed for SPL balance check: ${error.message}`,
               );
             }
             throw error;

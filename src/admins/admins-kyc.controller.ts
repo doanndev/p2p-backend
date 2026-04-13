@@ -10,7 +10,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { AdminsService } from './admins.service';
+import { AdminsKycService } from './admins-kyc.service';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionReadUsersGuard } from './guards/admin-permission-read-users.guard';
 import { UpdateKycStatusDto } from './dto/update-kyc-status.dto';
@@ -26,7 +26,7 @@ import {
 @ApiCookieAuth('admin_access_token')
 @Controller('admins/kyc')
 export class AdminsKycController {
-  constructor(private readonly adminsService: AdminsService) {}
+  constructor(private readonly adminsKycService: AdminsKycService) {}
 
   @Get('list')
   @ApiOperation({
@@ -51,7 +51,7 @@ export class AdminsKycController {
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
   async getKycList(@Query('status') status?: string) {
-    const result = await this.adminsService.getKycList(status);
+    const result = await this.adminsKycService.getKycList(status);
     return result;
   }
 
@@ -70,7 +70,7 @@ export class AdminsKycController {
   @HttpCode(HttpStatus.OK)
   async getUserKycHistory(@Param('user_id') userId: string) {
     const uid = parseInt(userId, 10);
-    const result = await this.adminsService.getUserKycHistory(uid);
+    const result = await this.adminsKycService.getUserKycHistory(uid);
     return result;
   }
 
@@ -84,7 +84,7 @@ export class AdminsKycController {
   @HttpCode(HttpStatus.OK)
   async checkUserKycStatus(@Param('user_id') userId: string) {
     const uid = parseInt(userId, 10);
-    const result = await this.adminsService.checkUserKycStatus(uid);
+    const result = await this.adminsKycService.checkUserKycStatus(uid);
     return result;
   }
 
@@ -109,7 +109,7 @@ export class AdminsKycController {
   ) {
     const uid = parseInt(userId, 10);
     const admin = req.user;
-    const result = await this.adminsService.updateKycStatus(
+    const result = await this.adminsKycService.updateKycStatus(
       uid,
       updateKycStatusDto,
       admin.admin_id,

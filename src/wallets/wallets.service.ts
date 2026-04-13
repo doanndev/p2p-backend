@@ -90,9 +90,14 @@ const TOKEN_USDT_PRICES_CACHE_KEY = 'wallets:token_prices_usdt';
 const TOKEN_USDT_PRICES_TTL_SEC = 60;
 const TOKEN_USDT_PRICES_REFRESH_MS = 60_000;
 
+/** Ví TRX derive HD — private key hex 64 ký tự (TronWeb) */
+type TronHdWallet = { privateKeyHex: string };
+
 @Injectable()
 export class WalletsService implements OnModuleInit {
   private readonly logger = new Logger(WalletsService.name);
+
+  private static readonly TRON_TRC20_FEE_LIMIT_SUN = 100_000_000;
 
   private debugShortAddr(addr: string, head = 8, tail = 6): string {
     const s = (addr || '').trim();
@@ -788,14 +793,39 @@ export class WalletsService implements OnModuleInit {
     };
   }
 
+  private isTronNetwork(networkSymbol: string): boolean {
+    const s = networkSymbol.trim().toUpperCase();
+    return s === 'TRX' || s === 'TRON';
+  }
+
+  private deriveTronAtPath(mnemonic: string, path: string): TronHdWallet {
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const bip32Factory = bip32.BIP32Factory(tinysecp);
+    const root = bip32Factory.fromSeed(seed);
+    const derivedNode = root.derivePath(path);
+    if (!derivedNode.privateKey) {
+      throw new BadRequestException('Failed to derive Tron private key');
+    }
+    return {
+      privateKeyHex: Buffer.from(derivedNode.privateKey).toString('hex'),
+    };
+  }
+
+  private tronAddressFromPrivateKeyHex(privateKeyHex: string): string {
+    const addr = TronWeb.address.fromPrivateKey(privateKeyHex);
+    if (!addr || typeof addr !== 'string') {
+      throw new BadRequestException('Failed to derive Tron address');
+    }
+    return addr;
+  }
+
   /**
-   * Generate exchange wallet (ví sàn) with fixed path
-   * Path: m/44'/60'/0'/0'/0'/382' (ETH/BSC) or m/44'/501'/0'/0'/0'/382' (SOL)
+   * Ví main (mainWallet) — path 382': SOL / EVM / TRX
    */
-  private getExchangeWallet(
+  private getMainWallet(
     mnemonic: string,
     networkSymbol: string,
-  ): HDNodeWallet | Keypair {
+  ): HDNodeWallet | Keypair | TronHdWallet {
     if (networkSymbol === 'SOL') {
       const seed = bip39.mnemonicToSeedSync(mnemonic);
       const derivedSeed = derivePath(
@@ -803,26 +833,50 @@ export class WalletsService implements OnModuleInit {
         seed.toString('hex'),
       );
       return Keypair.fromSeed(derivedSeed.key);
-    } else {
-      // ETH/BSC và các mạng EVM khác
-      // Sử dụng bip32 để tạo ví sàn (nhất quán với generateEthAddress)
-      const seed = bip39.mnemonicToSeedSync(mnemonic);
-      const bip32Factory = bip32.BIP32Factory(tinysecp);
-      const root = bip32Factory.fromSeed(seed);
-
-      // Derive path: m/44'/60'/0'/0'/0'/382'
-      const derivedNode = root.derivePath(`m/44'/60'/0'/0'/0'/382'`);
-
-      // Chuyển đổi private key từ bip32 sang Wallet để lấy HDNodeWallet
-      const privateKeyBuffer = derivedNode.privateKey;
-      const privateKey = `0x${Buffer.from(privateKeyBuffer).toString('hex')}`;
-      const wallet = new Wallet(privateKey);
-
-      // Tạo HDNodeWallet từ private key để có thể sử dụng connect()
-      // Note: Wallet trong ethers v6 không phải HDNodeWallet, nhưng có thể dùng trực tiếp
-      // Hoặc tạo HDNodeWallet từ extended key
-      return wallet as any as HDNodeWallet;
     }
+    if (this.isTronNetwork(networkSymbol)) {
+      return this.deriveTronAtPath(mnemonic, `m/44'/195'/0'/0'/0'/382'`);
+    }
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const bip32Factory = bip32.BIP32Factory(tinysecp);
+    const root = bip32Factory.fromSeed(seed);
+    const derivedNode = root.derivePath(`m/44'/60'/0'/0'/0'/382'`);
+    if (!derivedNode.privateKey) {
+      throw new BadRequestException('Failed to derive main wallet');
+    }
+    const privateKey = `0x${Buffer.from(derivedNode.privateKey).toString('hex')}`;
+    const wallet = new Wallet(privateKey);
+    return wallet as any as HDNodeWallet;
+  }
+
+  /**
+   * Ví trợ phí (feeWallet) — path 369': trả phí mạng / delegate TRX → main
+   */
+  private getFeeWallet(
+    mnemonic: string,
+    networkSymbol: string,
+  ): HDNodeWallet | Keypair | TronHdWallet {
+    if (networkSymbol === 'SOL') {
+      const seed = bip39.mnemonicToSeedSync(mnemonic);
+      const derivedSeed = derivePath(
+        `m/44'/501'/0'/0'/0'/369'`,
+        seed.toString('hex'),
+      );
+      return Keypair.fromSeed(derivedSeed.key);
+    }
+    if (this.isTronNetwork(networkSymbol)) {
+      return this.deriveTronAtPath(mnemonic, `m/44'/195'/0'/0'/0'/369'`);
+    }
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const bip32Factory = bip32.BIP32Factory(tinysecp);
+    const root = bip32Factory.fromSeed(seed);
+    const derivedNode = root.derivePath(`m/44'/60'/0'/0'/0'/369'`);
+    if (!derivedNode.privateKey) {
+      throw new BadRequestException('Failed to derive fee wallet');
+    }
+    const privateKey = `0x${Buffer.from(derivedNode.privateKey).toString('hex')}`;
+    const wallet = new Wallet(privateKey);
+    return wallet as any as HDNodeWallet;
   }
 
   /**
@@ -860,10 +914,224 @@ export class WalletsService implements OnModuleInit {
     }
   }
 
-  private async sendTransaction(
+  private tronApiHeaders(): Record<string, string> | undefined {
+    const key =
+      this.configService.get<string>('TRONGRID_API_KEY')?.trim() ||
+      this.configService.get<string>('TRON_API_KEY')?.trim();
+    return key ? { 'Tron-Pro-Api-Key': key } : undefined;
+  }
+
+  private async getTronFullHost(network: Network): Promise<string> {
+    const urls = await this.adminSettingsConfigService.getRpcUrlsToTryByNetwork(
+      network.net_symbol,
+    );
+    if (!urls.length) {
+      throw new BadRequestException(
+        `Tron RPC not configured for network ${network.net_symbol}`,
+      );
+    }
+    return urls[0].replace(/\/+$/, '').trim();
+  }
+
+  private createTronWebWithKey(
+    fullHost: string,
+    privateKeyHex: string,
+  ): InstanceType<typeof TronWeb> {
+    return new TronWeb({
+      fullHost: fullHost.replace(/\/+$/, ''),
+      headers: this.tronApiHeaders(),
+      privateKey: privateKeyHex,
+    });
+  }
+
+  private normalizeTronAddress(
+    tw: InstanceType<typeof TronWeb>,
+    address: string,
+  ): string {
+    const a = address.trim();
+    if (!a) throw new BadRequestException('Empty Tron address');
+    if (tw.isAddress(a)) return a;
+    if (/^41[0-9a-fA-F]{40}$/.test(a)) {
+      return tw.address.fromHex(a);
+    }
+    throw new BadRequestException(`Invalid Tron address: ${a.slice(0, 12)}…`);
+  }
+
+  private resolveTronContractBase58(
+    tw: InstanceType<typeof TronWeb>,
+    mintOrContract: string,
+  ): string {
+    const s = mintOrContract.trim();
+    if (tw.isAddress(s)) return s;
+    if (/^41[0-9a-fA-F]{40}$/.test(s)) {
+      return tw.address.fromHex(s);
+    }
+    throw new BadRequestException(
+      `Invalid TRC20 contract: ${s.slice(0, 16)}… (expect base58 T… or 41-hex)`,
+    );
+  }
+
+  private extractTronTxId(result: unknown): string {
+    const r = result as {
+      transaction?: { txID?: string };
+      txid?: string;
+    };
+    const id = r?.transaction?.txID ?? r?.txid;
+    if (id && typeof id === 'string') return id;
+    throw new BadRequestException('Tron broadcast: missing txID');
+  }
+
+  private async clampTronDelegateSun(
+    tw: InstanceType<typeof TronWeb>,
+    ownerBase58: string,
+    resource: 'ENERGY' | 'BANDWIDTH',
+    requestedSun: number,
+  ): Promise<number> {
+    if (requestedSun <= 0) return 0;
+    try {
+      const res = (await this.rpcRateLimitService.withRpcLimit(() =>
+        tw.trx.getCanDelegatedMaxSize(ownerBase58, resource),
+      )) as { max_size?: number };
+      const max = res?.max_size;
+      if (typeof max === 'number' && Number.isFinite(max) && max > 0) {
+        return Math.min(requestedSun, Math.floor(max));
+      }
+    } catch {
+      // ignore
+    }
+    return requestedSun;
+  }
+
+  private async broadcastTronSignedTransaction(
+    tw: InstanceType<typeof TronWeb>,
+    privateKeyHex: string,
+    unsignedTx: object,
+  ): Promise<string> {
+    const signed = await this.rpcRateLimitService.withRpcLimit(() =>
+      tw.trx.sign(unsignedTx as any, privateKeyHex),
+    );
+    const out = await this.rpcRateLimitService.withRpcLimit(() =>
+      tw.trx.sendRawTransaction(signed as any),
+    );
+    const ok = (out as { result?: boolean }).result;
+    if (ok === false) {
+      const msg = (out as { message?: string }).message || 'broadcast failed';
+      throw new Error(String(msg));
+    }
+    return this.extractTronTxId(out);
+  }
+
+  /** Ủy quyền ENERGY/BANDWIDTH từ ví fee (369) → ví main (382). */
+  private async delegateTronResourcesFromFeeWallet(
+    tw: InstanceType<typeof TronWeb>,
+    feePrivateKeyHex: string,
+    fromBase58: string,
+    receiverBase58: string,
+    energyTrx: number,
+    bandwidthTrx: number,
+  ): Promise<string | null> {
+    let lastTxId: string | null = null;
+    if (energyTrx > 0) {
+      try {
+        let sun = Math.floor(energyTrx * 1_000_000);
+        sun = await this.clampTronDelegateSun(tw, fromBase58, 'ENERGY', sun);
+        if (sun > 0) {
+          const tx = await this.rpcRateLimitService.withRpcLimit(() =>
+            tw.transactionBuilder.delegateResource(
+              sun,
+              receiverBase58,
+              'ENERGY',
+              fromBase58,
+              false,
+              undefined,
+            ),
+          );
+          lastTxId = await this.broadcastTronSignedTransaction(
+            tw,
+            feePrivateKeyHex,
+            tx as object,
+          );
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `[withdraw-trx] delegate ENERGY failed: ${e?.message ?? e}`,
+        );
+      }
+    }
+    if (bandwidthTrx > 0) {
+      try {
+        let sun = Math.floor(bandwidthTrx * 1_000_000);
+        sun = await this.clampTronDelegateSun(tw, fromBase58, 'BANDWIDTH', sun);
+        if (sun > 0) {
+          const tx = await this.rpcRateLimitService.withRpcLimit(() =>
+            tw.transactionBuilder.delegateResource(
+              sun,
+              receiverBase58,
+              'BANDWIDTH',
+              fromBase58,
+              false,
+              undefined,
+            ),
+          );
+          lastTxId = await this.broadcastTronSignedTransaction(
+            tw,
+            feePrivateKeyHex,
+            tx as object,
+          );
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `[withdraw-trx] delegate BANDWIDTH failed: ${e?.message ?? e}`,
+        );
+      }
+    }
+    return lastTxId;
+  }
+
+  private async ensureEvmMainHasGas(
+    provider: ReturnType<typeof createEvmJsonRpcProvider>,
+    mainWallet: HDNodeWallet | Wallet,
+    feeWallet: HDNodeWallet | Wallet,
+    minMainWei: bigint,
+  ): Promise<void> {
+    const connectedMain = mainWallet.connect(provider);
+    const connectedFee = feeWallet.connect(provider);
+    const bal = await this.rpcRateLimitService.withRpcLimit(() =>
+      provider.getBalance(connectedMain.address),
+    );
+    if (bal >= minMainWei) return;
+    const need = minMainWei - bal;
+    const feeData = await this.rpcRateLimitService.withRpcLimit(() =>
+      provider.getFeeData(),
+    );
+    const gasPrice = feeData.gasPrice ?? BigInt(0);
+    const gasForTopup = gasPrice * BigInt(21000);
+    const feeBal = await this.rpcRateLimitService.withRpcLimit(() =>
+      provider.getBalance(connectedFee.address),
+    );
+    if (feeBal < need + gasForTopup) {
+      throw new BadRequestException(
+        'Fee wallet cannot fund gas on main wallet; try again later',
+      );
+    }
+    const tx = await this.rpcRateLimitService.withRpcLimit(() =>
+      connectedFee.sendTransaction({
+        to: connectedMain.address,
+        value: need,
+        gasPrice: feeData.gasPrice,
+      }),
+    );
+    await this.rpcRateLimitService.withRpcLimit(() => tx.wait());
+  }
+
+  /**
+   * Rút on-chain: luôn ký từ ví main (382), phí mạng từ ví fee (369).
+   * Hỗ trợ SOL, ETH, BSC, TRX.
+   */
+  private async sendWithdrawTransaction(
     network: Network,
     coin: Coin,
-    exchangeWallet: HDNodeWallet | Keypair | Wallet,
+    mnemonic: string,
     toAddress: string,
     amount: number,
   ): Promise<string> {
@@ -890,22 +1158,27 @@ export class WalletsService implements OnModuleInit {
           commitment: 'confirmed',
           wsEndpoint: wssUrl || undefined,
         });
-        const keypair = exchangeWallet as Keypair;
+        const mainKeypair = this.getMainWallet(mnemonic, 'SOL') as Keypair;
+        const feeKeypair = this.getFeeWallet(mnemonic, 'SOL') as Keypair;
         const toPublicKey = new PublicKey(toAddress);
 
         // Kiểm tra xem coin có phải native SOL không
         if (coin.coin_symbol === 'SOL') {
-          // Native SOL transfer
           const transaction = new Transaction().add(
             SystemProgram.transfer({
-              fromPubkey: keypair.publicKey,
+              fromPubkey: mainKeypair.publicKey,
               toPubkey: toPublicKey,
-              lamports: amount * 1e9, // Convert to lamports (1 SOL = 1e9 lamports)
+              lamports: amount * 1e9,
             }),
           );
+          const { blockhash } = await this.rpcRateLimitService.withRpcLimit(
+            () => connection.getLatestBlockhash('confirmed'),
+          );
+          transaction.recentBlockhash = blockhash;
+          transaction.feePayer = feeKeypair.publicKey;
 
           const signature = await this.rpcRateLimitService.withRpcLimit(() =>
-            connection.sendTransaction(transaction, [keypair]),
+            connection.sendTransaction(transaction, [mainKeypair, feeKeypair]),
           );
           await this.rpcRateLimitService.withRpcLimit(() =>
             connection.confirmTransaction(signature, 'confirmed'),
@@ -928,7 +1201,7 @@ export class WalletsService implements OnModuleInit {
           // Lấy associated token address của sender và receiver
           const fromTokenAccount = await getAssociatedTokenAddress(
             mintPublicKey,
-            keypair.publicKey,
+            mainKeypair.publicKey,
           );
           const toTokenAccount = await getAssociatedTokenAddress(
             mintPublicKey,
@@ -937,7 +1210,7 @@ export class WalletsService implements OnModuleInit {
 
           this.logger.debug(
             `[withdraw-sol-spl] rpcUrl=${rpcUrl} mint=${mintPublicKey.toBase58()} decimals=${decimals} ` +
-              `fromWallet=${keypair.publicKey.toBase58()} fromATA=${fromTokenAccount.toBase58()} ` +
+              `fromWallet=${mainKeypair.publicKey.toBase58()} fromATA=${fromTokenAccount.toBase58()} ` +
               `toWallet=${toPublicKey.toBase58()} toATA=${toTokenAccount.toBase58()} amount=${amount}`,
           );
 
@@ -963,7 +1236,7 @@ export class WalletsService implements OnModuleInit {
                 : '';
             this.logger.debug(
               `[withdraw-sol-spl] getAccount(sender) fail ` +
-                `signerPubkey=${keypair.publicKey.toBase58()} ` +
+                `signerPubkey=${mainKeypair.publicKey.toBase58()} ` +
                 `mint=${mintPublicKey.toBase58()} rpcUrl=${rpcUrl} ` +
                 `error.name=${errName} error.code=${errCode || 'n/a'} err=${errMsg || '(empty message)'}`,
             );
@@ -1010,7 +1283,7 @@ export class WalletsService implements OnModuleInit {
                 : '';
             this.logger.debug(
               `[withdraw-sol-spl] getAccount(receiver) fail (may create ATA) ` +
-                `signerPubkey=${keypair.publicKey.toBase58()} ` +
+                `signerPubkey=${mainKeypair.publicKey.toBase58()} ` +
                 `mint=${mintPublicKey.toBase58()} rpcUrl=${rpcUrl} ` +
                 `error.name=${errName} error.code=${errCode || 'n/a'} err=${errMsg || '(empty message)'} ` +
                 `toATA=${toTokenAccount.toBase58()}`,
@@ -1024,10 +1297,10 @@ export class WalletsService implements OnModuleInit {
           if (!toTokenAccountInfo) {
             transaction.add(
               createAssociatedTokenAccountInstruction(
-                keypair.publicKey, // payer
-                toTokenAccount, // associatedTokenAddress
-                toPublicKey, // owner
-                mintPublicKey, // mint
+                feeKeypair.publicKey,
+                toTokenAccount,
+                toPublicKey,
+                mintPublicKey,
                 TOKEN_PROGRAM_ID,
                 ASSOCIATED_TOKEN_PROGRAM_ID,
               ),
@@ -1039,7 +1312,7 @@ export class WalletsService implements OnModuleInit {
             createTransferInstruction(
               fromTokenAccount,
               toTokenAccount,
-              keypair.publicKey,
+              mainKeypair.publicKey,
               transferAmount,
               [],
               TOKEN_PROGRAM_ID,
@@ -1051,12 +1324,15 @@ export class WalletsService implements OnModuleInit {
             () => connection.getLatestBlockhash('confirmed'),
           );
           transaction.recentBlockhash = blockhash;
-          transaction.feePayer = keypair.publicKey;
+          transaction.feePayer = feeKeypair.publicKey;
 
           // Simulate transaction trước khi gửi để kiểm tra lỗi
           try {
             const simulation = await this.rpcRateLimitService.withRpcLimit(() =>
-              connection.simulateTransaction(transaction),
+              connection.simulateTransaction(transaction, [
+                mainKeypair,
+                feeKeypair,
+              ]),
             );
             if (simulation.value.err) {
               const errorMessage = simulation.value.err.toString();
@@ -1087,7 +1363,7 @@ export class WalletsService implements OnModuleInit {
           }
 
           const signature = await this.rpcRateLimitService.withRpcLimit(() =>
-            connection.sendTransaction(transaction, [keypair]),
+            connection.sendTransaction(transaction, [mainKeypair, feeKeypair]),
           );
           await this.rpcRateLimitService.withRpcLimit(() =>
             connection.confirmTransaction(signature, 'confirmed'),
@@ -1095,6 +1371,106 @@ export class WalletsService implements OnModuleInit {
           return signature;
         }
       });
+    } else if (this.isTronNetwork(network.net_symbol)) {
+      const coinNetwork = await this.coinNetworkRepository.findOne({
+        where: {
+          cn_coin_id: coin.coin_id,
+          cn_network_id: network.net_id,
+          cn_status: CoinNetworkStatus.ACTIVE,
+        },
+      });
+      if (!coinNetwork) {
+        throw new BadRequestException(
+          `Coin ${coin.coin_symbol} is not available on network ${network.net_symbol}`,
+        );
+      }
+
+      const fullHost = await this.getTronFullHost(network);
+      const mainSk = this.getMainWallet(
+        mnemonic,
+        network.net_symbol,
+      ) as TronHdWallet;
+      const feeSk = this.getFeeWallet(
+        mnemonic,
+        network.net_symbol,
+      ) as TronHdWallet;
+      const mainAddr = this.tronAddressFromPrivateKeyHex(mainSk.privateKeyHex);
+      const twFee = this.createTronWebWithKey(fullHost, feeSk.privateKeyHex);
+      const feeAddr =
+        twFee.defaultAddress.base58 ||
+        this.tronAddressFromPrivateKeyHex(feeSk.privateKeyHex);
+
+      const energyTrx =
+        await this.adminSettingsConfigService.getTronDelegateEnergyStakeTrx();
+      const bandwidthTrx =
+        await this.adminSettingsConfigService.getTronDelegateBandwidthStakeTrx();
+      await this.delegateTronResourcesFromFeeWallet(
+        twFee,
+        feeSk.privateKeyHex,
+        feeAddr,
+        mainAddr,
+        energyTrx,
+        bandwidthTrx,
+      );
+
+      const twMain = this.createTronWebWithKey(fullHost, mainSk.privateKeyHex);
+      const toNorm = this.normalizeTronAddress(twMain, toAddress);
+      const coinSym = coin.coin_symbol.trim().toUpperCase();
+      const netSym = network.net_symbol.trim().toUpperCase();
+      const isNativeTrx = coinSym === 'TRX' || coinSym === netSym;
+
+      if (isNativeTrx) {
+        const sun = Math.floor(amount * 1_000_000);
+        if (sun <= 0) {
+          throw new BadRequestException('Invalid TRX transfer amount');
+        }
+        const result = await this.rpcRateLimitService.withRpcLimit(() =>
+          twMain.trx.sendTransaction(toNorm, sun, {
+            privateKey: mainSk.privateKeyHex,
+          }),
+        );
+        return this.extractTronTxId(result);
+      }
+
+      if (!coinNetwork.cn_coin_mint) {
+        throw new BadRequestException(
+          `Token ${coin.coin_symbol} requires cn_coin_mint on ${network.net_symbol}`,
+        );
+      }
+
+      const contractAddr = this.resolveTronContractBase58(
+        twMain,
+        coinNetwork.cn_coin_mint,
+      );
+      const contract = await twMain.contract().at(contractAddr);
+      const callOpts = { from: mainAddr };
+      const decimalsRaw = await this.rpcRateLimitService.withRpcLimit(() =>
+        contract.decimals().call(callOpts),
+      );
+      const decimals =
+        typeof decimalsRaw === 'object' &&
+        decimalsRaw != null &&
+        'toString' in decimalsRaw
+          ? Number((decimalsRaw as { toString(): string }).toString())
+          : Number(decimalsRaw);
+      const amountUnits = BigInt(
+        Math.floor(amount * Math.pow(10, decimals) + 1e-12),
+      );
+      if (amountUnits <= BigInt(0)) {
+        throw new BadRequestException('Invalid TRC20 transfer amount');
+      }
+      const txid = await this.rpcRateLimitService.withRpcLimit(() =>
+        contract
+          .transfer(toNorm, amountUnits.toString())
+          .send(
+            { feeLimit: WalletsService.TRON_TRC20_FEE_LIMIT_SUN },
+            mainSk.privateKeyHex,
+          ),
+      );
+      if (typeof txid !== 'string' || !txid) {
+        throw new BadRequestException('TRC20 transfer did not return tx id');
+      }
+      return txid;
     } else {
       // EVM: thử lần lượt RPC từ DB rồi env (nếu khác), khi lỗi/rate limit thử URL tiếp theo
       const rpcUrls =
@@ -1122,13 +1498,19 @@ export class WalletsService implements OnModuleInit {
         );
       }
 
-      const wallet = exchangeWallet as HDNodeWallet | Wallet;
+      const mainWallet = this.getMainWallet(mnemonic, network.net_symbol) as
+        | HDNodeWallet
+        | Wallet;
+      const feeWallet = this.getFeeWallet(mnemonic, network.net_symbol) as
+        | HDNodeWallet
+        | Wallet;
+
       let lastEvmErr: Error | null = null;
       for (const rpcUrl of rpcUrls) {
         try {
           const provider = createEvmJsonRpcProvider(rpcUrl);
 
-          const connectedWallet = wallet.connect(provider);
+          const connectedWallet = mainWallet.connect(provider);
           const normalizedToAddressEvm = this.normalizeEvmAddress(toAddress);
 
           // Kiểm tra xem coin có phải native token không (ETH hoặc BNB trên BSC)
@@ -1138,23 +1520,27 @@ export class WalletsService implements OnModuleInit {
             (network.net_symbol === 'BSC' && coin.coin_symbol === 'BNB');
 
           if (isNativeToken) {
-            // Native token transfer (ETH hoặc BNB trên BSC)
-            // Kiểm tra balance của sender trước khi transfer
             const transferAmount = parseUnits(amount.toString(), 18);
-            const senderBalance = await this.rpcRateLimitService.withRpcLimit(
-              () => provider.getBalance(connectedWallet.address),
-            );
-
-            // Ước tính gas fee (có thể lấy từ feeData)
             const feeData = await this.rpcRateLimitService.withRpcLimit(() =>
               provider.getFeeData(),
             );
-            const estimatedGasLimit = 21000; // Gas limit cho native token transfer
+            const estimatedGasLimit = BigInt(21000);
             const estimatedGasFee = feeData.gasPrice
-              ? feeData.gasPrice * BigInt(estimatedGasLimit)
+              ? feeData.gasPrice * estimatedGasLimit
               : BigInt(0);
+            const gasBuffer = estimatedGasFee / BigInt(5) + BigInt(1);
+            const minMainWei = transferAmount + estimatedGasFee + gasBuffer;
 
-            // Kiểm tra balance có đủ cho cả transfer amount và gas fee không
+            await this.ensureEvmMainHasGas(
+              provider,
+              mainWallet,
+              feeWallet,
+              minMainWei,
+            );
+
+            const senderBalance = await this.rpcRateLimitService.withRpcLimit(
+              () => provider.getBalance(connectedWallet.address),
+            );
             if (senderBalance < transferAmount + estimatedGasFee) {
               const availableBalance =
                 Number(senderBalance - estimatedGasFee) / Math.pow(10, 18);
@@ -1233,6 +1619,29 @@ export class WalletsService implements OnModuleInit {
                 `Could not check token balance, proceeding with transfer: ${errMsg}`,
               );
             }
+
+            const feeData = await this.rpcRateLimitService.withRpcLimit(() =>
+              provider.getFeeData(),
+            );
+            const gasPrice = feeData.gasPrice ?? BigInt(0);
+            let gasLimit = BigInt(120_000);
+            try {
+              gasLimit = await this.rpcRateLimitService.withRpcLimit(() =>
+                tokenContract.transfer.estimateGas(
+                  normalizedToAddressEvm,
+                  transferAmount,
+                ),
+              );
+            } catch {
+              // dùng mặc định
+            }
+            const gasWithBuffer = gasLimit + gasLimit / BigInt(5) + BigInt(1);
+            await this.ensureEvmMainHasGas(
+              provider,
+              mainWallet,
+              feeWallet,
+              gasPrice * gasWithBuffer,
+            );
 
             const tx = await this.rpcRateLimitService.withRpcLimit(() =>
               tokenContract.transfer(normalizedToAddressEvm, transferAmount),
@@ -1767,7 +2176,14 @@ export class WalletsService implements OnModuleInit {
     // 0. Kiểm tra user đã xác minh danh tính và status = active
     const user = await this.userRepository.findOne({
       where: { uid: userId },
-      select: ['uid', 'uverify', 'ustatus', 'u_active_ggauth', 'uggauth', 'uemail'],
+      select: [
+        'uid',
+        'uverify',
+        'ustatus',
+        'u_active_ggauth',
+        'uggauth',
+        'uemail',
+      ],
     });
 
     if (!user) {
@@ -1795,6 +2211,18 @@ export class WalletsService implements OnModuleInit {
       throw new BadRequestException('Network not found');
     }
 
+    const netSymUpper = network.net_symbol.trim().toUpperCase();
+    const withdrawSupported =
+      netSymUpper === 'SOL' ||
+      netSymUpper === 'ETH' ||
+      netSymUpper === 'BSC' ||
+      this.isTronNetwork(network.net_symbol);
+    if (!withdrawSupported) {
+      throw new BadRequestException(
+        'Withdraw is only supported on SOL, ETH, BSC, and TRX networks',
+      );
+    }
+
     this.logger.debug(
       `[withdraw] resolved network=${network.net_symbol} net_id=${network.net_id}`,
     );
@@ -1817,15 +2245,15 @@ export class WalletsService implements OnModuleInit {
       // Normalize public_key: trim whitespace
       const normalizedPublicKey = userWallet.uwn_public_key.trim();
 
-      // Với EVM chains (ETH, BSC, …): so sánh case-insensitive (lowercase)
-      // Với Solana: so sánh case-sensitive
+      // SOL / TRX: base58 case-sensitive; EVM: checksum-insensitive
       let isMatch = false;
 
-      if (network.net_symbol === 'SOL') {
-        // Solana: so sánh case-sensitive
+      if (
+        network.net_symbol === 'SOL' ||
+        this.isTronNetwork(network.net_symbol)
+      ) {
         isMatch = address === normalizedPublicKey;
       } else {
-        // EVM (ETH, BSC, …): so sánh case-insensitive
         isMatch = address.toLowerCase() === normalizedPublicKey.toLowerCase();
       }
 
@@ -1927,41 +2355,13 @@ export class WalletsService implements OnModuleInit {
       throw new BadRequestException('Invalid wallet seed');
     }
 
-    // 7. Ví ký giao dịch: EVM (ETH/BSC/…) dùng ví sàn 382'; Solana dùng ví nạp của user (cùng path HD) vì token/SOL nằm trên địa chỉ đó.
+    // 7. Ghi nhận uwn_id (ví nạp user trên network) cho wallet_history — on-chain rút từ ví main 382', phí từ ví 369'.
     const userWalletNetwork = await this.useWalletNetworkRepository.findOne({
       where: {
         uwn_user_id: userId,
         uwn_network_id: network.net_id,
       },
     });
-
-    let signingWallet: HDNodeWallet | Keypair | Wallet;
-    if (network.net_symbol === 'SOL') {
-      if (!userWalletNetwork?.uwn_public_key) {
-        throw new BadRequestException(
-          'Solana deposit wallet not found. Create a wallet for this network before withdrawing.',
-        );
-      }
-      const d =
-        userWalletNetwork.uwn_end_path !== null &&
-        userWalletNetwork.uwn_end_path !== undefined
-          ? userWalletNetwork.uwn_end_path
-          : this.getLastThreeDigits(userWalletNetwork.uwn_id);
-      const { a, b, c } = this.calculatePathComponents(userId);
-      const userSolKeypair = this.deriveSolKeypair(mnemonic, a, b, c, d);
-      const expectedPk = userWalletNetwork.uwn_public_key.trim();
-      if (userSolKeypair.publicKey.toBase58() !== expectedPk) {
-        throw new BadRequestException(
-          'Solana wallet derivation does not match stored address. Contact support.',
-        );
-      }
-      signingWallet = userSolKeypair;
-      this.logger.debug(
-        `[withdraw] SOL signer=user deposit keypair pubkey=${expectedPk}`,
-      );
-    } else {
-      signingWallet = this.getExchangeWallet(mnemonic, network.net_symbol);
-    }
 
     // 8. Tạo wallet_history với status PENDING
     // Lưu ý: Database vẫn ghi nhận amount gốc (bao gồm cả phí nếu có)
@@ -1981,14 +2381,13 @@ export class WalletsService implements OnModuleInit {
     const savedHistory = await this.walletHistoryRepository.save(walletHistory);
 
     try {
-      // 9. Gửi transaction từ ví sàn đến address
-      // Sử dụng onchainAmount (đã trừ phí nếu không phải free withdraw)
-      const txHash = await this.sendTransaction(
+      // 9. Gửi từ ví main (382') tới đích; phí mạng do ví fee (369') (SOL ký 2 bên; EVM nạp gas; TRX ủy quyền energy từ fee).
+      const txHash = await this.sendWithdrawTransaction(
         network,
         coin,
-        signingWallet,
+        mnemonic,
         address,
-        onchainAmount, // Rút onchain với số tiền đã trừ phí (nếu có)
+        onchainAmount,
       );
 
       // 10. Cập nhật wallet_history với hash, status SUCCESS và wh_node

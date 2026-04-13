@@ -5,7 +5,7 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import { AdminsService } from './admins.service';
+import { AdminsStatisticsService } from './admins-statistics.service';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
@@ -13,7 +13,9 @@ import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swa
 @ApiCookieAuth('admin_access_token')
 @Controller('admins/statistical')
 export class AdminsStatisticalController {
-  constructor(private readonly adminsService: AdminsService) {}
+  constructor(
+    private readonly adminsStatisticsService: AdminsStatisticsService,
+  ) {}
 
   @Get('platform')
   @ApiOperation({ summary: 'Thống kê tổng quan nền tảng' })
@@ -24,7 +26,7 @@ export class AdminsStatisticalController {
   @UseGuards(AdminJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async getPlatformStatistics() {
-    const result = await this.adminsService.getPlatformStatistics();
+    const result = await this.adminsStatisticsService.getPlatformStatistics();
     return result;
   }
 
@@ -37,7 +39,7 @@ export class AdminsStatisticalController {
   @UseGuards(AdminJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async getRunningStatistics() {
-    const result = await this.adminsService.getRunningStatistics();
+    const result = await this.adminsStatisticsService.getRunningStatistics();
     return result;
   }
 }

@@ -15,13 +15,9 @@ function validString(v: string | null | undefined): string | null {
   return s.length > 0 ? s : null;
 }
 
-/** Chuẩn hóa URL để so sánh (bỏ slash ở cuối). */
-function normalizeRpcUrl(url: string): string {
-  return url.replace(/\/+$/, '').trim();
-}
-
 /**
- * Cấu hình RPC / Zerion: ưu tiên từ admin_settings (setting_name), không có hoặc không hợp lệ thì fallback sang biến môi trường .env.
+ * Cấu hình RPC / Zerion / Tron delegate: ưu tiên admin_settings; RPC còn fallback .env khi thiếu.
+ * Tron ủy quyền stake (`config.tron.delegate_*`) chỉ từ DB (+ mặc định trong code khi thiếu key).
  */
 @Injectable()
 export class AdminSettingsConfigService {
@@ -36,6 +32,9 @@ export class AdminSettingsConfigService {
     lv5: 2,
     lv6: 1,
   };
+
+  /** Khi `config.tron.delegate_energy_stake_trx` chưa cấu hình hoặc không hợp lệ (số TRX stake ủy quyền ENERGY). */
+  private readonly defaultTronDelegateEnergyStakeTrx = 30;
 
   constructor(
     @InjectRepository(AdminSetting)
@@ -132,65 +131,49 @@ export class AdminSettingsConfigService {
     return validString(this.configService.get<string>('RPC_BNB')) ?? null;
   }
 
-  /** RPC theo network symbol (SOL, ETH, BSC). */
+  /** RPC theo network symbol: DB `config.rpc.<symbol>` (chữ thường) nếu có, không thì env. */
   async getEffectiveRpcByNetwork(netSymbol: string): Promise<string | null> {
     const upper = netSymbol.toUpperCase();
     if (upper === 'SOL') return this.getEffectiveRpcSol();
     if (upper === 'ETH') return this.getEffectiveRpcEth();
     if (upper === 'BSC') return this.getEffectiveRpcBsc();
-    return (
-      validString(this.configService.get<string>(`RPC_${netSymbol}`)) ?? null
+    const fromDb = await this.getSettingRaw(
+      `config.rpc.${upper.toLowerCase()}`,
     );
+    if (fromDb != null) return fromDb;
+    if (upper === 'TRX' || upper === 'TRON') {
+      return (
+        validString(this.configService.get<string>('RPC_TRX')) ??
+        validString(this.configService.get<string>('RPC_TRON')) ??
+        null
+      );
+    }
+    return validString(this.configService.get<string>(`RPC_${upper}`)) ?? null;
   }
 
   /**
-   * Danh sách RPC URL cần thử (DB trước, rồi env nếu khác – bỏ qua nếu trùng sau khi chuẩn hóa trailing slash).
-   * Khi RPC từ DB lỗi hoặc rate limit, caller có thể thử URL tiếp theo (env).
+   * Một RPC URL duy nhất: giá trị trong admin_settings nếu có và hợp lệ, không thì .env.
+   * Không ghép thêm URL dự phòng trong code.
    */
   async getRpcSolUrlsToTry(): Promise<string[]> {
-    const fromDb = await this.getSettingRaw('config.rpc.sol');
-    const fromEnv = validString(
-      this.configService.get<string>('SOLANA_RPC_URL') ?? null,
-    );
-    if (!fromDb && !fromEnv) return [];
-    if (!fromDb) return [fromEnv!];
-    if (!fromEnv) return [fromDb];
-    if (normalizeRpcUrl(fromDb) === normalizeRpcUrl(fromEnv)) return [fromDb];
-    return [fromDb, fromEnv];
+    const url = await this.getEffectiveRpcSol();
+    return url ? [url] : [];
   }
 
   async getRpcEthUrlsToTry(): Promise<string[]> {
-    const fromDb = await this.getSettingRaw('config.rpc.eth');
-    const fromEnv = validString(
-      this.configService.get<string>('RPC_ETH') ?? null,
-    );
-    if (!fromDb && !fromEnv) return [];
-    if (!fromDb) return [fromEnv!];
-    if (!fromEnv) return [fromDb];
-    if (normalizeRpcUrl(fromDb) === normalizeRpcUrl(fromEnv)) return [fromDb];
-    return [fromDb, fromEnv];
+    const url = await this.getEffectiveRpcEth();
+    return url ? [url] : [];
   }
 
   async getRpcBscUrlsToTry(): Promise<string[]> {
-    const fromDb = await this.getSettingRaw('config.rpc.bsc');
-    const fromEnv = validString(
-      this.configService.get<string>('RPC_BNB') ?? null,
-    );
-    if (!fromDb && !fromEnv) return [];
-    if (!fromDb) return [fromEnv!];
-    if (!fromEnv) return [fromDb];
-    if (normalizeRpcUrl(fromDb) === normalizeRpcUrl(fromEnv)) return [fromDb];
-    return [fromDb, fromEnv];
+    const url = await this.getEffectiveRpcBsc();
+    return url ? [url] : [];
   }
 
-  /** Danh sách RPC URL cần thử theo network (DB rồi env nếu khác). */
+  /** Một RPC URL theo network: DB trước, không có thì env (`RPC_<SYMBOL>`). */
   async getRpcUrlsToTryByNetwork(netSymbol: string): Promise<string[]> {
-    const upper = netSymbol.toUpperCase();
-    if (upper === 'SOL') return this.getRpcSolUrlsToTry();
-    if (upper === 'ETH') return this.getRpcEthUrlsToTry();
-    if (upper === 'BSC') return this.getRpcBscUrlsToTry();
-    const env = validString(this.configService.get<string>(`RPC_${netSymbol}`));
-    return env ? [env] : [];
+    const url = await this.getEffectiveRpcByNetwork(netSymbol);
+    return url ? [url] : [];
   }
 
   /**
@@ -245,5 +228,49 @@ export class AdminSettingsConfigService {
   async getP2pLockHoursByLevel(): Promise<Record<string, number>> {
     const raw = await this.getSettingRaw('transaction.lock_hours_by_level');
     return this.toLockHoursMap(raw);
+  }
+
+  /**
+   * Phần trăm USDT gom về ví CEO khi sweep (ví user → main/CEO và ví trợ phí → main/CEO):
+   * `wallet.sweep.ceo_wallet_percent` (0–100). Phần còn lại về ví main (exchange path 382').
+   * Ví dụ 70 → CEO 70%, main 30%. Không cấu hình hoặc không hợp lệ → 70.
+   */
+  async getSweepCeoWalletPercent(): Promise<number> {
+    const fromDb = await this.getSettingNumber(
+      'wallet.sweep.ceo_wallet_percent',
+    );
+    if (fromDb == null || !Number.isFinite(fromDb)) {
+      return 70;
+    }
+    const n = Math.round(fromDb);
+    return Math.min(100, Math.max(0, n));
+  }
+
+  /**
+   * Tron — số TRX stake ủy quyền ENERGY mỗi lần (delegateResource, ×1e6 sun).
+   * `config.tron.delegate_energy_stake_trx`: thiếu/không hợp lệ → mặc định 30; `0` = không ủy quyền ENERGY.
+   */
+  async getTronDelegateEnergyStakeTrx(): Promise<number> {
+    const fromDb = await this.getSettingNumber(
+      'config.tron.delegate_energy_stake_trx',
+    );
+    if (fromDb != null && Number.isFinite(fromDb) && fromDb >= 0) {
+      return fromDb;
+    }
+    return this.defaultTronDelegateEnergyStakeTrx;
+  }
+
+  /**
+   * Tron — số TRX stake ủy quyền BANDWIDTH mỗi lần.
+   * `config.tron.delegate_bandwidth_stake_trx`: thiếu/không hợp lệ → 0 (tắt).
+   */
+  async getTronDelegateBandwidthStakeTrx(): Promise<number> {
+    const fromDb = await this.getSettingNumber(
+      'config.tron.delegate_bandwidth_stake_trx',
+    );
+    if (fromDb != null && Number.isFinite(fromDb) && fromDb >= 0) {
+      return fromDb;
+    }
+    return 0;
   }
 }

@@ -20,6 +20,16 @@ const DEFAULT_SETTINGS = [
   { name: 'config.rpc.sol', type: 'string', value: null },
   { name: 'config.rpc.eth', type: 'string', value: null },
   { name: 'config.rpc.bsc', type: 'string', value: null },
+  {
+    name: 'config.tron.delegate_energy_stake_trx',
+    type: 'number',
+    value: '30',
+  },
+  {
+    name: 'config.tron.delegate_bandwidth_stake_trx',
+    type: 'number',
+    value: '0',
+  },
   { name: 'config.rpc.rate_limit', type: 'number', value: '50' },
   { name: 'transaction.time_lock_balance', type: 'number', value: null },
   {
@@ -28,6 +38,11 @@ const DEFAULT_SETTINGS = [
     value: '{"lv1":24,"lv2":12,"lv3":4,"lv4":3,"lv5":2,"lv6":1}',
   },
   { name: 'transaction.fee', type: 'number', value: '2' },
+  {
+    name: 'wallet.sweep.ceo_wallet_percent',
+    type: 'number',
+    value: '70',
+  },
 ];
 
 async function hasColumn(client, columnName) {

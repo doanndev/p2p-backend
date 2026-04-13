@@ -10,7 +10,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { AdminsService } from './admins.service';
+import { AdminsUsersOpsService } from './admins-users-ops.service';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionReadUsersGuard } from './guards/admin-permission-read-users.guard';
 import { AdminPermissionAdvancedUsersGuard } from './guards/admin-permission-advanced-users.guard';
@@ -29,7 +29,7 @@ import {
 @ApiCookieAuth('admin_access_token')
 @Controller('admins/users')
 export class AdminUsersController {
-  constructor(private readonly adminsService: AdminsService) {}
+  constructor(private readonly adminsUsersOpsService: AdminsUsersOpsService) {}
 
   @Get()
   @ApiOperation({ summary: 'Danh sách user phân trang' })
@@ -46,7 +46,7 @@ export class AdminUsersController {
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
   async getUsers(@Query('page') page?: string, @Query('limit') limit?: string) {
-    const result = await this.adminsService.getUsersPaginated(
+    const result = await this.adminsUsersOpsService.getUsersPaginated(
       page ? parseInt(page, 10) || 1 : 1,
       limit ? parseInt(limit, 10) || 30 : 30,
     );
@@ -67,7 +67,7 @@ export class AdminUsersController {
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
   async getKolRegisters(@Query('status') status?: string) {
-    const result = await this.adminsService.getKolRegisters(status);
+    const result = await this.adminsUsersOpsService.getKolRegisters(status);
     return result;
   }
 
@@ -96,7 +96,7 @@ export class AdminUsersController {
     @Query('user_id') userId?: string,
   ) {
     const userIdNumber = userId ? parseInt(userId, 10) : undefined;
-    const result = await this.adminsService.getKolArticles(
+    const result = await this.adminsUsersOpsService.getKolArticles(
       status,
       userIdNumber,
     );
@@ -123,7 +123,7 @@ export class AdminUsersController {
   @HttpCode(HttpStatus.OK)
   async getUserById(@Param('id') id: string) {
     const uid = parseInt(id, 10);
-    const result = await this.adminsService.getUserById(uid);
+    const result = await this.adminsUsersOpsService.getUserById(uid);
     return result;
   }
 
@@ -143,7 +143,7 @@ export class AdminUsersController {
     @Body() updateKolDto: UpdateKolDto,
   ) {
     const uid = parseInt(id, 10);
-    const result = await this.adminsService.toggleUserKol(
+    const result = await this.adminsUsersOpsService.toggleUserKol(
       uid,
       updateKolDto.status,
     );
@@ -168,7 +168,7 @@ export class AdminUsersController {
   ) {
     const uid = parseInt(id, 10);
     const admin = req.user;
-    const result = await this.adminsService.updateUserStatus(
+    const result = await this.adminsUsersOpsService.updateUserStatus(
       uid,
       updateUserStatusDto.status,
       admin.admin_id,
@@ -197,7 +197,7 @@ export class AdminUsersController {
   ) {
     const articleId = parseInt(id, 10);
     const admin = req.user;
-    const result = await this.adminsService.updateKolArticleStatus(
+    const result = await this.adminsUsersOpsService.updateKolArticleStatus(
       articleId,
       updateKolArticleStatusDto.status,
       admin.admin_id,

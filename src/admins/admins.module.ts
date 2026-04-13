@@ -8,7 +8,11 @@ import { AdminsStatisticalController } from './admins-statistical.controller';
 import { AdminUsersController } from './admin-users.controller';
 import { AdminWalletController } from './admin-wallet.controller';
 import { AdminsKycController } from './admins-kyc.controller';
-import { AdminsService } from './admins.service';
+import { AdminsAuthService } from './admins-auth.service';
+import { AdminsStatisticsService } from './admins-statistics.service';
+import { AdminsUsersOpsService } from './admins-users-ops.service';
+import { AdminsWalletOpsService } from './admins-wallet-ops.service';
+import { AdminsKycService } from './admins-kyc.service';
 import { AdminRole } from './entities/admin-role.entity';
 import { Permission } from './entities/permission.entity';
 import { RolePermission } from './entities/role-permission.entity';
@@ -88,7 +92,11 @@ import { SettingsModule } from '../settings/settings.module';
     AdminsKycController,
   ],
   providers: [
-    AdminsService,
+    AdminsAuthService,
+    AdminsStatisticsService,
+    AdminsUsersOpsService,
+    AdminsWalletOpsService,
+    AdminsKycService,
     AdminJwtStrategy,
     AdminJwtAuthGuard,
     AdminPermissionGuard,
@@ -104,7 +112,6 @@ import { SettingsModule } from '../settings/settings.module';
     AdminSuperAdminGuard,
   ],
   exports: [
-    AdminsService,
     AdminJwtAuthGuard,
     AdminPermissionGuard,
     AdminPermissionReadSettingsGuard,
