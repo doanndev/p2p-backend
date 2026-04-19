@@ -213,13 +213,13 @@ export class AdminSettingsConfigService {
   }
 
   /**
-   * Phí giao dịch P2P (orderbook), đơn vị %: `transaction.fee` (ví dụ 2 = 2%).
+   * Phí giao dịch P2P (orderbook), đơn vị %: `smartref.fee` (ví dụ 0.5 = 0.5%).
    * Không cấu hình hoặc không hợp lệ → 2.
    */
-  async getEffectiveTransactionFeePercent(): Promise<number> {
-    const fromDb = await this.getSettingNumber('transaction.fee');
+  async getSmartrefFeePercent(): Promise<number> {
+    const fromDb = await this.getSettingNumber('smartref.fee');
     if (fromDb == null || !Number.isFinite(fromDb) || fromDb <= 0) {
-      return 2;
+      return 0.5;
     }
     return Math.min(fromDb, 100);
   }

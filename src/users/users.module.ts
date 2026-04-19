@@ -26,6 +26,7 @@ import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entit
 import { UserSecurityController } from './user-security.controller';
 import { UserSecurityService } from './user-security.service';
 import { UserLevelUpWorker } from './user-level-up.worker';
+import { SmartRefModule } from '../smart-ref/smart-ref.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { UserLevelUpWorker } from './user-level-up.worker';
     PassportModule,
     ConfigModule,
     SystemsModule,
+    SmartRefModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

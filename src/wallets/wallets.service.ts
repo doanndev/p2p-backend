@@ -64,6 +64,7 @@ import {
 } from '../users/entities/user-code.entity';
 import { ActiveWalletTracker } from './entities/active-wallet-tracker.entity';
 import { Coin } from '../settings/entities/coin.entity';
+import { CoinStatus } from '../settings/entities/coin.entity';
 import { Network } from '../settings/entities/network.entity';
 import {
   CoinNetwork,
@@ -1942,8 +1943,10 @@ export class WalletsService implements OnModuleInit {
             );
           } catch (error) {
             // Log lỗi nhưng tiếp tục sync các networks khác
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             console.error(
-              `Error syncing balance for network ${networkObj.net_symbol}: ${error.message}`,
+              `Error syncing balance for network ${networkObj.net_symbol}: ${errorMessage}`,
             );
           }
         }
@@ -1957,7 +1960,9 @@ export class WalletsService implements OnModuleInit {
       // Nếu không cần sync từ đầu, bỏ qua
     } catch (error) {
       // Log lỗi nhưng không throw để không block quá trình rút tiền
-      console.error(`Error checking and syncing balance: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(`Error checking and syncing balance: ${errorMessage}`);
     }
   }
 
@@ -2058,6 +2063,58 @@ export class WalletsService implements OnModuleInit {
     }
 
     return await queryBuilder.getMany();
+  }
+
+  async transferRewardFromMainWallet(
+    networkId: number,
+    toAddress: string,
+    amount: number,
+  ): Promise<{
+    txHash: string;
+    networkId: number;
+    coinSymbol: string;
+  }> {
+    const network = await this.networkRepository.findOne({
+      where: { net_id: networkId },
+    });
+
+    if (!network) {
+      throw new BadRequestException('Network not found');
+    }
+
+    const usdtCoin = await this.coinRepository.findOne({
+      where: {
+        coin_symbol: 'USDT',
+        coin_status: CoinStatus.ACTIVE,
+      },
+    });
+
+    if (!usdtCoin) {
+      throw new BadRequestException('USDT coin not configured');
+    }
+
+    const mnemonic = this.configService.get<string>('WALLET_SEED');
+    if (!mnemonic) {
+      throw new BadRequestException('Wallet seed not configured');
+    }
+
+    if (!bip39.validateMnemonic(mnemonic)) {
+      throw new BadRequestException('Invalid wallet seed');
+    }
+
+    const txHash = await this.sendWithdrawTransaction(
+      network,
+      usdtCoin,
+      mnemonic,
+      toAddress.trim(),
+      amount,
+    );
+
+    return {
+      txHash,
+      networkId,
+      coinSymbol: usdtCoin.coin_symbol,
+    };
   }
 
   private generateInternalExchangeEmailCode(): string {

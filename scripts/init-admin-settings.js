@@ -37,7 +37,7 @@ const DEFAULT_SETTINGS = [
     type: 'json',
     value: '{"lv1":24,"lv2":12,"lv3":4,"lv4":3,"lv5":2,"lv6":1}',
   },
-  { name: 'transaction.fee', type: 'number', value: '2' },
+  { name: 'smartref.fee', type: 'number', value: '0.5' },
   {
     name: 'wallet.sweep.ceo_wallet_percent',
     type: 'number',

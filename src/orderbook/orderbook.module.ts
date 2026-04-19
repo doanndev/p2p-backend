@@ -18,11 +18,13 @@ import { SettingsModule } from '../settings/settings.module';
 import { Admin } from '../admins/entities/admin.entity';
 import { TransactionExpiryQueueService } from './transaction-expiry-queue.service';
 import { UsersModule } from '../users/users.module';
+import { SmartRefModule } from '../smart-ref/smart-ref.module';
 
 @Module({
   imports: [
     SettingsModule,
     UsersModule,
+    SmartRefModule,
     TypeOrmModule.forFeature([
       OrderBook,
       NationalCurrency,

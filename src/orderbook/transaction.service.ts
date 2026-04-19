@@ -35,6 +35,7 @@ import {
   TransactionExpiryQueueService,
   TRANSACTION_EXPIRY_DELAY_MS,
 } from './transaction-expiry-queue.service';
+import { SmartRefService } from '../smart-ref/smart-ref.service';
 
 @Injectable()
 export class TransactionService {
@@ -56,6 +57,7 @@ export class TransactionService {
     private readonly emailService: EmailService,
     private readonly transactionExpiryQueue: TransactionExpiryQueueService,
     private readonly userLevelUpWorker: UserLevelUpWorker,
+    private readonly smartRefService: SmartRefService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -618,8 +620,9 @@ export class TransactionService {
   }
 
   async confirmReceived(userId: number, id: number) {
-    const feePercent =
-      await this.adminSettingsConfigService.getEffectiveTransactionFeePercent();
+    const refferalFeePercent =
+      await this.adminSettingsConfigService.getSmartrefFeePercent();
+    const feePercent = Number(process.env.FEE_PERCENT);
 
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
@@ -643,7 +646,7 @@ export class TransactionService {
 
       const amount = this.toNumber(transaction.trans_amount);
       const feeAmount = this.toNumber(
-        this.formatAmount((amount * feePercent) / 100),
+        this.formatAmount((amount * (refferalFeePercent + feePercent)) / 100),
       );
 
       let orderBook: OrderBook | null = null;
@@ -732,6 +735,21 @@ export class TransactionService {
         transactionId: saved.trans_id,
       };
     });
+
+    // Chia hoa hồng smartref cho các referral của người bán
+    if (result.smartrefFeePercent > 0) {
+      const smartrefRewardAmount = this.toNumber(
+        this.formatAmount((result.amount * result.smartrefFeePercent) / 100),
+      );
+      await this.smartRefService
+        .disputeSmartref(result.sellerId, smartrefRewardAmount)
+        .catch((error) => {
+          console.error(
+            `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
+            error,
+          );
+        });
+    }
 
     // Fire-and-forget level-up checks after executed.
     void this.userLevelUpWorker

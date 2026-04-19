@@ -44,6 +44,7 @@ import { StorageService } from './storage.service';
 import { UserVerifyStatus } from './entities/user-verify.entity';
 import { UserWallet, WalletType } from '../wallets/entities/user-wallet.entity';
 import { Coin } from '../settings/entities/coin.entity';
+import { SmartRefService } from '../smart-ref/smart-ref.service';
 
 @Injectable()
 export class UsersService {
@@ -76,6 +77,7 @@ export class UsersService {
     private storageService: StorageService,
     private configService: ConfigService,
     private googleAuthService: GoogleAuthService,
+    private smartRefService: SmartRefService,
   ) {}
 
   /**
@@ -128,6 +130,7 @@ export class UsersService {
   async register(registerDto: RegisterDto): Promise<User> {
     // ref_code is optional: only validate when client sends it
     const normalizedRefCode = registerDto.refCode?.trim();
+    let directReferrerUid: number | null = null;
     if (normalizedRefCode) {
       const referrerUser = await this.userRepository.findOne({
         where: { uref: normalizedRefCode },
@@ -138,6 +141,7 @@ export class UsersService {
           'Invalid referral code. Referral code does not exist',
         );
       }
+      directReferrerUid = referrerUser.uid;
     }
 
     // Generate unique uref (8 characters: uppercase letters and numbers)
@@ -205,6 +209,13 @@ export class UsersService {
     });
 
     const savedUser = await this.userRepository.save(user);
+
+    if (directReferrerUid != null) {
+      await this.smartRefService.recordInviteeReferralChain(
+        savedUser.uid,
+        directReferrerUid,
+      );
+    }
 
     return savedUser;
   }

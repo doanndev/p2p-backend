@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 
-/** Tuyến SmartRef, tối đa 7 cấp (kiểm tra ở tầng nghiệp vụ). */
+/** Tuyến SmartRef; số cấp tối đa theo setting_rewards_smartref (MAX srs_level active). */
 @Entity('smart_ref_trees')
 @Index(['srt_invitee', 'srt_level'], { unique: true })
 export class SmartRefTree {

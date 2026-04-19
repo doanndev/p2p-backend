@@ -27,6 +27,7 @@ import {
   TransactionOption,
   TransactionStatus,
 } from './entities/transaction.entity';
+import { SmartRefService } from '../smart-ref/smart-ref.service';
 
 type CreatorTransactionReputation = {
   total_transactions: number;
@@ -51,6 +52,7 @@ export class OrderbookService {
     private readonly transactionRepository: Repository<Transaction>,
     private readonly dataSource: DataSource,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
+    private readonly smartRefService: SmartRefService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -293,12 +295,9 @@ export class OrderbookService {
         ? undefined
         : this.toNumber(dto.nationalMax);
 
-    const feePercent =
-      dto.option === OrderBookOption.SELL
-        ? await this.adminSettingsConfigService.getEffectiveTransactionFeePercent()
-        : 0;
+    const feePercent = Number(process.env.FEE_PERCENT);
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       if (dto.option === OrderBookOption.SELL && !dto.buId) {
         throw new BadRequestException('buId is required when option is sell');
       }
@@ -346,12 +345,9 @@ export class OrderbookService {
       }
 
       /** Số coin lock vào ví: lệnh bán = amount + phí (hiển thị orderbook vẫn là amount). */
-      const lockTotal =
-        dto.option === OrderBookOption.SELL && feePercent > 0
-          ? this.toNumber(
-              this.formatAmount(amount + (amount * feePercent) / 100),
-            )
-          : amount;
+      const lockTotal = this.toNumber(
+        this.formatAmount(amount + (amount * feePercent) / 100),
+      );
       const amountStr = this.formatAmount(lockTotal);
       // Một câu UPDATE nguyên tử: trừ khả dụng + cộng lock, chỉ khi đủ số dư (ACID, tránh lệch decimal khi save entity).
       const updateResult = await manager
@@ -429,6 +425,27 @@ export class OrderbookService {
         description: saved.ob_description,
       };
     });
+
+    // Chia hoa hồng smartref cho các referral của người bán (chỉ áp dụng cho SELL orders - async, không chặn response)
+    if (dto.option === OrderBookOption.SELL) {
+      const smartrefFeePercent =
+        await this.adminSettingsConfigService.getSmartrefFeePercent();
+      if (smartrefFeePercent > 0) {
+        const smartrefRewardAmount = this.toNumber(
+          this.formatAmount((amount * smartrefFeePercent) / 100),
+        );
+        await this.smartRefService
+          .disputeSmartref(userId, smartrefRewardAmount)
+          .catch((error) => {
+            console.error(
+              `Failed to distribute smartref rewards for seller ${userId} on new orderbook:`,
+              error,
+            );
+          });
+      }
+    }
+
+    return result;
   }
 
   async getOrderBooks(query: QueryOrderbooksDto) {

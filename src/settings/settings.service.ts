@@ -199,7 +199,7 @@ export class SettingsService {
       percent_month: number;
       turn_free: number;
       max_level: number;
-      parcentage: Record<number, number>;
+      percentage: Record<number, number>;
       reward_milestone: Array<{
         milestone: number;
         reward: number;
@@ -255,7 +255,7 @@ export class SettingsService {
       'ref.smart_ref_level',
       0,
     );
-    const parcentage: Record<number, number> = {};
+    const percentage: Record<number, number> = {};
 
     return {
       statusCode: 200,
@@ -268,7 +268,7 @@ export class SettingsService {
         percent_month,
         turn_free,
         max_level,
-        parcentage,
+        percentage,
         reward_milestone,
       },
     };
