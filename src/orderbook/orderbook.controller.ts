@@ -71,14 +71,9 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
     username: 'john_doe',
     fullName: 'John Doe',
     avatar: 'https://cdn.example.com/avatar.jpg',
-  },
-  user_orderbook_stats: {
-    total: 12,
-    by_status: {
-      pending: 3,
-      executed: 8,
-      failed: 1,
-    },
+    total_transactions: 24,
+    successful_transactions: 20,
+    failed_transactions: 4,
   },
   coin: 1,
   national: 2,
@@ -99,6 +94,12 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
 
 const ORDERBOOK_DETAIL_RESPONSE_EXAMPLE = {
   ...ORDERBOOK_CREATE_RESPONSE_EXAMPLE,
+  user: {
+    ...ORDERBOOK_CREATE_RESPONSE_EXAMPLE.user,
+    total_transactions: 24,
+    successful_transactions: 20,
+    failed_transactions: 4,
+  },
   bank_infor: {
     id: 1,
     userId: 12,

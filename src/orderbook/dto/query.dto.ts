@@ -76,24 +76,6 @@ export class QueryOrderbooksDto {
   option?: OrderBookOption;
 
   @ApiPropertyOptional({
-    description: 'Số coin tối thiểu theo amount_remaining',
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  amountMin?: number;
-
-  @ApiPropertyOptional({
-    description: 'Số coin tối đa theo amount_remaining',
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  amountMax?: number;
-
-  @ApiPropertyOptional({
     description: 'Số dư còn lại tối thiểu (amount_remaining)',
   })
   @IsOptional()

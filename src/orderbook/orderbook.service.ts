@@ -22,6 +22,17 @@ import { SettingBankOrder } from './entities/setting-bank-order.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { NationalCurrency } from './entities/national-currency.entity';
+import {
+  Transaction,
+  TransactionOption,
+  TransactionStatus,
+} from './entities/transaction.entity';
+
+type CreatorTransactionReputation = {
+  total_transactions: number;
+  successful_transactions: number;
+  failed_transactions: number;
+};
 
 @Injectable()
 export class OrderbookService {
@@ -36,6 +47,8 @@ export class OrderbookService {
     private readonly settingBankOrderRepository: Repository<SettingBankOrder>,
     @InjectRepository(BankUser)
     private readonly bankUserRepository: Repository<BankUser>,
+    @InjectRepository(Transaction)
+    private readonly transactionRepository: Repository<Transaction>,
     private readonly dataSource: DataSource,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
   ) {}
@@ -72,6 +85,192 @@ export class OrderbookService {
       bankAccountName: bankUser.bu_bank_account_name,
       bankAccountNumber: bankUser.bu_bank_account_number,
     };
+  }
+
+  private emptyCreatorTransactionReputation(): CreatorTransactionReputation {
+    return {
+      total_transactions: 0,
+      successful_transactions: 0,
+      failed_transactions: 0,
+    };
+  }
+
+  private parseReputationRow(row: {
+    total_transactions: string | number | null;
+    successful_transactions: string | number | null;
+    failed_transactions: string | number | null;
+  }): CreatorTransactionReputation {
+    return {
+      total_transactions: Number(row.total_transactions) || 0,
+      successful_transactions: Number(row.successful_transactions) || 0,
+      failed_transactions: Number(row.failed_transactions) || 0,
+    };
+  }
+
+  /** Transaction reputation for the orderbook creator (all matching txs, not scoped to this ob_id). */
+  private async getCreatorTransactionReputation(
+    creatorUserId: number,
+    orderBookOption: OrderBookOption,
+  ): Promise<CreatorTransactionReputation> {
+    if (orderBookOption === OrderBookOption.SELL) {
+      const raw = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select(
+          `SUM(CASE WHEN t.trans_status IN (:exec, :fail) THEN 1 ELSE 0 END)`,
+          'total_transactions',
+        )
+        .addSelect(
+          `SUM(CASE WHEN t.trans_status = :exec THEN 1 ELSE 0 END)`,
+          'successful_transactions',
+        )
+        .addSelect(
+          `SUM(CASE WHEN t.trans_status = :fail THEN 1 ELSE 0 END)`,
+          'failed_transactions',
+        )
+        .where('t.trans_option = :buyOpt', { buyOpt: TransactionOption.BUY })
+        .andWhere('t.trans_user_sell = :uid', { uid: creatorUserId })
+        .setParameters({
+          exec: TransactionStatus.EXECUTED,
+          fail: TransactionStatus.FAILED,
+        })
+        .getRawOne<{
+          total_transactions: string | number | null;
+          successful_transactions: string | number | null;
+          failed_transactions: string | number | null;
+        }>();
+      return raw
+        ? this.parseReputationRow(raw)
+        : this.emptyCreatorTransactionReputation();
+    }
+
+    const raw = await this.transactionRepository
+      .createQueryBuilder('t')
+      .select(
+        `SUM(CASE WHEN t.trans_status IN (:exec, :fail) THEN 1 ELSE 0 END)`,
+        'total_transactions',
+      )
+      .addSelect(
+        `SUM(CASE WHEN t.trans_status = :exec THEN 1 ELSE 0 END)`,
+        'successful_transactions',
+      )
+      .addSelect(
+        `SUM(CASE WHEN t.trans_status = :fail THEN 1 ELSE 0 END)`,
+        'failed_transactions',
+      )
+      .where('t.trans_option = :sellOpt', { sellOpt: TransactionOption.SELL })
+      .andWhere('t.trans_user_buy = :uid', { uid: creatorUserId })
+      .setParameters({
+        exec: TransactionStatus.EXECUTED,
+        fail: TransactionStatus.FAILED,
+      })
+      .getRawOne<{
+        total_transactions: string | number | null;
+        successful_transactions: string | number | null;
+        failed_transactions: string | number | null;
+      }>();
+    return raw
+      ? this.parseReputationRow(raw)
+      : this.emptyCreatorTransactionReputation();
+  }
+
+  private async buildCreatorTransactionReputationMaps(
+    rows: OrderBook[],
+  ): Promise<{
+    sellCreators: Map<number, CreatorTransactionReputation>;
+    buyCreators: Map<number, CreatorTransactionReputation>;
+  }> {
+    const sellUserIds = [
+      ...new Set(
+        rows
+          .filter((r) => r.ob_option === OrderBookOption.SELL)
+          .map((r) => r.ob_user_id),
+      ),
+    ];
+    const buyUserIds = [
+      ...new Set(
+        rows
+          .filter((r) => r.ob_option === OrderBookOption.BUY)
+          .map((r) => r.ob_user_id),
+      ),
+    ];
+
+    const [sellRaw, buyRaw] = await Promise.all([
+      sellUserIds.length
+        ? this.transactionRepository
+            .createQueryBuilder('t')
+            .select('t.trans_user_sell', 'userId')
+            .addSelect(
+              `SUM(CASE WHEN t.trans_status IN (:exec, :fail) THEN 1 ELSE 0 END)`,
+              'total_transactions',
+            )
+            .addSelect(
+              `SUM(CASE WHEN t.trans_status = :exec THEN 1 ELSE 0 END)`,
+              'successful_transactions',
+            )
+            .addSelect(
+              `SUM(CASE WHEN t.trans_status = :fail THEN 1 ELSE 0 END)`,
+              'failed_transactions',
+            )
+            .where('t.trans_option = :buyOpt', {
+              buyOpt: TransactionOption.BUY,
+            })
+            .andWhere('t.trans_user_sell IN (:...uids)', { uids: sellUserIds })
+            .groupBy('t.trans_user_sell')
+            .setParameters({
+              exec: TransactionStatus.EXECUTED,
+              fail: TransactionStatus.FAILED,
+            })
+            .getRawMany<{
+              userId: string;
+              total_transactions: string | number | null;
+              successful_transactions: string | number | null;
+              failed_transactions: string | number | null;
+            }>()
+        : [],
+      buyUserIds.length
+        ? this.transactionRepository
+            .createQueryBuilder('t')
+            .select('t.trans_user_buy', 'userId')
+            .addSelect(
+              `SUM(CASE WHEN t.trans_status IN (:exec, :fail) THEN 1 ELSE 0 END)`,
+              'total_transactions',
+            )
+            .addSelect(
+              `SUM(CASE WHEN t.trans_status = :exec THEN 1 ELSE 0 END)`,
+              'successful_transactions',
+            )
+            .addSelect(
+              `SUM(CASE WHEN t.trans_status = :fail THEN 1 ELSE 0 END)`,
+              'failed_transactions',
+            )
+            .where('t.trans_option = :sellOpt', {
+              sellOpt: TransactionOption.SELL,
+            })
+            .andWhere('t.trans_user_buy IN (:...uids)', { uids: buyUserIds })
+            .groupBy('t.trans_user_buy')
+            .setParameters({
+              exec: TransactionStatus.EXECUTED,
+              fail: TransactionStatus.FAILED,
+            })
+            .getRawMany<{
+              userId: string;
+              total_transactions: string | number | null;
+              successful_transactions: string | number | null;
+              failed_transactions: string | number | null;
+            }>()
+        : [],
+    ]);
+
+    const sellCreators = new Map<number, CreatorTransactionReputation>();
+    for (const r of sellRaw) {
+      sellCreators.set(Number(r.userId), this.parseReputationRow(r));
+    }
+    const buyCreators = new Map<number, CreatorTransactionReputation>();
+    for (const r of buyRaw) {
+      buyCreators.set(Number(r.userId), this.parseReputationRow(r));
+    }
+
+    return { sellCreators, buyCreators };
   }
 
   private async getPublicUserById(userId: number) {
@@ -239,13 +438,8 @@ export class OrderbookService {
       .createQueryBuilder('ob')
       .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING });
 
-    // Join user nhưng chỉ select field an toàn (không select password/email/phone...)
-    qb.leftJoin('ob.user', 'u').addSelect([
-      'u.uid',
-      'u.uname',
-      'u.ufulllname',
-      'u.uavatar',
-    ]);
+    // Không join user ở đây: skip/take + join kích hoạt DISTINCT pagination của TypeORM
+    // và dễ lỗi khi ORDER BY theo alias từ addSelect (mixed buy/sell sort).
 
     if (query.dateFrom) {
       qb.andWhere('ob.ob_created_at >= :df', { df: new Date(query.dateFrom) });
@@ -265,16 +459,6 @@ export class OrderbookService {
     if (query.tradeMode !== undefined) {
       qb.andWhere('ob.ob_trade_mode = :tm', { tm: query.tradeMode });
     }
-    if (query.amountMin !== undefined) {
-      qb.andWhere('ob.ob_amount_remaining >= :amin', {
-        amin: this.formatAmount(query.amountMin),
-      });
-    }
-    if (query.amountMax !== undefined) {
-      qb.andWhere('ob.ob_amount_remaining <= :amax', {
-        amax: this.formatAmount(query.amountMax),
-      });
-    }
     if (query.amountRemainingMin !== undefined) {
       qb.andWhere('ob.ob_amount_remaining >= :rmin', {
         rmin: this.formatAmount(query.amountRemainingMin),
@@ -291,20 +475,37 @@ export class OrderbookService {
     } else if (query.option === OrderBookOption.BUY) {
       qb.orderBy('ob.ob_price', 'DESC').addOrderBy('ob.ob_id', 'DESC');
     } else {
-      // Mixed options: SELL books first by price ASC, BUY books by price DESC.
-      qb.orderBy(
-        `CASE WHEN ob.ob_option = '${OrderBookOption.SELL}' THEN ob.ob_price END`,
-        'ASC',
+      // Mixed options: SELL by price ASC, BUY by price DESC (same SQL as before).
+      // Must use SELECT aliases for sort keys: TypeORM treats the first `.` in a raw
+      // orderBy string as `alias.column`, so `CASE WHEN ob.ob_option` breaks.
+      qb.addSelect(
+        `CASE WHEN ob.ob_option = :obSortSellOpt THEN ob.ob_price END`,
+        'obSortSellPrice',
       )
-        .addOrderBy(
-          `CASE WHEN ob.ob_option = '${OrderBookOption.BUY}' THEN ob.ob_price END`,
-          'DESC',
+        .addSelect(
+          `CASE WHEN ob.ob_option = :obSortBuyOpt THEN ob.ob_price END`,
+          'obSortBuyPrice',
         )
+        .setParameter('obSortSellOpt', OrderBookOption.SELL)
+        .setParameter('obSortBuyOpt', OrderBookOption.BUY)
+        .orderBy('obSortSellPrice', 'ASC', 'NULLS LAST')
+        .addOrderBy('obSortBuyPrice', 'DESC', 'NULLS LAST')
         .addOrderBy('ob.ob_id', 'DESC');
     }
     qb.skip((page - 1) * limit).take(limit);
 
     const [rows, total] = await qb.getManyAndCount();
+
+    const creatorIds = [...new Set(rows.map((r) => r.ob_user_id))];
+    const users =
+      creatorIds.length > 0
+        ? await this.userRepository.find({
+            where: { uid: In(creatorIds) },
+            select: ['uid', 'uname', 'ufulllname', 'uavatar'],
+          })
+        : [];
+    const userById = new Map(users.map((u) => [u.uid, u]));
+
     const orderBookIds = rows.map((row) => row.ob_id);
     const bankSettingRows = orderBookIds.length
       ? await this.settingBankOrderRepository.find({
@@ -319,71 +520,52 @@ export class OrderbookService {
       }
     }
 
-    // Stats: tổng số orderbook & count theo status của user tạo orderbook
-    const userIds = Array.from(new Set(rows.map((r) => r.ob_user_id)));
-    const statsByUserId = new Map<
-      number,
-      { total: number; byStatus: Record<string, number> }
-    >();
-
-    if (userIds.length) {
-      const rawStats = await this.orderBookRepository
-        .createQueryBuilder('ob')
-        .select('ob.ob_user_id', 'userId')
-        .addSelect('ob.ob_status', 'status')
-        .addSelect('COUNT(*)', 'count')
-        .where('ob.ob_user_id IN (:...userIds)', { userIds })
-        .groupBy('ob.ob_user_id')
-        .addGroupBy('ob.ob_status')
-        .getRawMany<{ userId: string; status: string; count: string }>();
-
-      for (const r of rawStats) {
-        const uid = Number(r.userId);
-        const status = r.status;
-        const count = Number(r.count);
-        const cur = statsByUserId.get(uid) ?? { total: 0, byStatus: {} };
-        cur.total += count;
-        cur.byStatus[status] = count;
-        statsByUserId.set(uid, cur);
-      }
-    }
+    const { sellCreators, buyCreators } =
+      await this.buildCreatorTransactionReputationMaps(rows);
 
     return {
       statusCode: 200,
-      data: rows.map((book) => ({
-        id: book.ob_id,
-        user: book.user
-          ? {
-              id: book.user.uid,
-              username: book.user.uname,
-              fullName: book.user.ufulllname,
-              avatar: book.user.uavatar,
-            }
-          : null,
-        user_orderbook_stats: {
-          total: statsByUserId.get(book.ob_user_id)?.total ?? 0,
-          by_status: statsByUserId.get(book.ob_user_id)?.byStatus ?? {},
-        },
-        coin: book.ob_coin,
-        national: book.ob_national,
-        adv_code: book.ob_adv_code,
-        option: book.ob_option,
-        coin_symbol: book.ob_coin_symbol,
-        national_symbol: book.ob_national_symbol,
-        amount: book.ob_amount,
-        amount_remaining: book.ob_amount_remaining,
-        price: book.ob_price,
-        national_min: book.ob_national_min,
-        national_max: book.ob_national_max,
-        status: book.ob_status,
-        trade_mode: book.ob_trade_mode,
-        description: book.ob_description,
-        bank_user:
+      data: rows.map((book) => {
+        const reputation =
           book.ob_option === OrderBookOption.SELL
-            ? this.toBankUserResponse(bankByOrderBookId.get(book.ob_id))
+            ? (sellCreators.get(book.ob_user_id) ??
+              this.emptyCreatorTransactionReputation())
+            : (buyCreators.get(book.ob_user_id) ??
+              this.emptyCreatorTransactionReputation());
+
+        const u = userById.get(book.ob_user_id);
+        return {
+          id: book.ob_id,
+          user: u
+            ? {
+                id: u.uid,
+                username: u.uname,
+                fullName: u.ufulllname,
+                avatar: u.uavatar,
+                ...reputation,
+              }
             : null,
-        created_at: book.ob_created_at,
-      })),
+          coin: book.ob_coin,
+          national: book.ob_national,
+          adv_code: book.ob_adv_code,
+          option: book.ob_option,
+          coin_symbol: book.ob_coin_symbol,
+          national_symbol: book.ob_national_symbol,
+          amount: book.ob_amount,
+          amount_remaining: book.ob_amount_remaining,
+          price: book.ob_price,
+          national_min: book.ob_national_min,
+          national_max: book.ob_national_max,
+          status: book.ob_status,
+          trade_mode: book.ob_trade_mode,
+          description: book.ob_description,
+          bank_user:
+            book.ob_option === OrderBookOption.SELL
+              ? this.toBankUserResponse(bankByOrderBookId.get(book.ob_id))
+              : null,
+          created_at: book.ob_created_at,
+        };
+      }),
       meta: {
         page,
         limit,
@@ -426,16 +608,6 @@ export class OrderbookService {
     }
     if (query.tradeMode !== undefined) {
       qb.andWhere('ob.ob_trade_mode = :tm', { tm: query.tradeMode });
-    }
-    if (query.amountMin !== undefined) {
-      qb.andWhere('ob.ob_amount >= :amin', {
-        amin: this.formatAmount(query.amountMin),
-      });
-    }
-    if (query.amountMax !== undefined) {
-      qb.andWhere('ob.ob_amount <= :amax', {
-        amax: this.formatAmount(query.amountMax),
-      });
     }
     if (query.amountRemainingMin !== undefined) {
       qb.andWhere('ob.ob_amount_remaining >= :rmin', {
@@ -510,9 +682,15 @@ export class OrderbookService {
     const bankInfor = this.toBankUserResponse(setting?.bank_user);
     const shouldIncludeBankUser = orderBook.ob_option === OrderBookOption.SELL;
 
+    const reputation = await this.getCreatorTransactionReputation(
+      orderBook.ob_user_id,
+      orderBook.ob_option,
+    );
+    const publicUser = this.toPublicUser(orderBook.user);
+
     return {
       id: orderBook.ob_id,
-      user: this.toPublicUser(orderBook.user),
+      user: publicUser ? { ...publicUser, ...reputation } : null,
       coin: orderBook.ob_coin,
       national: orderBook.ob_national,
       adv_code: orderBook.ob_adv_code,
