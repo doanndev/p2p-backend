@@ -733,6 +733,8 @@ export class TransactionService {
         buyerId: transaction.trans_user_buy,
         sellerId: transaction.trans_user_sell,
         transactionId: saved.trans_id,
+        amount,
+        smartrefFeePercent: refferalFeePercent,
       };
     });
 

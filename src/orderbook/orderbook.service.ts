@@ -833,8 +833,7 @@ export class OrderbookService {
   }
 
   async deleteOrderBook(userId: number, id: number) {
-    const feePercent =
-      await this.adminSettingsConfigService.getEffectiveTransactionFeePercent();
+    const feePercent = Number(process.env.FEE_PERCENT);
 
     return this.dataSource.transaction(async (manager) => {
       const orderBook = await manager.findOne(OrderBook, {
