@@ -1,0 +1,134 @@
+name: Deploy Production
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_REPOSITORY }}
+
+jobs:
+  build-and-deploy:
+    name: Build image and deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          yarn install --frozen-lockfile
+
+      - name: Build app
+        run: yarn build
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:production
+            ${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name || github.sha }}
+
+      - name: Deploy on VPS (production)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            IMAGE="${{ env.IMAGE_NAME }}:production"
+            CONTAINER_NAME="backend-production"
+            ENV_FILE="$HOME/env/production.env"
+
+            mkdir -p "$HOME/env"
+            : > "$ENV_FILE"
+            echo "DB_HOST=${{ secrets.DB_HOST }}" >> "$ENV_FILE"
+            echo "DB_PORT=${{ secrets.DB_PORT }}" >> "$ENV_FILE"
+            echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> "$ENV_FILE"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> "$ENV_FILE"
+            echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> "$ENV_FILE"
+            echo "SMTP_HOST=${{ secrets.SMTP_HOST }}" >> "$ENV_FILE"
+            echo "SMTP_PORT=${{ secrets.SMTP_PORT }}" >> "$ENV_FILE"
+            echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> "$ENV_FILE"
+            echo "SMTP_PASS=${{ secrets.SMTP_PASS }}" >> "$ENV_FILE"
+            echo "SMTP_FROM=${{ secrets.SMTP_FROM }}" >> "$ENV_FILE"
+            echo "FRONTEND_URLS=${{ secrets.FRONTEND_URLS }}" >> "$ENV_FILE"
+            echo "NODE_ENV=${{ secrets.NODE_ENV }}" >> "$ENV_FILE"
+            echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> "$ENV_FILE"
+            echo "CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}" >> "$ENV_FILE"
+            echo "CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}" >> "$ENV_FILE"
+            echo "CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}" >> "$ENV_FILE"
+            echo "KYC_CHALLENGE_TTL_MINUTES=${{ secrets.KYC_CHALLENGE_TTL_MINUTES }}" >> "$ENV_FILE"
+            echo "SOLANA_RPC_URL=${{ secrets.SOLANA_RPC_URL }}" >> "$ENV_FILE"
+            echo "SOLANA_WSS_URL=${{ secrets.SOLANA_WSS_URL }}" >> "$ENV_FILE"
+            echo "RPC_ETH=${{ secrets.RPC_ETH }}" >> "$ENV_FILE"
+            echo "RPC_BNB=${{ secrets.RPC_BNB }}" >> "$ENV_FILE"
+            echo "RPC_RATE_LIMIT_PER_SECOND=${{ secrets.RPC_RATE_LIMIT_PER_SECOND }}" >> "$ENV_FILE"
+            echo "ZERION_API_KEY=${{ secrets.ZERION_API_KEY }}" >> "$ENV_FILE"
+            echo "ETHERSCAN_API_URL=${{ secrets.ETHERSCAN_API_URL }}" >> "$ENV_FILE"
+            echo "ETHERSCAN_CHAIN_ID=${{ secrets.ETHERSCAN_CHAIN_ID }}" >> "$ENV_FILE"
+            echo "BNB_CHAIN_ID=${{ secrets.BNB_CHAIN_ID }}" >> "$ENV_FILE"
+            echo "ARB_CHAIN_ID=${{ secrets.ARB_CHAIN_ID }}" >> "$ENV_FILE"
+            echo "RPC_TRX=${{ secrets.RPC_TRX }}" >> "$ENV_FILE"
+            echo "TRONGRID_API_KEY=${{ secrets.TRONGRID_API_KEY }}" >> "$ENV_FILE"
+            echo "SOLSCAN_API_KEY=${{ secrets.SOLSCAN_API_KEY }}" >> "$ENV_FILE"
+            echo "ETHERSCAN_API_KEY=${{ secrets.ETHERSCAN_API_KEY }}" >> "$ENV_FILE"
+            echo "BSCSCAN_API_KEY=${{ secrets.BSCSCAN_API_KEY }}" >> "$ENV_FILE"
+            echo "WALLET_SEED=${{ secrets.WALLET_SEED }}" >> "$ENV_FILE"
+            echo "WALLET_CEO_ETH=${{ secrets.WALLET_CEO_ETH }}" >> "$ENV_FILE"
+            echo "WALLET_CEO_BNB=${{ secrets.WALLET_CEO_BNB }}" >> "$ENV_FILE"
+            echo "WALLET_CEO_SOL=${{ secrets.WALLET_CEO_SOL }}" >> "$ENV_FILE"
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> "$ENV_FILE"
+            echo "JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}" >> "$ENV_FILE"
+            echo "TZ=${{ secrets.TZ }}" >> "$ENV_FILE"
+            echo "LOG_LEVEL=${{ secrets.LOG_LEVEL }}" >> "$ENV_FILE"
+            echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> "$ENV_FILE"
+            echo "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" >> "$ENV_FILE"
+            echo "FRONTEND_URL_GOOGLE_REDIRECT=${{ secrets.FRONTEND_URL_GOOGLE_REDIRECT }}" >> "$ENV_FILE"
+            echo "APP_NAME=${{ secrets.APP_NAME }}" >> "$ENV_FILE"
+            echo "APP_DESCRIPTION=${{ secrets.APP_DESCRIPTION }}" >> "$ENV_FILE"
+            echo "APP_LOGO=${{ secrets.APP_LOGO }}" >> "$ENV_FILE"
+            echo "COINGECKO_SIMPLE_PRICE_URL=${{ secrets.COINGECKO_SIMPLE_PRICE_URL }}" >> "$ENV_FILE"
+
+            docker pull "$IMAGE"
+            docker rm -f "$CONTAINER_NAME" || true
+            docker run -d \
+              --name "$CONTAINER_NAME" \
+              --restart unless-stopped \
+              --env-file "$ENV_FILE" \
+              -p 8000:8000 \
+              "$IMAGE"
+            docker image prune -f
