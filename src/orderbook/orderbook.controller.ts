@@ -39,6 +39,7 @@ import { AttachBankToOrderbookDto } from './dto/attach-bank-to-orderbook.dto';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { QueryDisputesDto } from './dto/query-disputes.dto';
 import { AdminJwtAuthGuard } from '../admins/guards/admin-jwt-auth.guard';
+import { ReviewBankChangeRequestDto } from './dto/review-bank-change-request.dto';
 
 const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   id: 101,
@@ -60,7 +61,6 @@ const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   national_min: '500000.00000000',
   national_max: '2000000.00000000',
   status: 'pending',
-  trade_mode: 'safe',
   description: 'Giao dịch trong giờ hành chính',
 };
 
@@ -87,7 +87,6 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
   national_min: '500000.00000000',
   national_max: '2000000.00000000',
   status: 'pending',
-  trade_mode: 'safe',
   description: 'Giao dịch trong giờ hành chính',
   created_at: '2026-03-26T01:23:45.000Z',
 };
@@ -155,8 +154,6 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   time_bank: '2026-03-25T08:30:00.000Z',
   status: 'pending',
   message: null,
-  trade_mode: 'safe',
-  coin_unlock_at: null,
   lock_released_at: null,
   expired_at: '2026-03-25T09:00:00.000Z',
   payment_proof_urls: ['https://cdn.example.com/proof/slip-1.jpg'],
@@ -219,7 +216,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách order book',
     description:
-      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, tradeMode (fast|safe), khoảng amount (áp vào amount_remaining). Sort giá tự động: option sell từ thấp lên cao, option buy từ cao xuống thấp.',
+      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, khoảng amount (áp vào amount_remaining). Sort giá tự động: option sell từ thấp lên cao, option buy từ cao xuống thấp.',
   })
   @ApiOkResponse({
     description: 'Danh sách order book đang pending',
@@ -248,7 +245,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách order book của user hiện tại',
     description:
-      'Trả về các orderbook do user hiện tại tạo. Hỗ trợ lọc theo status, ngày tạo, option, coin, national currency, tradeMode, khoảng amount / amount_remaining, sort theo amount.',
+      'Trả về các orderbook do user hiện tại tạo. Hỗ trợ lọc theo status, ngày tạo, option, coin, national currency, khoảng amount / amount_remaining, sort theo amount.',
   })
   @ApiOkResponse({
     description: 'Danh sách order book của tôi',
@@ -323,23 +320,18 @@ export class OrderbookController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Gắn bank user cho orderbook (upsert setting_bank_order)',
+    summary: 'Tạo yêu cầu đổi bank cho orderbook (chờ admin duyệt)',
   })
   @ApiBody({ type: AttachBankToOrderbookDto })
   @ApiOkResponse({
-    description: 'Gắn bank thành công',
+    description: 'Yêu cầu đổi bank đã được ghi nhận',
     schema: {
       example: {
-        message: 'Bank attached to orderbook successfully',
+        message: 'Bank change request submitted and waiting for admin approval',
         orderbookId: 101,
-        bankUser: {
-          id: 1,
-          userId: 12,
-          bankName: 'Vietcombank',
-          bankBranch: 'Hà Nội',
-          bankAccountName: 'NGUYEN VAN A',
-          bankAccountNumber: '0123456789',
-        },
+        requestedBankUserId: 1,
+        requestedAt: '2026-04-22T10:20:30.000Z',
+        expiresInSeconds: 43200,
       },
     },
   })
@@ -352,6 +344,46 @@ export class OrderbookController {
       req.user.uid,
       Number(id),
       dto.bankUserId,
+    );
+  }
+
+  @Get('admin/bank-user-change-requests')
+  @UseGuards(AdminJwtAuthGuard)
+  @ApiOperation({
+    summary:
+      'Admin lấy danh sách request đổi bank cho orderbook đang chờ duyệt',
+  })
+  @ApiOkResponse({
+    description: 'Danh sách request đang pending',
+  })
+  getPendingBankChangeRequests() {
+    return this.orderbookService.getPendingOrderbookBankChangeRequests();
+  }
+
+  @Put('admin/:id/bank-user')
+  @UseGuards(AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Admin duyệt hoặc từ chối request đổi bank cho orderbook',
+  })
+  @ApiBody({ type: ReviewBankChangeRequestDto })
+  @ApiOkResponse({
+    description: 'Đã xử lý request đổi bank',
+    schema: {
+      example: {
+        message: 'Orderbook bank change request approved',
+        orderbookId: 101,
+        approved: true,
+      },
+    },
+  })
+  reviewOrderbookBankChangeRequest(
+    @Param('id') id: string,
+    @Body() dto: ReviewBankChangeRequestDto,
+  ) {
+    return this.orderbookService.reviewOrderbookBankChangeRequest(
+      Number(id),
+      dto.approve,
     );
   }
 

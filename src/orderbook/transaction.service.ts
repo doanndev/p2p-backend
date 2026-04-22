@@ -18,7 +18,6 @@ import {
   TransactionType,
 } from './entities/transaction.entity';
 import { Dispute, DisputeStatus, DisputeType } from './entities/dispute.entity';
-import { OrderBookTradeMode } from './entities/order-book-trade-mode';
 import { User } from '../users/entities/user.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
@@ -70,37 +69,6 @@ export class TransactionService {
 
   private generateReferenceCode(): string {
     return `TX-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-  }
-
-  private static readonly DEFAULT_P2P_LOCK_HOURS_BY_LEVEL = {
-    lv1: 24,
-    lv2: 12,
-    lv3: 4,
-    lv4: 3,
-    lv5: 2,
-    lv6: 1,
-  } as const;
-
-  /** Hours of buyer lock after trade completes (confirmReceived). */
-  private async getP2pLockHours(
-    tradeMode: OrderBookTradeMode | null,
-    buyerLevel: number,
-  ): Promise<number> {
-    const mode = tradeMode ?? OrderBookTradeMode.SAFE;
-    if (mode === OrderBookTradeMode.SAFE) {
-      return 24;
-    }
-
-    const lockHoursMap =
-      await this.adminSettingsConfigService.getP2pLockHoursByLevel();
-    const level = Number.isFinite(buyerLevel) ? Math.floor(buyerLevel) : 1;
-    const key = `lv${level}`;
-
-    return (
-      lockHoursMap[key] ??
-      TransactionService.DEFAULT_P2P_LOCK_HOURS_BY_LEVEL[key] ??
-      TransactionService.DEFAULT_P2P_LOCK_HOURS_BY_LEVEL.lv1
-    );
   }
 
   private toPublicUser(user: User | null | undefined) {
@@ -156,12 +124,8 @@ export class TransactionService {
       message: t.trans_message,
       created_at: t.trans_created_at,
       expired_at: t.trans_expired_at ? t.trans_expired_at.toISOString() : null,
-      trade_mode: t.trans_trade_mode,
       bank_user: shouldIncludeBankUser
         ? this.toBankUserResponse(bankUser)
-        : null,
-      coin_unlock_at: t.trans_coin_unlock_at
-        ? t.trans_coin_unlock_at.toISOString()
         : null,
       lock_released_at: t.trans_lock_released_at
         ? t.trans_lock_released_at.toISOString()
@@ -426,7 +390,7 @@ export class TransactionService {
           trans_time_bank: null,
           trans_status: TransactionStatus.PENDING,
           trans_message: null,
-          trans_trade_mode: orderBook.ob_trade_mode,
+          trans_trade_mode: null,
           trans_coin_unlock_at: null,
           trans_lock_released_at: null,
           trans_expired_at: expiresAt,
@@ -700,27 +664,13 @@ export class TransactionService {
       }
 
       sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
-      buyerWallet.uw_lock_balance =
-        this.toNumber(buyerWallet.uw_lock_balance) + toBuyer;
+      buyerWallet.uw_balance = this.toNumber(buyerWallet.uw_balance) + toBuyer;
 
       await manager.save(UserWallet, sellerWallet);
       await manager.save(UserWallet, buyerWallet);
 
-      const buyerUser = await manager.findOne(User, {
-        where: { uid: transaction.trans_user_buy },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!buyerUser) {
-        throw new NotFoundException('Buyer user not found');
-      }
-
-      const lockHours = await this.getP2pLockHours(
-        transaction.trans_trade_mode,
-        buyerUser.ulevel,
-      );
-      transaction.trans_coin_unlock_at = new Date(
-        Date.now() + lockHours * 60 * 60 * 1000,
-      );
+      transaction.trans_coin_unlock_at = null;
+      transaction.trans_lock_released_at = new Date();
       transaction.trans_status = TransactionStatus.EXECUTED;
       const saved = await manager.save(Transaction, transaction);
 

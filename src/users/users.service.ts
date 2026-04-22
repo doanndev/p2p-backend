@@ -463,6 +463,7 @@ export class UsersService {
     };
   }> {
     const path = googleLoginDto.path?.trim() || 'google-login';
+    const normalizedRefCode = googleLoginDto.ref?.trim();
     const tokenResponse = await this.googleAuthService.exchangeCodeForToken(
       googleLoginDto.code,
       path,
@@ -476,6 +477,8 @@ export class UsersService {
     const displayName =
       googleUser.name?.trim() || email.split('@')[0] || 'User';
     const picture = googleUser.picture?.trim() || null;
+    let userWasCreated = false;
+    let directReferrerUid: number | null = null;
 
     let user = await this.userRepository.findOne({
       where: { ugoogle_sub: sub },
@@ -503,6 +506,20 @@ export class UsersService {
         if (picture) user.uavatar = picture;
         await this.userRepository.save(user);
       } else {
+        if (normalizedRefCode) {
+          const referrerUser = await this.userRepository.findOne({
+            where: { uref: normalizedRefCode },
+          });
+
+          if (!referrerUser) {
+            throw new BadRequestException(
+              'Invalid referral code. Referral code does not exist',
+            );
+          }
+
+          directReferrerUid = referrerUser.uid;
+        }
+
         let newUref = this.generateUref();
         let existingUrefUser = await this.userRepository.findOne({
           where: { uref: newUref },
@@ -552,12 +569,24 @@ export class UsersService {
         }
         user.uname = finalUname;
         await this.userRepository.save(user);
+        userWasCreated = true;
       }
     }
 
     if (user.ustatus === UserStatus.BLOCK) {
       throw new BadRequestException(
         'Your account has been blocked. Please contact support for assistance.',
+      );
+    }
+
+    if (
+      userWasCreated &&
+      directReferrerUid != null &&
+      directReferrerUid !== user.uid
+    ) {
+      await this.smartRefService.recordInviteeReferralChain(
+        user.uid,
+        directReferrerUid,
       );
     }
 
@@ -1496,6 +1525,29 @@ export class UsersService {
       existingVerify.uv_paper_image = paperImageUrl.trim();
       existingVerify.uv_status = UserVerifyStatus.PENDING;
       const savedVerify = await this.userVerifyRepository.save(existingVerify);
+
+      const adminEmail = this.configService.get<string>('ADMIN_EMAIL')?.trim();
+      if (adminEmail) {
+        const user = await this.userRepository.findOne({
+          where: { uid: userId },
+          select: ['uid', 'uname', 'uemail', 'ufulllname'],
+        });
+
+        await this.emailService
+          .sendNewKycNotificationToAdmin(adminEmail, {
+            userId,
+            userName: user?.uname || 'unknown',
+            userEmail: user?.uemail || 'unknown',
+            fullName: user?.ufulllname || 'unknown',
+            verificationId: savedVerify.uv_id,
+            submittedAt: new Date(),
+          })
+          .catch((error) => {
+            this.logger.warn(
+              `Failed to send new KYC notification to ADMIN_EMAIL (${adminEmail}): ${error?.message || 'Unknown error'}`,
+            );
+          });
+      }
 
       const response = {
         statusCode: 200,

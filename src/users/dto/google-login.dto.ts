@@ -17,4 +17,12 @@ export class GoogleLoginDto {
   @IsOptional()
   @IsString()
   path?: string;
+
+  @ApiPropertyOptional({
+    description: 'Mã giới thiệu (uref) do frontend truyền lên',
+    example: 'AB12CD34',
+  })
+  @IsOptional()
+  @IsString()
+  ref?: string;
 }

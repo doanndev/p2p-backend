@@ -11,7 +11,6 @@ import {
   Min,
 } from 'class-validator';
 import { OrderBookOption } from '../entities/order-book.entity';
-import { OrderBookTradeMode } from '../entities/order-book-trade-mode';
 
 export class CreateOrderbookDto {
   @ApiProperty({ example: 1 })
@@ -63,16 +62,6 @@ export class CreateOrderbookDto {
   @IsNotEmpty()
   @IsString()
   nationalSymbol: string;
-
-  @ApiProperty({
-    enum: OrderBookTradeMode,
-    required: false,
-    description:
-      'fast = khóa coin theo level buyer khi hoàn tất; safe = khóa 24h',
-  })
-  @IsOptional()
-  @IsEnum(OrderBookTradeMode)
-  tradeMode?: OrderBookTradeMode;
 
   @ApiProperty({
     example: 1,

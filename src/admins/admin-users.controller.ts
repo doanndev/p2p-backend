@@ -17,6 +17,7 @@ import { AdminPermissionAdvancedUsersGuard } from './guards/admin-permission-adv
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateKolDto } from './dto/update-kol.dto';
 import { UpdateKolArticleStatusDto } from './dto/update-kol-article-status.dto';
+import { ReviewUserLevelupDto } from './dto/review-user-levelup.dto';
 import {
   ApiBody,
   ApiCookieAuth,
@@ -127,6 +128,17 @@ export class AdminUsersController {
     return result;
   }
 
+  @Get('need-levelup')
+  @ApiOperation({ summary: 'Danh sách user đang chờ duyệt level-up' })
+  @ApiOkResponse({
+    description: 'Danh sách user need_levelup=true',
+  })
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
+  @HttpCode(HttpStatus.OK)
+  async getUsersNeedLevelUp() {
+    return this.adminsUsersOpsService.getUsersNeedLevelUp();
+  }
+
   @Post(':id/update-kol')
   @ApiOperation({ summary: 'Duyệt hoặc từ chối hồ sơ KOL của user' })
   @ApiBody({ type: UpdateKolDto })
@@ -174,6 +186,35 @@ export class AdminUsersController {
       admin.admin_id,
     );
     return result;
+  }
+
+  @Post(':id/review-levelup')
+  @ApiOperation({ summary: 'Duyệt hoặc từ chối level-up cho user' })
+  @ApiBody({ type: ReviewUserLevelupDto })
+  @ApiOkResponse({
+    description: 'Kết quả duyệt level-up',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'User level-up approved successfully',
+        data: { uid: 12, level: 4, need_levelup: false, action: 'approve' },
+      },
+    },
+  })
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionAdvancedUsersGuard)
+  @HttpCode(HttpStatus.OK)
+  async reviewUserLevelup(
+    @Param('id') id: string,
+    @Body() dto: ReviewUserLevelupDto,
+    @Request() req: any,
+  ) {
+    const uid = parseInt(id, 10);
+    const admin = req.user;
+    return this.adminsUsersOpsService.reviewUserLevelUp(
+      uid,
+      dto.action,
+      admin.admin_id,
+    );
   }
 
   @Post('kol-articles/:id/update-status')

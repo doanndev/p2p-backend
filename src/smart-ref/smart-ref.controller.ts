@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   Request,
   UseGuards,
   UsePipes,
@@ -19,6 +20,9 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SmartRefService } from './smart-ref.service';
 import { SmartRefWithdrawDto } from './dto/smart-ref-withdraw.dto';
+import { AdminJwtAuthGuard } from '../admins/guards/admin-jwt-auth.guard';
+import { AdminPermissionReadReferralGuard } from '../admins/guards/admin-permission-read-referral.guard';
+import { AdminRefTreeQueryDto } from './dto/admin-ref-tree-query.dto';
 
 @ApiTags('Smart Ref')
 @ApiCookieAuth('access_token')
@@ -167,6 +171,106 @@ export class SmartRefController {
       statusCode: HttpStatus.OK,
       message: 'Withdraw smart ref reward successfully',
       data: result,
+    };
+  }
+
+  @Get('admin/statistics')
+  @ApiOperation({ summary: 'Admin thống kê referral (cache 30 phút)' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Get admin referral statistics successfully',
+        data: {
+          total_ref_paid_usd: 12500.5,
+          total_invited_users: 2345,
+          total_referral_transaction_value_usd: 845000.25,
+        },
+      },
+    },
+  })
+  @ApiCookieAuth('admin_access_token')
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadReferralGuard)
+  @HttpCode(HttpStatus.OK)
+  async getAdminReferralStatistics() {
+    const data = await this.smartRefService.getAdminReferralStatistics();
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Get admin referral statistics successfully',
+      data,
+    };
+  }
+
+  @Get('admin/referrals')
+  @ApiOperation({
+    summary:
+      'Admin lấy danh sách referral + invitees (sort F1 từ đông đến ít) và xem tree downline',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Get admin referrals successfully',
+        data: [
+          {
+            referral: {
+              uid: 10,
+              uname: 'alice',
+              uemail: 'alice@example.com',
+              ufulllname: 'Alice',
+              uavatar: null,
+              created_at: '2026-04-22T10:00:00.000Z',
+            },
+            f1_count: 12,
+            total_invitees: 30,
+            invitees_by_level: [{ level: 1, count: 12, invitees: [] }],
+          },
+        ],
+      },
+    },
+  })
+  @ApiCookieAuth('admin_access_token')
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadReferralGuard)
+  @HttpCode(HttpStatus.OK)
+  async getAdminReferralsWithInvitees() {
+    const data = await this.smartRefService.getAdminReferralsWithInvitees();
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Get admin referrals successfully',
+      data,
+    };
+  }
+
+  @Get('admin/downline-tree')
+  @ApiOperation({
+    summary:
+      'Admin truy vấn cây downline đa tầng của một user bất kỳ (theo nhánh F1)',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Get admin downline tree successfully',
+        data: {
+          user: { uid: 10, uname: 'alice' },
+          depth: 0,
+          children: [],
+        },
+      },
+    },
+  })
+  @ApiCookieAuth('admin_access_token')
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadReferralGuard)
+  @HttpCode(HttpStatus.OK)
+  async getAdminDownlineTree(@Query() query: AdminRefTreeQueryDto) {
+    const data = await this.smartRefService.getAdminDownlineTree(
+      query.userId,
+      query.maxDepth ?? 5,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Get admin downline tree successfully',
+      data,
     };
   }
 }

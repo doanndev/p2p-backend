@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { User, UserSex, UserStatus } from '../users/entities/user.entity';
 import {
   KolRegister,
@@ -19,6 +19,15 @@ import {
   AdminLogAction,
   AdminLogModule,
 } from './entities/admin-log.entity';
+import {
+  Transaction,
+  TransactionStatus,
+} from '../orderbook/entities/transaction.entity';
+import {
+  WalletHistory,
+  WalletHistoryOption,
+  WalletHistoryStatus,
+} from '../wallets/entities/wallet-history.entity';
 
 @Injectable()
 export class AdminsUsersOpsService {
@@ -31,6 +40,10 @@ export class AdminsUsersOpsService {
     private kolArticleRepository: Repository<KolArticle>,
     @InjectRepository(AdminLog)
     private adminLogRepository: Repository<AdminLog>,
+    @InjectRepository(Transaction)
+    private transactionRepository: Repository<Transaction>,
+    @InjectRepository(WalletHistory)
+    private walletHistoryRepository: Repository<WalletHistory>,
   ) {}
 
   async getUsersPaginated(
@@ -54,6 +67,14 @@ export class AdminsUsersOpsService {
       active_email: boolean;
       verify: boolean;
       kol: boolean;
+      transaction_stats: {
+        total_transactions: number;
+        executed_transactions: number;
+      };
+      wallet_stats: {
+        total_deposit: number;
+        total_withdraw: number;
+      };
       created_at: Date;
     }>;
     meta: {
@@ -107,8 +128,93 @@ export class AdminsUsersOpsService {
       active_email: u.u_active_email,
       verify: u.uverify,
       kol: u.ukol,
+      transaction_stats: {
+        total_transactions: 0,
+        executed_transactions: 0,
+      },
+      wallet_stats: {
+        total_deposit: 0,
+        total_withdraw: 0,
+      },
       created_at: u.created_at,
     }));
+
+    const userIds = mapped.map((u) => u.uid);
+    if (userIds.length > 0) {
+      const [txStatsRaw, walletStatsRaw] = await Promise.all([
+        this.transactionRepository
+          .createQueryBuilder('t')
+          .select('u.uid', 'userId')
+          .addSelect('COUNT(t.trans_id)', 'totalTransactions')
+          .addSelect(
+            `SUM(CASE WHEN t.trans_status = :executed THEN 1 ELSE 0 END)`,
+            'executedTransactions',
+          )
+          .innerJoin(
+            User,
+            'u',
+            '(u.uid = t.trans_user_buy OR u.uid = t.trans_user_sell)',
+          )
+          .where('u.uid IN (:...userIds)', { userIds })
+          .setParameter('executed', TransactionStatus.EXECUTED)
+          .groupBy('u.uid')
+          .getRawMany<{
+            userId: string;
+            totalTransactions: string;
+            executedTransactions: string;
+          }>(),
+        this.walletHistoryRepository
+          .createQueryBuilder('wh')
+          .select('wh.wh_user', 'userId')
+          .addSelect(
+            `SUM(CASE WHEN wh.wh_option = :depositOpt THEN wh.wh_amount ELSE 0 END)`,
+            'totalDeposit',
+          )
+          .addSelect(
+            `SUM(CASE WHEN wh.wh_option = :withdrawOpt THEN wh.wh_amount ELSE 0 END)`,
+            'totalWithdraw',
+          )
+          .where('wh.wh_user IN (:...userIds)', { userIds })
+          .andWhere('wh.wh_status = :successStatus', {
+            successStatus: WalletHistoryStatus.SUCCESS,
+          })
+          .setParameters({
+            depositOpt: WalletHistoryOption.DEPOSIT,
+            withdrawOpt: WalletHistoryOption.WITHDRAW,
+          })
+          .groupBy('wh.wh_user')
+          .getRawMany<{
+            userId: string;
+            totalDeposit: string | null;
+            totalWithdraw: string | null;
+          }>(),
+      ]);
+
+      const txStatsByUserId = new Map(
+        txStatsRaw.map((row) => [
+          Number(row.userId),
+          {
+            total_transactions: Number(row.totalTransactions) || 0,
+            executed_transactions: Number(row.executedTransactions) || 0,
+          },
+        ]),
+      );
+      const walletStatsByUserId = new Map(
+        walletStatsRaw.map((row) => [
+          Number(row.userId),
+          {
+            total_deposit: Number(row.totalDeposit ?? 0),
+            total_withdraw: Number(row.totalWithdraw ?? 0),
+          },
+        ]),
+      );
+
+      for (const row of mapped) {
+        row.transaction_stats =
+          txStatsByUserId.get(row.uid) ?? row.transaction_stats;
+        row.wallet_stats = walletStatsByUserId.get(row.uid) ?? row.wallet_stats;
+      }
+    }
 
     return {
       statusCode: 200,
@@ -140,6 +246,14 @@ export class AdminsUsersOpsService {
       active_email: boolean;
       verify: boolean;
       kol: boolean;
+      transaction_stats: {
+        total_transactions: number;
+        executed_transactions: number;
+      };
+      wallet_stats: {
+        total_deposit: number;
+        total_withdraw: number;
+      };
       created_at: Date;
     };
   }> {
@@ -189,12 +303,181 @@ export class AdminsUsersOpsService {
       active_email: user.u_active_email,
       verify: user.uverify,
       kol: user.ukol,
+      transaction_stats: {
+        total_transactions: 0,
+        executed_transactions: 0,
+      },
+      wallet_stats: {
+        total_deposit: 0,
+        total_withdraw: 0,
+      },
       created_at: user.created_at,
+    };
+
+    const [txStatsRaw, walletStatsRaw] = await Promise.all([
+      this.transactionRepository
+        .createQueryBuilder('t')
+        .select('COUNT(t.trans_id)', 'totalTransactions')
+        .addSelect(
+          `SUM(CASE WHEN t.trans_status = :executed THEN 1 ELSE 0 END)`,
+          'executedTransactions',
+        )
+        .where('(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)', { uid })
+        .setParameter('executed', TransactionStatus.EXECUTED)
+        .getRawOne<{
+          totalTransactions: string | null;
+          executedTransactions: string | null;
+        }>(),
+      this.walletHistoryRepository
+        .createQueryBuilder('wh')
+        .select(
+          `SUM(CASE WHEN wh.wh_option = :depositOpt THEN wh.wh_amount ELSE 0 END)`,
+          'totalDeposit',
+        )
+        .addSelect(
+          `SUM(CASE WHEN wh.wh_option = :withdrawOpt THEN wh.wh_amount ELSE 0 END)`,
+          'totalWithdraw',
+        )
+        .where('wh.wh_user = :uid', { uid })
+        .andWhere('wh.wh_status = :successStatus', {
+          successStatus: WalletHistoryStatus.SUCCESS,
+        })
+        .setParameters({
+          depositOpt: WalletHistoryOption.DEPOSIT,
+          withdrawOpt: WalletHistoryOption.WITHDRAW,
+        })
+        .getRawOne<{
+          totalDeposit: string | null;
+          totalWithdraw: string | null;
+        }>(),
+    ]);
+
+    mapped.transaction_stats = {
+      total_transactions: Number(txStatsRaw?.totalTransactions ?? 0),
+      executed_transactions: Number(txStatsRaw?.executedTransactions ?? 0),
+    };
+    mapped.wallet_stats = {
+      total_deposit: Number(walletStatsRaw?.totalDeposit ?? 0),
+      total_withdraw: Number(walletStatsRaw?.totalWithdraw ?? 0),
     };
 
     return {
       statusCode: 200,
       data: mapped,
+    };
+  }
+
+  async getUsersNeedLevelUp(): Promise<{
+    statusCode: number;
+    data: Array<{
+      uid: number;
+      uname: string;
+      email: string;
+      display_name: string;
+      level: number;
+      need_levelup: boolean;
+      current_cycle_active_days: number;
+      last_actived_day: Date | null;
+      created_at: Date;
+    }>;
+  }> {
+    const users = await this.userRepository.find({
+      select: [
+        'uid',
+        'uname',
+        'uemail',
+        'ufulllname',
+        'ulevel',
+        'need_levelup',
+        'current_cycle_active_days',
+        'last_actived_day',
+        'created_at',
+      ],
+      where: { need_levelup: true },
+      order: { created_at: 'DESC' },
+    });
+
+    return {
+      statusCode: 200,
+      data: users.map((u) => ({
+        uid: u.uid,
+        uname: u.uname,
+        email: u.uemail,
+        display_name: u.ufulllname,
+        level: u.ulevel,
+        need_levelup: u.need_levelup,
+        current_cycle_active_days: u.current_cycle_active_days,
+        last_actived_day: u.last_actived_day,
+        created_at: u.created_at,
+      })),
+    };
+  }
+
+  async reviewUserLevelUp(
+    uid: number,
+    action: 'approve' | 'reject',
+    adminId: number,
+  ): Promise<{
+    statusCode: number;
+    message: string;
+    data: {
+      uid: number;
+      level: number;
+      need_levelup: boolean;
+      action: 'approve' | 'reject';
+    };
+  }> {
+    if (!uid || Number.isNaN(uid)) {
+      throw new BadRequestException('Invalid user id');
+    }
+
+    const user = await this.userRepository.findOne({
+      select: ['uid', 'ulevel', 'need_levelup'],
+      where: { uid },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (!user.need_levelup) {
+      throw new BadRequestException(
+        'User does not have pending level-up request',
+      );
+    }
+
+    const previousLevel = user.ulevel;
+    if (action === 'approve') {
+      user.ulevel = Math.min(4, user.ulevel + 1);
+    }
+    user.need_levelup = false;
+    user.current_cycle_active_days = 0;
+    await this.userRepository.save(user);
+
+    await this.adminLogRepository.save({
+      log_admin_id: adminId,
+      log_action:
+        action === 'approve' ? AdminLogAction.APPROVE : AdminLogAction.REJECT,
+      log_module: AdminLogModule.USERS,
+      log_description: `Admin ${action} user level-up: user_id=${uid}, old_level=${previousLevel}, new_level=${user.ulevel}`,
+      log_ip_address: null,
+      log_user_agent: null,
+      log_target_id: uid,
+      log_target_type: 'user',
+      log_old_data: { level: previousLevel, need_levelup: true },
+      log_new_data: { level: user.ulevel, need_levelup: user.need_levelup },
+    });
+
+    return {
+      statusCode: 200,
+      message:
+        action === 'approve'
+          ? 'User level-up approved successfully'
+          : 'User level-up rejected successfully',
+      data: {
+        uid: user.uid,
+        level: user.ulevel,
+        need_levelup: user.need_levelup,
+        action,
+      },
     };
   }
 
@@ -616,5 +899,4 @@ export class AdminsUsersOpsService {
       },
     };
   }
-
 }

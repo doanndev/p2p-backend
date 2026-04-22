@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -33,12 +34,8 @@ export class AdminsStatisticsService {
     message: string;
     statistics: {
       total_users: number;
-      total_staking_count: number;
-      total_staking_amount: number;
-      total_estimated_reward: number;
       total_deposit: number;
       total_withdraw: number;
-      total_reward: number;
       total_balance: number;
       total_transfer_main: number;
     };
@@ -108,12 +105,8 @@ export class AdminsStatisticsService {
       message: 'Platform statistics retrieved successfully',
       statistics: {
         total_users: totalUsers,
-        total_staking_count: totalStakingCount,
-        total_staking_amount: totalStakingAmount,
-        total_estimated_reward: totalEstimatedReward,
         total_deposit: totalDeposit,
         total_withdraw: totalWithdraw,
-        total_reward: totalReward,
         total_balance: totalBalance,
         total_transfer_main: totalTransferMain,
       },
@@ -125,12 +118,8 @@ export class AdminsStatisticsService {
     message: string;
     statistics: {
       total_users: number;
-      total_staking_count: number;
-      total_staking_amount: number;
-      total_estimated_reward: number;
       total_deposit: number;
       total_withdraw: number;
-      total_reward: number;
       total_balance: number;
       total_transfer_main: number;
     };
@@ -142,5 +131,4 @@ export class AdminsStatisticsService {
       statistics: platform.statistics,
     };
   }
-
 }

@@ -10,6 +10,8 @@ import { SmartRefTree } from './entities/smart-ref-tree.entity';
 import { SettingRewardSmartref } from './entities/setting-reward-smartref.entity';
 import { SmartRefReward } from './entities/smart-ref-reward.entity';
 import { WalletsService } from '../wallets/wallets.service';
+import { CacheService } from '../systems/cache.service';
+import { Transaction, TransactionStatus } from '../orderbook/entities/transaction.entity';
 
 type SmartRefLevelSettingResponse = {
   level: number;
@@ -36,6 +38,9 @@ type SmartRefInviteeLevelResponse = {
 
 @Injectable()
 export class SmartRefService {
+  private readonly adminRefStatsCacheKey = 'smart-ref:admin:stats:v1';
+  private readonly adminRefStatsCacheTtlSec = 30 * 60;
+
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -49,7 +54,10 @@ export class SmartRefService {
     private readonly refWithdrawHistoryRepository: Repository<RefWithdrawHistory>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Transaction)
+    private readonly transactionRepository: Repository<Transaction>,
     private readonly walletsService: WalletsService,
+    private readonly cacheService: CacheService,
   ) {}
 
   /** Số cấp tối đa theo cấu hình active trong setting_rewards_smartref (MAX srs_level). */
@@ -323,5 +331,237 @@ export class SmartRefService {
         }),
       );
     }
+  }
+
+  async getAdminReferralStatistics(): Promise<{
+    total_ref_paid_usd: number;
+    total_invited_users: number;
+    total_referral_transaction_value_usd: number;
+  }> {
+    const cached = await this.cacheService.get(this.adminRefStatsCacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as {
+          total_ref_paid_usd: number;
+          total_invited_users: number;
+          total_referral_transaction_value_usd: number;
+        };
+      } catch {
+        // ignore malformed cache and refresh
+      }
+    }
+
+    const [paidRaw, invitedRaw] = await Promise.all([
+      this.refWithdrawHistoryRepository
+        .createQueryBuilder('w')
+        .select('COALESCE(SUM(w.rwh_amount_usd), 0)', 'total')
+        .getRawOne<{ total: string | null }>(),
+      this.smartRefTreeRepository
+        .createQueryBuilder('t')
+        .select('COUNT(DISTINCT t.srt_invitee)', 'total')
+        .getRawOne<{ total: string | null }>(),
+    ]);
+
+    const inviteeRows = await this.smartRefTreeRepository
+      .createQueryBuilder('t')
+      .select('DISTINCT t.srt_invitee', 'inviteeId')
+      .getRawMany<{ inviteeId: string }>();
+    const inviteeIds = inviteeRows
+      .map((r) => Number(r.inviteeId))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    let txValueUsd = 0;
+    if (inviteeIds.length > 0) {
+      const txRaw = await this.transactionRepository
+        .createQueryBuilder('tx')
+        .select('COALESCE(SUM(tx.trans_total_usd), 0)', 'total')
+        .where('tx.trans_status = :st', { st: TransactionStatus.EXECUTED })
+        .andWhere(
+          '(tx.trans_user_buy IN (:...inviteeIds) OR tx.trans_user_sell IN (:...inviteeIds))',
+          { inviteeIds },
+        )
+        .getRawOne<{ total: string | null }>();
+      txValueUsd = Number(txRaw?.total ?? 0);
+    }
+
+    const payload = {
+      total_ref_paid_usd: Number(paidRaw?.total ?? 0),
+      total_invited_users: Number(invitedRaw?.total ?? 0),
+      total_referral_transaction_value_usd: txValueUsd,
+    };
+
+    await this.cacheService.set(
+      this.adminRefStatsCacheKey,
+      JSON.stringify(payload),
+      this.adminRefStatsCacheTtlSec,
+    );
+
+    return payload;
+  }
+
+  async getAdminReferralsWithInvitees() {
+    const levelOneRows = await this.smartRefTreeRepository.find({
+      where: { srt_level: 1 },
+      order: { srt_referral: 'ASC', srt_invitee: 'ASC' },
+    });
+
+    if (levelOneRows.length === 0) {
+      return [];
+    }
+
+    const referralIds = [...new Set(levelOneRows.map((r) => r.srt_referral))];
+    const allTreeRows = await this.smartRefTreeRepository.find({
+      where: { srt_referral: In(referralIds) },
+      order: { srt_referral: 'ASC', srt_level: 'ASC', srt_invitee: 'ASC' },
+    });
+
+    const userIds = new Set<number>();
+    for (const row of allTreeRows) {
+      userIds.add(row.srt_referral);
+      userIds.add(row.srt_invitee);
+    }
+    const users = await this.userRepository.find({
+      select: ['uid', 'uname', 'uemail', 'ufulllname', 'uavatar', 'created_at'],
+      where: { uid: In([...userIds]) },
+    });
+    const userById = new Map(users.map((u) => [u.uid, u]));
+
+    const referralMap = new Map<
+      number,
+      {
+        referral: {
+          uid: number;
+          uname: string;
+          uemail: string;
+          ufulllname: string;
+          uavatar: string | null;
+          created_at: Date;
+        } | null;
+        f1_count: number;
+        total_invitees: number;
+        invitees_by_level: Array<{
+          level: number;
+          count: number;
+          invitees: Array<{
+            uid: number;
+            uname: string;
+            uemail: string;
+            ufulllname: string;
+            uavatar: string | null;
+            created_at: Date;
+          }>;
+        }>;
+      }
+    >();
+
+    for (const referralId of referralIds) {
+      const rows = allTreeRows.filter((r) => r.srt_referral === referralId);
+      const levelMap = new Map<number, number[]>();
+      for (const row of rows) {
+        const arr = levelMap.get(row.srt_level) ?? [];
+        arr.push(row.srt_invitee);
+        levelMap.set(row.srt_level, arr);
+      }
+
+      const inviteesByLevel = [...levelMap.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([level, ids]) => ({
+          level,
+          count: ids.length,
+          invitees: ids
+            .map((uid) => userById.get(uid))
+            .filter((u): u is User => Boolean(u))
+            .map((u) => ({
+              uid: u.uid,
+              uname: u.uname,
+              uemail: u.uemail,
+              ufulllname: u.ufulllname,
+              uavatar: u.uavatar,
+              created_at: u.created_at,
+            })),
+        }));
+
+      const referralUser = userById.get(referralId) ?? null;
+      referralMap.set(referralId, {
+        referral: referralUser
+          ? {
+              uid: referralUser.uid,
+              uname: referralUser.uname,
+              uemail: referralUser.uemail,
+              ufulllname: referralUser.ufulllname,
+              uavatar: referralUser.uavatar,
+              created_at: referralUser.created_at,
+            }
+          : null,
+        f1_count: levelMap.get(1)?.length ?? 0,
+        total_invitees: rows.length,
+        invitees_by_level: inviteesByLevel,
+      });
+    }
+
+    return [...referralMap.values()].sort((a, b) => b.f1_count - a.f1_count);
+  }
+
+  async getAdminDownlineTree(userId: number, maxDepth = 5) {
+    const root = await this.userRepository.findOne({
+      select: ['uid', 'uname', 'uemail', 'ufulllname', 'uavatar', 'created_at'],
+      where: { uid: userId },
+    });
+    if (!root) {
+      throw new BadRequestException('User not found');
+    }
+
+    const cappedDepth = Math.min(Math.max(maxDepth, 1), 10);
+
+    const levelOneRows = await this.smartRefTreeRepository.find({
+      where: { srt_level: 1 },
+      order: { srt_referral: 'ASC', srt_invitee: 'ASC' },
+    });
+
+    const childrenMap = new Map<number, number[]>();
+    for (const row of levelOneRows) {
+      const arr = childrenMap.get(row.srt_referral) ?? [];
+      arr.push(row.srt_invitee);
+      childrenMap.set(row.srt_referral, arr);
+    }
+
+    const allUserIds = new Set<number>([userId]);
+    const queue: Array<{ id: number; depth: number }> = [{ id: userId, depth: 0 }];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current.depth >= cappedDepth) continue;
+      const children = childrenMap.get(current.id) ?? [];
+      for (const childId of children) {
+        allUserIds.add(childId);
+        queue.push({ id: childId, depth: current.depth + 1 });
+      }
+    }
+
+    const users = await this.userRepository.find({
+      select: ['uid', 'uname', 'uemail', 'ufulllname', 'uavatar', 'created_at'],
+      where: { uid: In([...allUserIds]) },
+    });
+    const userById = new Map(users.map((u) => [u.uid, u]));
+
+    const buildNode = (id: number, depth: number): any => {
+      const u = userById.get(id);
+      const childrenIds = depth >= cappedDepth ? [] : childrenMap.get(id) ?? [];
+      return {
+        user: u
+          ? {
+              uid: u.uid,
+              uname: u.uname,
+              uemail: u.uemail,
+              ufulllname: u.ufulllname,
+              uavatar: u.uavatar,
+              created_at: u.created_at,
+            }
+          : { uid: id },
+        depth,
+        children: childrenIds.map((childId) => buildNode(childId, depth + 1)),
+      };
+    };
+
+    return buildNode(userId, 0);
   }
 }

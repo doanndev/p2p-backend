@@ -8,7 +8,6 @@ import {
   AdminSetting,
   AdminSettingStatus,
   AdminSettingType,
-  FundType,
 } from './entities/admin-setting.entity';
 import { AdminSettingTurn } from './entities/admin-setting-turn.entity';
 import { VideoSettingsDto } from './dto/video-settings.dto';
@@ -86,6 +85,97 @@ export class SettingsService {
     return Number.isFinite(n) ? n : fallback;
   }
 
+  private inferAdminSettingType(
+    value: string | number | boolean | Record<string, unknown> | null,
+  ): AdminSettingType {
+    if (value === null) return AdminSettingType.STRING;
+    if (typeof value === 'number') return AdminSettingType.NUMBER;
+    if (typeof value === 'boolean') return AdminSettingType.BOOLEAN;
+    if (typeof value === 'object') return AdminSettingType.JSON;
+    return AdminSettingType.STRING;
+  }
+
+  async getAllAdminSettings(): Promise<{
+    statusCode: number;
+    data: Array<{
+      id: number;
+      key: string;
+      type: AdminSettingType;
+      value: string | null;
+      status: AdminSettingStatus;
+    }>;
+  }> {
+    const rows = await this.adminSettingRepository.find({
+      order: { as_id: 'DESC' },
+    });
+
+    return {
+      statusCode: 200,
+      data: rows.map((row) => ({
+        id: row.as_id,
+        key: row.setting_name,
+        type: row.setting_type,
+        value: row.setting_value,
+        status: row.status,
+      })),
+    };
+  }
+
+  async updateAdminSettingByKeyValue(
+    key: string,
+    value: string | number | boolean | Record<string, unknown> | null,
+    adminId: number,
+  ): Promise<{
+    statusCode: number;
+    message: string;
+    data: {
+      key: string;
+      type: AdminSettingType;
+      value: string | null;
+      status: AdminSettingStatus;
+    };
+  }> {
+    const normalizedKey = key.trim();
+    const inferredType = this.inferAdminSettingType(value);
+    await this.upsertSetting(
+      normalizedKey,
+      inferredType,
+      value,
+      AdminSettingStatus.ACTIVE,
+    );
+
+    const updated = await this.adminSettingRepository.findOne({
+      where: { setting_name: normalizedKey },
+    });
+
+    await this.adminLogRepository.save({
+      log_admin_id: adminId,
+      log_action: AdminLogAction.UPDATE,
+      log_module: AdminLogModule.SETTINGS,
+      log_description: `Admin updated setting ${normalizedKey}`,
+      log_ip_address: null,
+      log_user_agent: null,
+      log_target_id: updated?.as_id ?? null,
+      log_target_type: 'admin_setting',
+      log_new_data: {
+        key: normalizedKey,
+        type: inferredType,
+        value,
+      },
+    });
+
+    return {
+      statusCode: 200,
+      message: 'Admin setting updated successfully',
+      data: {
+        key: normalizedKey,
+        type: updated?.setting_type ?? inferredType,
+        value: updated?.setting_value ?? null,
+        status: updated?.status ?? AdminSettingStatus.ACTIVE,
+      },
+    };
+  }
+
   async updateVideoSettings(
     videoSettingsDto: VideoSettingsDto,
     adminId: number,
@@ -105,7 +195,10 @@ export class SettingsService {
         videoSettingsDto.turnDefault,
       );
     }
-    if (videoSettingsDto.devicesDefault && videoSettingsDto.devicesDefault > 0) {
+    if (
+      videoSettingsDto.devicesDefault &&
+      videoSettingsDto.devicesDefault > 0
+    ) {
       await this.upsertSetting(
         'video.devices_default',
         AdminSettingType.NUMBER,
@@ -126,7 +219,11 @@ export class SettingsService {
       'video.turn_watch_default',
       10,
     );
-    const devicesDefault = this.getNumberSetting(map, 'video.devices_default', 20);
+    const devicesDefault = this.getNumberSetting(
+      map,
+      'video.devices_default',
+      20,
+    );
     const timeGap = this.getNumberSetting(map, 'video.time_gap', 15);
 
     await this.adminLogRepository.save({
@@ -168,7 +265,11 @@ export class SettingsService {
     }
 
     const map = await this.getActiveSettingsMap();
-    const turnWithdrawFree = this.getNumberSetting(map, 'withdraw.turn_free', 5);
+    const turnWithdrawFree = this.getNumberSetting(
+      map,
+      'withdraw.turn_free',
+      5,
+    );
 
     await this.adminLogRepository.save({
       log_admin_id: adminId,
@@ -238,7 +339,11 @@ export class SettingsService {
       20,
     );
     const time_gap = this.getNumberSetting(settingMap, 'video.time_gap', 15);
-    const percent_day = this.getNumberSetting(settingMap, 'reward.percent_day', 0.2);
+    const percent_day = this.getNumberSetting(
+      settingMap,
+      'reward.percent_day',
+      0.2,
+    );
     const percent_week = this.getNumberSetting(
       settingMap,
       'reward.percent_week',
@@ -249,7 +354,11 @@ export class SettingsService {
       'reward.percent_month',
       20,
     );
-    const turn_free = this.getNumberSetting(settingMap, 'withdraw.turn_free', 5);
+    const turn_free = this.getNumberSetting(
+      settingMap,
+      'withdraw.turn_free',
+      5,
+    );
     const max_level = this.getNumberSetting(
       settingMap,
       'ref.smart_ref_level',

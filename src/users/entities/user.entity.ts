@@ -87,6 +87,9 @@ export class User {
   @Column({ name: 'ulevel', type: 'smallint' })
   ulevel: number;
 
+  @Column({ name: 'need_levelup', type: 'boolean', default: false })
+  need_levelup: boolean;
+
   @Column({
     name: 'current_cycle_active_days',
     type: 'integer',
