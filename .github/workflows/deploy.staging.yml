@@ -84,6 +84,7 @@ jobs:
             echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> "$ENV_FILE"
             echo "SMTP_PASS=${{ secrets.SMTP_PASS }}" >> "$ENV_FILE"
             echo "SMTP_FROM=${{ secrets.SMTP_FROM }}" >> "$ENV_FILE"
+            echo "ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}" >> "$ENV_FILE"
             echo "FRONTEND_URLS=${{ secrets.FRONTEND_URLS }}" >> "$ENV_FILE"
             echo "NODE_ENV=${{ secrets.NODE_ENV }}" >> "$ENV_FILE"
             echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> "$ENV_FILE"

@@ -31,6 +31,7 @@ import { UserWalletNetwork } from '../wallets/entities/user-wallet-network.entit
 import { ActiveWalletTracker } from '../wallets/entities/active-wallet-tracker.entity';
 import { WalletDepositTracker } from '../wallets/entities/wallet-deposit-tracker.entity';
 import { CoinNetwork } from '../settings/entities/coin-network.entity';
+import { Transaction } from '../orderbook/entities/transaction.entity';
 import { VerifyLog } from '../users/entities/verify-log.entity';
 import { UserVerify } from '../users/entities/user-verify.entity';
 import { KolRegister } from '../users/entities/kol-register.entity';
@@ -70,6 +71,7 @@ import { SettingsModule } from '../settings/settings.module';
       UserVerify,
       KolRegister,
       KolArticle,
+      Transaction,
     ]),
     PassportModule,
     ConfigModule,

@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WalletsModule } from '../wallets/wallets.module';
+import { Admin } from '../admins/entities/admin.entity';
+import { RolePermission } from '../admins/entities/role-permission.entity';
+import { AdminPermissionReadReferralGuard } from '../admins/guards/admin-permission-read-referral.guard';
+import { Transaction } from '../orderbook/entities/transaction.entity';
 import { User } from '../users/entities/user.entity';
 import { RefWithdrawHistory } from './entities/ref-withdraw-history.entity';
 import { SettingRewardSmartref } from './entities/setting-reward-smartref.entity';
@@ -22,10 +26,13 @@ import { SmartRefService } from './smart-ref.service';
       SmartRefReward,
       RefMember,
       RefMemberReward,
+      Transaction,
+      Admin,
+      RolePermission,
     ]),
   ],
   controllers: [SmartRefController],
-  providers: [SmartRefService],
+  providers: [SmartRefService, AdminPermissionReadReferralGuard],
   exports: [TypeOrmModule, SmartRefService],
 })
 export class SmartRefModule {}
