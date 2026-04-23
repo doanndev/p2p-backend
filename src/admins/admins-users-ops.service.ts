@@ -49,6 +49,13 @@ export class AdminsUsersOpsService {
   async getUsersPaginated(
     page = 1,
     limit = 30,
+    sortBy:
+      | 'created_at'
+      | 'total_transactions'
+      | 'executed_transactions'
+      | 'total_deposit'
+      | 'total_withdraw' = 'created_at',
+    sortOrder: 'ASC' | 'DESC' = 'DESC',
   ): Promise<{
     statusCode: number;
     data: Array<{
@@ -87,33 +94,119 @@ export class AdminsUsersOpsService {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const currentPage = Math.max(page, 1);
     const skip = (currentPage - 1) * safeLimit;
+    const orderDirection = sortOrder === 'ASC' ? 'ASC' : 'DESC';
+    const sortableColumns = {
+      created_at: 'u.created_at',
+      total_transactions: 'total_transactions',
+      executed_transactions: 'executed_transactions',
+      total_deposit: 'total_deposit',
+      total_withdraw: 'total_withdraw',
+    } as const;
+    const orderColumn = sortableColumns[sortBy] ?? sortableColumns.created_at;
 
-    const [items, total] = await this.userRepository.findAndCount({
-      select: [
-        'uid',
-        'uname',
-        'uemail',
-        'uphone',
-        'uavatar',
-        'ufulllname',
-        'ubirthday',
-        'usex',
-        'ulevel',
-        'ustatus',
-        'utelegram',
-        'uref',
-        'u_active_email',
-        'uverify',
-        'ukol',
-        'created_at',
-      ],
-      order: { created_at: 'DESC' },
-      skip,
-      take: safeLimit,
-    });
+    const [rawItems, total] = await Promise.all([
+      this.userRepository
+        .createQueryBuilder('u')
+        .select('u.uid', 'uid')
+        .addSelect('u.uname', 'uname')
+        .addSelect('u.uemail', 'uemail')
+        .addSelect('u.uphone', 'uphone')
+        .addSelect('u.uavatar', 'uavatar')
+        .addSelect('u.ufulllname', 'ufulllname')
+        .addSelect('u.ubirthday', 'ubirthday')
+        .addSelect('u.usex', 'usex')
+        .addSelect('u.ulevel', 'ulevel')
+        .addSelect('u.ustatus', 'ustatus')
+        .addSelect('u.utelegram', 'utelegram')
+        .addSelect('u.uref', 'uref')
+        .addSelect('u.u_active_email', 'u_active_email')
+        .addSelect('u.uverify', 'uverify')
+        .addSelect('u.ukol', 'ukol')
+        .addSelect('u.created_at', 'created_at')
+        .addSelect(
+          'COALESCE(tx_stats.total_transactions, 0)',
+          'total_transactions',
+        )
+        .addSelect(
+          'COALESCE(tx_stats.executed_transactions, 0)',
+          'executed_transactions',
+        )
+        .addSelect('COALESCE(wallet_stats.total_deposit, 0)', 'total_deposit')
+        .addSelect('COALESCE(wallet_stats.total_withdraw, 0)', 'total_withdraw')
+        .leftJoin(
+          (qb) =>
+            qb
+              .from(Transaction, 't')
+              .select('tx_u.uid', 'user_id')
+              .addSelect('COUNT(t.trans_id)', 'total_transactions')
+              .addSelect(
+                'SUM(CASE WHEN t.trans_status = :executedStatus THEN 1 ELSE 0 END)',
+                'executed_transactions',
+              )
+              .innerJoin(
+                User,
+                'tx_u',
+                '(tx_u.uid = t.trans_user_buy OR tx_u.uid = t.trans_user_sell)',
+              )
+              .groupBy('tx_u.uid'),
+          'tx_stats',
+          'tx_stats.user_id = u.uid',
+        )
+        .leftJoin(
+          (qb) =>
+            qb
+              .from(WalletHistory, 'wh')
+              .select('wh.wh_user', 'user_id')
+              .addSelect(
+                'SUM(CASE WHEN wh.wh_option = :depositOpt THEN wh.wh_amount ELSE 0 END)',
+                'total_deposit',
+              )
+              .addSelect(
+                'SUM(CASE WHEN wh.wh_option = :withdrawOpt THEN wh.wh_amount ELSE 0 END)',
+                'total_withdraw',
+              )
+              .where('wh.wh_status = :successStatus')
+              .groupBy('wh.wh_user'),
+          'wallet_stats',
+          'wallet_stats.user_id = u.uid',
+        )
+        .setParameters({
+          executedStatus: TransactionStatus.EXECUTED,
+          depositOpt: WalletHistoryOption.DEPOSIT,
+          withdrawOpt: WalletHistoryOption.WITHDRAW,
+          successStatus: WalletHistoryStatus.SUCCESS,
+        })
+        .orderBy(orderColumn, orderDirection)
+        .addOrderBy('u.created_at', 'DESC')
+        .offset(skip)
+        .limit(safeLimit)
+        .getRawMany<{
+          uid: string;
+          uname: string;
+          uemail: string;
+          uphone: string | null;
+          uavatar: string | null;
+          ufulllname: string;
+          ubirthday: Date | null;
+          usex: UserSex;
+          ulevel: string;
+          ustatus: UserStatus;
+          utelegram: string | null;
+          uref: string;
+          u_active_email: boolean | string;
+          uverify: boolean | string;
+          ukol: boolean | string;
+          created_at: Date;
+          total_transactions: string;
+          executed_transactions: string;
+          total_deposit: string | null;
+          total_withdraw: string | null;
+        }>(),
+      this.userRepository.count(),
+    ]);
 
-    const mapped = items.map((u) => ({
-      uid: u.uid,
+    const mapped = rawItems.map((u) => ({
+      uid: Number(u.uid),
       uname: u.uname,
       email: u.uemail,
       phone: u.uphone,
@@ -121,100 +214,23 @@ export class AdminsUsersOpsService {
       display_name: u.ufulllname,
       birthday: u.ubirthday,
       sex: u.usex,
-      level: u.ulevel,
+      level: Number(u.ulevel),
       status: u.ustatus,
       telegram: u.utelegram,
       ref: u.uref,
-      active_email: u.u_active_email,
-      verify: u.uverify,
-      kol: u.ukol,
+      active_email: u.u_active_email === true || u.u_active_email === 'true',
+      verify: u.uverify === true || u.uverify === 'true',
+      kol: u.ukol === true || u.ukol === 'true',
       transaction_stats: {
-        total_transactions: 0,
-        executed_transactions: 0,
+        total_transactions: Number(u.total_transactions) || 0,
+        executed_transactions: Number(u.executed_transactions) || 0,
       },
       wallet_stats: {
-        total_deposit: 0,
-        total_withdraw: 0,
+        total_deposit: Number(u.total_deposit ?? 0),
+        total_withdraw: Number(u.total_withdraw ?? 0),
       },
       created_at: u.created_at,
     }));
-
-    const userIds = mapped.map((u) => u.uid);
-    if (userIds.length > 0) {
-      const [txStatsRaw, walletStatsRaw] = await Promise.all([
-        this.transactionRepository
-          .createQueryBuilder('t')
-          .select('u.uid', 'userId')
-          .addSelect('COUNT(t.trans_id)', 'totalTransactions')
-          .addSelect(
-            `SUM(CASE WHEN t.trans_status = :executed THEN 1 ELSE 0 END)`,
-            'executedTransactions',
-          )
-          .innerJoin(
-            User,
-            'u',
-            '(u.uid = t.trans_user_buy OR u.uid = t.trans_user_sell)',
-          )
-          .where('u.uid IN (:...userIds)', { userIds })
-          .setParameter('executed', TransactionStatus.EXECUTED)
-          .groupBy('u.uid')
-          .getRawMany<{
-            userId: string;
-            totalTransactions: string;
-            executedTransactions: string;
-          }>(),
-        this.walletHistoryRepository
-          .createQueryBuilder('wh')
-          .select('wh.wh_user', 'userId')
-          .addSelect(
-            `SUM(CASE WHEN wh.wh_option = :depositOpt THEN wh.wh_amount ELSE 0 END)`,
-            'totalDeposit',
-          )
-          .addSelect(
-            `SUM(CASE WHEN wh.wh_option = :withdrawOpt THEN wh.wh_amount ELSE 0 END)`,
-            'totalWithdraw',
-          )
-          .where('wh.wh_user IN (:...userIds)', { userIds })
-          .andWhere('wh.wh_status = :successStatus', {
-            successStatus: WalletHistoryStatus.SUCCESS,
-          })
-          .setParameters({
-            depositOpt: WalletHistoryOption.DEPOSIT,
-            withdrawOpt: WalletHistoryOption.WITHDRAW,
-          })
-          .groupBy('wh.wh_user')
-          .getRawMany<{
-            userId: string;
-            totalDeposit: string | null;
-            totalWithdraw: string | null;
-          }>(),
-      ]);
-
-      const txStatsByUserId = new Map(
-        txStatsRaw.map((row) => [
-          Number(row.userId),
-          {
-            total_transactions: Number(row.totalTransactions) || 0,
-            executed_transactions: Number(row.executedTransactions) || 0,
-          },
-        ]),
-      );
-      const walletStatsByUserId = new Map(
-        walletStatsRaw.map((row) => [
-          Number(row.userId),
-          {
-            total_deposit: Number(row.totalDeposit ?? 0),
-            total_withdraw: Number(row.totalWithdraw ?? 0),
-          },
-        ]),
-      );
-
-      for (const row of mapped) {
-        row.transaction_stats =
-          txStatsByUserId.get(row.uid) ?? row.transaction_stats;
-        row.wallet_stats = walletStatsByUserId.get(row.uid) ?? row.wallet_stats;
-      }
-    }
 
     return {
       statusCode: 200,

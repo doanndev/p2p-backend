@@ -46,10 +46,24 @@ export class AdminUsersController {
   })
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
-  async getUsers(@Query('page') page?: string, @Query('limit') limit?: string) {
+  async getUsers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sort_by')
+    sortBy?:
+      | 'created_at'
+      | 'total_transactions'
+      | 'executed_transactions'
+      | 'total_deposit'
+      | 'total_withdraw',
+    @Query('sort_order') sortOrder?: 'asc' | 'desc' | 'ASC' | 'DESC',
+  ) {
+    const normalizedSortOrder = (sortOrder || 'DESC').toUpperCase();
     const result = await this.adminsUsersOpsService.getUsersPaginated(
       page ? parseInt(page, 10) || 1 : 1,
       limit ? parseInt(limit, 10) || 30 : 30,
+      sortBy || 'created_at',
+      normalizedSortOrder === 'ASC' ? 'ASC' : 'DESC',
     );
     return result;
   }
