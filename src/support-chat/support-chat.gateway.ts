@@ -71,6 +71,15 @@ export class SupportChatGateway
         cookies['admin_access_token'];
       const token = adminToken || userToken;
 
+      console.log('token', token);
+      console.log('userToken', userToken);
+      console.log('adminToken', adminToken);
+      console.log('cookies', cookies);
+      console.log('client.handshake.auth', client.handshake.auth);
+      console.log('client.handshake.headers', client.handshake.headers);
+      console.log('client.handshake.query', client.handshake.query);
+      console.log('client.handshake.url', client.handshake.url);
+
       if (!token) {
         client.disconnect(true);
         return;
