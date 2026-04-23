@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { ChatMessage, ChatMessageType } from './entities/chat-message.entity';
 import { ChatRoom, ChatRoomStatus } from './entities/chat-room.entity';
 import { Transaction } from '../orderbook/entities/transaction.entity';
+import { OrderBook } from '../orderbook/entities/order-book.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
 import { Admin, AdminStatus } from '../admins/entities/admin.entity';
 
@@ -28,6 +29,105 @@ export class ChatService {
     @InjectRepository(Admin)
     private readonly adminRepository: Repository<Admin>,
   ) {}
+
+  private toPublicUser(user: User | null | undefined) {
+    if (!user) return null;
+    return {
+      id: user.uid,
+      username: user.uname,
+      email: user.uemail,
+      phone: user.uphone,
+      avatar: user.uavatar,
+      display_name: user.ufulllname,
+      status: user.ustatus,
+    };
+  }
+
+  private toOrderbookResponse(orderbook: OrderBook | null | undefined) {
+    if (!orderbook) return null;
+    return {
+      id: orderbook.ob_id,
+      user_id: orderbook.ob_user_id,
+      coin: orderbook.ob_coin,
+      national: orderbook.ob_national,
+      adv_code: orderbook.ob_adv_code,
+      option: orderbook.ob_option,
+      coin_symbol: orderbook.ob_coin_symbol,
+      national_symbol: orderbook.ob_national_symbol,
+      amount: orderbook.ob_amount,
+      amount_remaining: orderbook.ob_amount_remaining,
+      price: orderbook.ob_price,
+      national_min: orderbook.ob_national_min,
+      national_max: orderbook.ob_national_max,
+      status: orderbook.ob_status,
+      description: orderbook.ob_description,
+      created_at: orderbook.ob_created_at,
+    };
+  }
+
+  private toTransactionResponse(transaction: Transaction | null | undefined) {
+    if (!transaction) return null;
+    return {
+      id: transaction.trans_id,
+      reference_code: transaction.transs_reference_code,
+      user_buy_id: transaction.trans_user_buy,
+      user_sell_id: transaction.trans_user_sell,
+      coin: transaction.trans_coin,
+      national: transaction.trans_national,
+      order_book: transaction.trans_order_book,
+      bu_id: transaction.trans_bu_id,
+      option: transaction.trans_option,
+      type: transaction.trans_type,
+      coin_symbol: transaction.trans_coin_symbol,
+      national_symbol: transaction.trans_national_symbol,
+      amount: transaction.trans_amount,
+      price: transaction.trans_price,
+      price_usd: transaction.trans_price_usd,
+      total_price: transaction.trans_total_price,
+      total_usd: transaction.trans_total_usd,
+      dispute_status: transaction.trans_dispute_status,
+      time_bank: transaction.trans_time_bank,
+      status: transaction.trans_status,
+      message: transaction.trans_message,
+      lock_released_at: transaction.trans_lock_released_at,
+      created_at: transaction.trans_created_at,
+      expired_at: transaction.trans_expired_at,
+      payment_proof_urls: transaction.trans_payment_proof_urls ?? [],
+    };
+  }
+
+  private toRoomResponse(room: ChatRoom) {
+    const transaction = (room as any).transaction as
+      | Transaction
+      | null
+      | undefined;
+    const orderbook = (transaction as any)?.order_book as
+      | OrderBook
+      | null
+      | undefined;
+    return {
+      room_id: room.room_id,
+      transaction_id: room.room_transaction_id,
+      buyer_id: room.room_buyer_id,
+      seller_id: room.room_seller_id,
+      buyer: this.toPublicUser((room as any).buyer),
+      seller: this.toPublicUser((room as any).seller),
+      transaction: this.toTransactionResponse(transaction),
+      orderbook: this.toOrderbookResponse(orderbook),
+      status: room.room_status,
+      created_at: room.room_created_at,
+      closed_at: room.room_closed_at,
+    };
+  }
+
+  private roomQueryBuilder() {
+    return this.chatRoomRepository
+      .createQueryBuilder('r')
+      .leftJoinAndSelect('r.buyer', 'buyer')
+      .leftJoinAndSelect('r.seller', 'seller')
+      .leftJoinAndSelect('r.transaction', 'tx')
+      .leftJoinAndSelect('tx.order_book', 'ob');
+  }
 
   async getRoomByTransactionId(
     transactionId: number,
@@ -177,25 +277,17 @@ export class ChatService {
       throw new ForbiddenException('Your account has been blocked');
     }
 
-    const rooms = await this.chatRoomRepository.find({
-      where: [
-        { room_status: ChatRoomStatus.ACTIVE, room_buyer_id: userId },
-        { room_status: ChatRoomStatus.ACTIVE, room_seller_id: userId },
-      ],
-      order: { room_created_at: 'DESC' },
-    });
+    const rooms = await this.roomQueryBuilder()
+      .where('r.room_status = :status', { status: ChatRoomStatus.ACTIVE })
+      .andWhere('(r.room_buyer_id = :userId OR r.room_seller_id = :userId)', {
+        userId,
+      })
+      .orderBy('r.room_created_at', 'DESC')
+      .getMany();
 
     if (rooms.length === 0) return [];
 
-    return rooms.map((room) => ({
-      room_id: room.room_id,
-      transaction_id: room.room_transaction_id,
-      buyer_id: room.room_buyer_id,
-      seller_id: room.room_seller_id,
-      status: room.room_status,
-      created_at: room.room_created_at,
-      closed_at: room.room_closed_at,
-    }));
+    return rooms.map((room) => this.toRoomResponse(room));
   }
 
   async adminListRooms(params?: {
@@ -203,9 +295,7 @@ export class ChatService {
     userId?: number;
     transactionId?: number;
   }) {
-    const query = this.chatRoomRepository
-      .createQueryBuilder('r')
-      .orderBy('r.room_created_at', 'DESC');
+    const query = this.roomQueryBuilder().orderBy('r.room_created_at', 'DESC');
 
     if (params?.status) {
       query.andWhere('r.room_status = :status', { status: params.status });
@@ -225,32 +315,16 @@ export class ChatService {
     }
 
     const rooms = await query.getMany();
-    return rooms.map((room) => ({
-      room_id: room.room_id,
-      transaction_id: room.room_transaction_id,
-      buyer_id: room.room_buyer_id,
-      seller_id: room.room_seller_id,
-      status: room.room_status,
-      created_at: room.room_created_at,
-      closed_at: room.room_closed_at,
-    }));
+    return rooms.map((room) => this.toRoomResponse(room));
   }
 
   async adminGetRoomDetail(transactionId: number) {
-    const room = await this.chatRoomRepository.findOne({
-      where: { room_transaction_id: transactionId },
-    });
+    const room = await this.roomQueryBuilder()
+      .where('r.room_transaction_id = :transactionId', { transactionId })
+      .getOne();
     if (!room) throw new NotFoundException('Chat room not found');
 
-    return {
-      room_id: room.room_id,
-      transaction_id: room.room_transaction_id,
-      buyer_id: room.room_buyer_id,
-      seller_id: room.room_seller_id,
-      status: room.room_status,
-      created_at: room.room_created_at,
-      closed_at: room.room_closed_at,
-    };
+    return this.toRoomResponse(room);
   }
 
   async adminGetRoomMessages(transactionId: number) {

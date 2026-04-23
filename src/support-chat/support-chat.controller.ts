@@ -1,5 +1,4 @@
 import {
-  Body,
   Controller,
   Get,
   HttpCode,
@@ -149,6 +148,8 @@ export class SupportChatController {
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   @ApiQuery({ name: 'status', required: false, example: 'open' })
   @ApiQuery({ name: 'userId', required: false, example: 1001 })
+  @ApiQuery({ name: 'username', required: false, example: 'john_doe' })
+  @ApiQuery({ name: 'email', required: false, example: 'john@example.com' })
   @ApiOkResponse({
     description: 'Conversation list',
     schema: {
@@ -159,6 +160,15 @@ export class SupportChatController {
             id: 12,
             conversation_code: 'user-1001',
             user_id: 1001,
+            user: {
+              id: 1001,
+              username: 'john_doe',
+              email: 'john@example.com',
+              phone: '0900000000',
+              avatar: 'https://cdn.example.com/avatar.jpg',
+              display_name: 'John Doe',
+              status: 'active',
+            },
             status: 'open',
             last_message_at: '2026-04-01T10:00:00.000Z',
             closed_at: null,
@@ -172,7 +182,10 @@ export class SupportChatController {
     },
   })
   getConversations(@Request() req: any, @Query() query: QueryConversationsDto) {
-    return this.supportChatService.getConversations(req.supportChatActor, query);
+    return this.supportChatService.getConversations(
+      req.supportChatActor,
+      query,
+    );
   }
 
   @Get(':id')
@@ -202,7 +215,10 @@ export class SupportChatController {
     @Request() req: any,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.supportChatService.getConversationDetail(req.supportChatActor, id);
+    return this.supportChatService.getConversationDetail(
+      req.supportChatActor,
+      id,
+    );
   }
 
   @Get(':id/messages')

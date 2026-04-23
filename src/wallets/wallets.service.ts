@@ -251,6 +251,9 @@ export class WalletsService implements OnModuleInit {
 
   async getListCoins(): Promise<Coin[]> {
     return await this.coinRepository.find({
+      where: {
+        coin_status: CoinStatus.ACTIVE,
+      },
       order: {
         coin_id: 'ASC',
       },

@@ -1,6 +1,7 @@
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
@@ -13,25 +14,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
-import { Admin, AdminStatus } from '../admins/entities/admin.entity';
+import { Admin } from '../admins/entities/admin.entity';
+import { User } from '../users/entities/user.entity';
+import { createSocketAuthMiddleware } from '../common/middlewares/socket-auth.middleware';
 
 type ChatSocket = Socket & {
-  actor?: { type: 'user' | 'admin'; id: number };
+  user_id: number;
+  actor: { type: 'user' | 'admin'; id: number };
 };
-
-function parseCookie(header: string | undefined): Record<string, string> {
-  if (!header) return {};
-  const parts = header.split(';').map((p) => p.trim());
-  const out: Record<string, string> = {};
-  for (const p of parts) {
-    const idx = p.indexOf('=');
-    if (idx === -1) continue;
-    const k = p.slice(0, idx).trim();
-    const v = decodeURIComponent(p.slice(idx + 1).trim());
-    out[k] = v;
-  }
-  return out;
-}
 
 function roomName(transactionId: number) {
   return `tx:${transactionId}`;
@@ -41,7 +31,9 @@ function roomName(transactionId: number) {
   namespace: '/chat',
   cors: { origin: true, credentials: true },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
@@ -49,51 +41,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     @InjectRepository(Admin)
     private readonly adminRepository: Repository<Admin>,
   ) {}
 
+  afterInit(server: Server) {
+    server.use(
+      createSocketAuthMiddleware({
+        jwtService: this.jwtService,
+        configService: this.configService,
+        userRepository: this.userRepository,
+        adminRepository: this.adminRepository,
+      }),
+    );
+  }
+
   async handleConnection(client: ChatSocket) {
-    try {
-      const cookieHeader =
-        (client.handshake.headers?.cookie as string | undefined) ?? undefined;
-      const cookies = parseCookie(cookieHeader);
-      const adminToken =
-        (client.handshake.auth?.admin_access_token as string | undefined) ||
-        cookies['admin_access_token'];
-      const userToken =
-        (client.handshake.auth?.access_token as string | undefined) ||
-        cookies['access_token'];
-      const token = adminToken || userToken;
-      if (!token) {
-        client.disconnect(true);
-        return;
-      }
-
-      const secret =
-        this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
-      const payload: any = await this.jwtService.verifyAsync(token, { secret });
-      const userId = Number(payload?.sub);
-      if (!userId) {
-        client.disconnect(true);
-        return;
-      }
-
-      if (adminToken) {
-        const admin = await this.adminRepository.findOne({
-          where: { admin_id: userId },
-        });
-        if (!admin || admin.admin_status !== AdminStatus.ACTIVE) {
-          client.disconnect(true);
-          return;
-        }
-        client.actor = { type: 'admin', id: userId };
-      } else {
-        client.actor = { type: 'user', id: userId };
-      }
-    } catch {
-      client.disconnect(true);
-    }
+    void client;
   }
 
   handleDisconnect(client: ChatSocket) {
@@ -110,7 +76,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     },
   ) {
     const actor = client.actor;
-    if (!actor) return { ok: false, error: 'unauthorized' };
 
     const transactionId = Number(body?.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
@@ -133,7 +98,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     },
   ) {
     const actor = client.actor;
-    if (!actor) return { ok: false, error: 'unauthorized' };
 
     const transactionId = Number(body?.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
@@ -163,7 +127,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     },
   ) {
     const actor = client.actor;
-    if (!actor) return { ok: false, error: 'unauthorized' };
 
     const transactionId = Number(body?.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
@@ -190,7 +153,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     },
   ) {
     const actor = client.actor;
-    if (!actor) return { ok: false, error: 'unauthorized' };
 
     const transactionId = Number(body?.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };

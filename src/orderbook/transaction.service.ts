@@ -134,6 +134,48 @@ export class TransactionService {
     };
   }
 
+  private toOrderBookResponse(orderBook: OrderBook | null | undefined) {
+    if (!orderBook) return null;
+    return {
+      id: orderBook.ob_id,
+      user_id: orderBook.ob_user_id,
+      coin: orderBook.ob_coin,
+      national: orderBook.ob_national,
+      adv_code: orderBook.ob_adv_code,
+      option: orderBook.ob_option,
+      coin_symbol: orderBook.ob_coin_symbol,
+      national_symbol: orderBook.ob_national_symbol,
+      amount: orderBook.ob_amount,
+      amount_remaining: orderBook.ob_amount_remaining,
+      price: orderBook.ob_price,
+      national_min: orderBook.ob_national_min,
+      national_max: orderBook.ob_national_max,
+      status: orderBook.ob_status,
+      description: orderBook.ob_description,
+      created_at: orderBook.ob_created_at,
+    };
+  }
+
+  private disputeQueryBuilder() {
+    return this.disputeRepository
+      .createQueryBuilder('d')
+      .leftJoinAndSelect('d.initiator', 'initiator')
+      .leftJoinAndSelect('d.responder', 'responder')
+      .leftJoinAndSelect('d.transaction', 'tx')
+      .leftJoinAndSelect('tx.user_buy', 'tx_user_buy')
+      .leftJoinAndSelect('tx.user_sell', 'tx_user_sell')
+      .leftJoinAndSelect('tx.bank_user', 'tx_bank_user')
+      .leftJoinAndSelect('tx.order_book', 'tx_order_book');
+  }
+
+  private async findDisputeWithRelations(
+    disputeId: number,
+  ): Promise<Dispute | null> {
+    return this.disputeQueryBuilder()
+      .where('d.dispute_id = :disputeId', { disputeId })
+      .getOne();
+  }
+
   /**
    * Called by BullMQ worker: if status still matches `expectedStatus`, mark failed and revert order book / locks (same as cancel).
    */
@@ -813,11 +855,24 @@ export class TransactionService {
   }
 
   private toDisputeResponse(d: Dispute) {
+    const transaction = (d as any).transaction as
+      | Transaction
+      | null
+      | undefined;
+    const orderBook = (transaction as any)?.order_book as
+      | OrderBook
+      | null
+      | undefined;
+
     return {
       id: d.dispute_id,
       transaction_id: d.dispute_transaction_id,
       initiator_id: d.dispute_initiator_id,
       responder_id: d.dispute_responder_id,
+      initiator: this.toPublicUser((d as any).initiator),
+      responder: this.toPublicUser((d as any).responder),
+      transaction: transaction ? this.toTransactionResponse(transaction) : null,
+      orderbook: this.toOrderBookResponse(orderBook),
       type: d.dispute_type,
       reason: d.dispute_reason,
       evidence: d.dispute_evidence,
@@ -880,21 +935,20 @@ export class TransactionService {
       await this.transactionRepository.save(tx);
     }
 
-    return this.toDisputeResponse(saved);
+    const hydrated = await this.findDisputeWithRelations(saved.dispute_id);
+    return this.toDisputeResponse(hydrated ?? saved);
   }
 
   async getMyDisputes(userId: number) {
-    const rows = await this.disputeRepository.find({
-      where: { dispute_initiator_id: userId },
-      order: { dispute_created_at: 'DESC' },
-    });
+    const rows = await this.disputeQueryBuilder()
+      .where('d.dispute_initiator_id = :userId', { userId })
+      .orderBy('d.dispute_created_at', 'DESC')
+      .getMany();
     return rows.map((d) => this.toDisputeResponse(d));
   }
 
   async getMyDisputeDetail(userId: number, disputeId: number) {
-    const d = await this.disputeRepository.findOne({
-      where: { dispute_id: disputeId },
-    });
+    const d = await this.findDisputeWithRelations(disputeId);
     if (!d) throw new NotFoundException('Dispute not found');
     if (d.dispute_initiator_id !== userId) {
       throw new ForbiddenException(
@@ -910,13 +964,13 @@ export class TransactionService {
     });
     if (!admin) throw new ForbiddenException('Admin not found');
 
-    const qb = this.disputeRepository
-      .createQueryBuilder('d')
-      .orderBy('d.dispute_created_at', 'DESC');
+    const qb = this.disputeQueryBuilder().orderBy(
+      'd.dispute_created_at',
+      'DESC',
+    );
     if (query.status) {
       qb.andWhere('d.dispute_status = :status', { status: query.status });
     }
-
     const rows = await qb.getMany();
     return rows.map((d) => this.toDisputeResponse(d));
   }
@@ -927,9 +981,7 @@ export class TransactionService {
     });
     if (!admin) throw new ForbiddenException('Admin not found');
 
-    const d = await this.disputeRepository.findOne({
-      where: { dispute_id: disputeId },
-    });
+    const d = await this.findDisputeWithRelations(disputeId);
     if (!d) throw new NotFoundException('Dispute not found');
     return this.toDisputeResponse(d);
   }

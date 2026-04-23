@@ -31,6 +31,16 @@ export class QueryConversationsDto {
   @Min(1)
   userId?: number;
 
+  @ApiPropertyOptional({ description: 'Filter by username' })
+  @IsOptional()
+  @IsString()
+  username?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by email' })
+  @IsOptional()
+  @IsString()
+  email?: string;
+
   @ApiPropertyOptional({ description: 'Search by conversation code' })
   @IsOptional()
   @IsString()

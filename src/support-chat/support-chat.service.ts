@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { SupportChat, SupportChatStatus } from './entities/support-chat.entity';
 import {
   SupportChatMessage,
@@ -16,6 +16,7 @@ import {
 import { SupportChatActor } from './support-chat.types';
 import { QueryConversationsDto } from './dto/query-conversations.dto';
 import { QueryConversationMessagesDto } from './dto/query-conversation-messages.dto';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class SupportChatService {
@@ -24,6 +25,8 @@ export class SupportChatService {
     private readonly supportChatRepository: Repository<SupportChat>,
     @InjectRepository(SupportChatMessage)
     private readonly supportChatMessageRepository: Repository<SupportChatMessage>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   private toConversationResponse(conversation: SupportChat) {
@@ -79,13 +82,25 @@ export class SupportChatService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const qb = this.supportChatRepository.createQueryBuilder('c');
+    const qb = this.supportChatRepository
+      .createQueryBuilder('c')
+      .leftJoin(User, 'u', 'u.uid = c.user_id');
 
     if (query.status) {
       qb.andWhere('c.status = :status', { status: query.status });
     }
     if (query.userId) {
       qb.andWhere('c.user_id = :userId', { userId: query.userId });
+    }
+    if (query.username?.trim()) {
+      qb.andWhere('u.uname ILIKE :username', {
+        username: `%${query.username.trim()}%`,
+      });
+    }
+    if (query.email?.trim()) {
+      qb.andWhere('u.uemail ILIKE :email', {
+        email: `%${query.email.trim()}%`,
+      });
     }
     if (query.q?.trim()) {
       qb.andWhere('c.conversation_code ILIKE :q', {
@@ -109,9 +124,42 @@ export class SupportChatService {
       .take(limit);
 
     const [rows, total] = await qb.getManyAndCount();
+    const userIds = [...new Set(rows.map((row) => row.user_id))];
+    const users = userIds.length
+      ? await this.userRepository.find({
+          where: { uid: In(userIds) },
+          select: [
+            'uid',
+            'uname',
+            'uemail',
+            'uphone',
+            'uavatar',
+            'ufulllname',
+            'ustatus',
+          ],
+        })
+      : [];
+    const userMap = new Map(users.map((user) => [user.uid, user]));
+
     return {
       statusCode: 200,
-      data: rows.map((row) => this.toConversationResponse(row)),
+      data: rows.map((row) => {
+        const user = userMap.get(row.user_id);
+        return {
+          ...this.toConversationResponse(row),
+          user: user
+            ? {
+                id: user.uid,
+                username: user.uname,
+                email: user.uemail,
+                phone: user.uphone,
+                avatar: user.uavatar,
+                display_name: user.ufulllname,
+                status: user.ustatus,
+              }
+            : null,
+        };
+      }),
       meta: {
         page,
         limit,

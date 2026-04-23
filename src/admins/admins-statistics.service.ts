@@ -37,15 +37,10 @@ export class AdminsStatisticsService {
       total_deposit: number;
       total_withdraw: number;
       total_balance: number;
-      total_transfer_main: number;
     };
   }> {
     // 1. Tổng số users
     const totalUsers = await this.userRepository.count();
-
-    const totalStakingCount = 0;
-    const totalStakingAmount = 0;
-    const totalEstimatedReward = 0;
 
     // 5. Tổng số tiền nạp (deposit - SUCCESS hoặc CHECKED)
     const totalDepositResult = await this.walletHistoryRepository
@@ -108,7 +103,6 @@ export class AdminsStatisticsService {
         total_deposit: totalDeposit,
         total_withdraw: totalWithdraw,
         total_balance: totalBalance,
-        total_transfer_main: totalTransferMain,
       },
     };
   }
@@ -121,7 +115,6 @@ export class AdminsStatisticsService {
       total_deposit: number;
       total_withdraw: number;
       total_balance: number;
-      total_transfer_main: number;
     };
   }> {
     const platform = await this.getPlatformStatistics();

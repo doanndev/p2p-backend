@@ -52,6 +52,7 @@ export class AdminsUsersOpsService {
     sortBy:
       | 'created_at'
       | 'total_transactions'
+      | 'total_transaction_amount'
       | 'executed_transactions'
       | 'total_deposit'
       | 'total_withdraw' = 'created_at',
@@ -75,7 +76,7 @@ export class AdminsUsersOpsService {
       verify: boolean;
       kol: boolean;
       transaction_stats: {
-        total_transactions: number;
+        total_transaction_amount: number;
         executed_transactions: number;
       };
       wallet_stats: {
@@ -97,7 +98,8 @@ export class AdminsUsersOpsService {
     const orderDirection = sortOrder === 'ASC' ? 'ASC' : 'DESC';
     const sortableColumns = {
       created_at: 'u.created_at',
-      total_transactions: 'total_transactions',
+      total_transactions: 'total_transaction_amount',
+      total_transaction_amount: 'total_transaction_amount',
       executed_transactions: 'executed_transactions',
       total_deposit: 'total_deposit',
       total_withdraw: 'total_withdraw',
@@ -124,8 +126,8 @@ export class AdminsUsersOpsService {
         .addSelect('u.ukol', 'ukol')
         .addSelect('u.created_at', 'created_at')
         .addSelect(
-          'COALESCE(tx_stats.total_transactions, 0)',
-          'total_transactions',
+          'COALESCE(tx_stats.total_transaction_amount, 0)',
+          'total_transaction_amount',
         )
         .addSelect(
           'COALESCE(tx_stats.executed_transactions, 0)',
@@ -138,7 +140,7 @@ export class AdminsUsersOpsService {
             qb
               .from(Transaction, 't')
               .select('tx_u.uid', 'user_id')
-              .addSelect('COUNT(t.trans_id)', 'total_transactions')
+              .addSelect('SUM(t.trans_amount)', 'total_transaction_amount')
               .addSelect(
                 'SUM(CASE WHEN t.trans_status = :executedStatus THEN 1 ELSE 0 END)',
                 'executed_transactions',
@@ -197,7 +199,7 @@ export class AdminsUsersOpsService {
           uverify: boolean | string;
           ukol: boolean | string;
           created_at: Date;
-          total_transactions: string;
+          total_transaction_amount: string | null;
           executed_transactions: string;
           total_deposit: string | null;
           total_withdraw: string | null;
@@ -222,7 +224,7 @@ export class AdminsUsersOpsService {
       verify: u.uverify === true || u.uverify === 'true',
       kol: u.ukol === true || u.ukol === 'true',
       transaction_stats: {
-        total_transactions: Number(u.total_transactions) || 0,
+        total_transaction_amount: Number(u.total_transaction_amount ?? 0),
         executed_transactions: Number(u.executed_transactions) || 0,
       },
       wallet_stats: {

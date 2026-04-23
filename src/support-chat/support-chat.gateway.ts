@@ -1,6 +1,7 @@
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
@@ -12,26 +13,21 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
-import { User, UserStatus } from '../users/entities/user.entity';
-import { Admin, AdminStatus } from '../admins/entities/admin.entity';
+import { User } from '../users/entities/user.entity';
+import { Admin } from '../admins/entities/admin.entity';
 import { SupportChatActor } from './support-chat.types';
 import { SupportChatService } from './support-chat.service';
 import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ConversationRoomDto } from './dto/conversation-room.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SupportChatSystemEventType } from './entities/support-chat-message.entity';
+import {
+  AuthenticatedSocket,
+  createSocketAuthMiddleware,
+} from '../common/middlewares/socket-auth.middleware';
 
-type SupportSocket = Socket & { actor?: SupportChatActor };
-
-function parseCookie(header: string | undefined): Record<string, string> {
-  if (!header) return {};
-  return header.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [k, ...rest] = part.trim().split('=');
-    if (!k || rest.length === 0) return acc;
-    acc[k] = decodeURIComponent(rest.join('='));
-    return acc;
-  }, {});
-}
+type SupportSocket = AuthenticatedSocket &
+  Socket & { actor: SupportChatActor; user_id: number };
 
 function supportRoomName(conversationId: number) {
   return `conversation:${conversationId}`;
@@ -42,7 +38,7 @@ function supportRoomName(conversationId: number) {
   cors: { origin: true, credentials: true },
 })
 export class SupportChatGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   private readonly logger = new Logger(SupportChatGateway.name);
 
@@ -74,6 +70,19 @@ export class SupportChatGateway
     };
   }
 
+  afterInit(server: Server) {
+    server.use(
+      createSocketAuthMiddleware({
+        jwtService: this.jwtService,
+        configService: this.configService,
+        userRepository: this.userRepository,
+        adminRepository: this.adminRepository,
+        includeEntityOnActor: true,
+        logger: this.logger,
+      }),
+    );
+  }
+
   async handleConnection(client: SupportSocket) {
     try {
       this.logger.debug(
@@ -85,18 +94,6 @@ export class SupportChatGateway
         })}`,
       );
 
-      const cookieHeader =
-        (client.handshake.headers?.cookie as string | undefined) ?? undefined;
-      const cookies = parseCookie(cookieHeader);
-
-      const userToken =
-        (client.handshake.auth?.access_token as string | undefined) ||
-        cookies['access_token'];
-      const adminToken =
-        (client.handshake.auth?.admin_access_token as string | undefined) ||
-        cookies['admin_access_token'];
-      const token = adminToken || userToken;
-
       this.logger.debug(
         `[connection:auth-input] ${JSON.stringify({
           ...this.socketMeta(client),
@@ -104,93 +101,16 @@ export class SupportChatGateway
           hasAuthAdminAccessToken: Boolean(
             client.handshake.auth?.admin_access_token,
           ),
-          hasCookieAccessToken: Boolean(cookies['access_token']),
-          hasCookieAdminAccessToken: Boolean(cookies['admin_access_token']),
-          token: this.maskToken(token),
-          userToken: this.maskToken(userToken),
-          adminToken: this.maskToken(adminToken),
+          hasCookieHeader: Boolean(client.handshake.headers?.cookie),
+          userId: client.user_id,
         })}`,
       );
-
-      if (!token) {
-        this.logger.warn(
-          `[connection:reject:no-token] ${JSON.stringify(this.socketMeta(client))}`,
-        );
-        client.disconnect(true);
-        return;
-      }
-
-      const secret =
-        this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
-      const payload: any = await this.jwtService.verifyAsync(token, { secret });
-      const actorId = Number(payload?.sub);
-      this.logger.debug(
-        `[connection:token-verified] ${JSON.stringify({
+      this.logger.log(
+        `[connection:ok] ${JSON.stringify({
           ...this.socketMeta(client),
-          actorId,
-          isAdminToken: Boolean(adminToken),
-          payloadSub: payload?.sub,
+          userId: client.user_id,
         })}`,
       );
-
-      if (!actorId) {
-        this.logger.warn(
-          `[connection:reject:invalid-sub] ${JSON.stringify({
-            ...this.socketMeta(client),
-            payloadSub: payload?.sub,
-          })}`,
-        );
-        client.disconnect(true);
-        return;
-      }
-
-      if (adminToken) {
-        const admin = await this.adminRepository.findOne({
-          where: { admin_id: actorId },
-        });
-        if (!admin || admin.admin_status !== AdminStatus.ACTIVE) {
-          this.logger.warn(
-            `[connection:reject:admin-invalid] ${JSON.stringify({
-              ...this.socketMeta(client),
-              actorId,
-              adminFound: Boolean(admin),
-              adminStatus: admin?.admin_status,
-            })}`,
-          );
-          client.disconnect(true);
-          return;
-        }
-        client.actor = { type: 'admin', id: admin.admin_id, admin };
-        this.logger.log(
-          `[connection:ok] ${JSON.stringify({
-            ...this.socketMeta(client),
-            adminStatus: admin.admin_status,
-          })}`,
-        );
-      } else {
-        const user = await this.userRepository.findOne({
-          where: { uid: actorId },
-        });
-        if (!user || user.ustatus === UserStatus.BLOCK) {
-          this.logger.warn(
-            `[connection:reject:user-invalid] ${JSON.stringify({
-              ...this.socketMeta(client),
-              actorId,
-              userFound: Boolean(user),
-              userStatus: user?.ustatus,
-            })}`,
-          );
-          client.disconnect(true);
-          return;
-        }
-        client.actor = { type: 'user', id: user.uid, user };
-        this.logger.log(
-          `[connection:ok] ${JSON.stringify({
-            ...this.socketMeta(client),
-            userStatus: user.ustatus,
-          })}`,
-        );
-      }
     } catch (error: any) {
       this.logger.error(
         `[connection:error] ${JSON.stringify({
@@ -228,12 +148,6 @@ export class SupportChatGateway
         conversationId: body?.conversationId,
       })}`,
     );
-    if (!client.actor) {
-      this.logger.warn(
-        `[event:join_conversation:unauthorized] ${JSON.stringify(this.socketMeta(client))}`,
-      );
-      return { ok: false, error: 'unauthorized' };
-    }
     await this.supportChatService.assertCanAccessConversation(
       client.actor,
       body.conversationId,
@@ -277,12 +191,6 @@ export class SupportChatGateway
         conversationId: body?.conversationId,
       })}`,
     );
-    if (!client.actor) {
-      this.logger.warn(
-        `[event:leave_conversation:unauthorized] ${JSON.stringify(this.socketMeta(client))}`,
-      );
-      return { ok: false, error: 'unauthorized' };
-    }
     await this.supportChatService.assertCanAccessConversation(
       client.actor,
       body.conversationId,
@@ -327,12 +235,6 @@ export class SupportChatGateway
         contentLength: body?.content?.length ?? 0,
       })}`,
     );
-    if (!client.actor) {
-      this.logger.warn(
-        `[event:send_message:unauthorized] ${JSON.stringify(this.socketMeta(client))}`,
-      );
-      return { ok: false, error: 'unauthorized' };
-    }
     const message = await this.supportChatService.saveUserOrAdminMessage(
       client.actor,
       body.conversationId,
@@ -364,12 +266,6 @@ export class SupportChatGateway
     @ConnectedSocket() client: SupportSocket,
     @MessageBody() body: ConversationRoomDto,
   ) {
-    if (!client.actor) {
-      this.logger.warn(
-        `[event:typing:unauthorized] ${JSON.stringify(this.socketMeta(client))}`,
-      );
-      return { ok: false, error: 'unauthorized' };
-    }
     await this.supportChatService.assertCanAccessConversation(
       client.actor,
       body.conversationId,
@@ -400,12 +296,6 @@ export class SupportChatGateway
     @ConnectedSocket() client: SupportSocket,
     @MessageBody() body: ConversationRoomDto,
   ) {
-    if (!client.actor) {
-      this.logger.warn(
-        `[event:stop_typing:unauthorized] ${JSON.stringify(this.socketMeta(client))}`,
-      );
-      return { ok: false, error: 'unauthorized' };
-    }
     await this.supportChatService.assertCanAccessConversation(
       client.actor,
       body.conversationId,
@@ -436,12 +326,6 @@ export class SupportChatGateway
     @ConnectedSocket() client: SupportSocket,
     @MessageBody() body: ConversationRoomDto,
   ) {
-    if (!client.actor) {
-      this.logger.warn(
-        `[event:seen:unauthorized] ${JSON.stringify(this.socketMeta(client))}`,
-      );
-      return { ok: false, error: 'unauthorized' };
-    }
     await this.supportChatService.markConversationSeen(
       client.actor,
       body.conversationId,
