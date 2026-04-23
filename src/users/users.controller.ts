@@ -829,28 +829,28 @@ export class UsersController {
     return result;
   }
 
-  @Get('total')
-  @ApiOperation({ summary: 'Lấy tổng số lượng user' })
-  @ApiOkResponse({
-    description: 'Tổng số lượng user',
-    schema: {
-      example: {
-        statusCode: 200,
-        message: 'Get total users successfully',
-        data: { total_users: 15230 },
-      },
-    },
-  })
-  @HttpCode(HttpStatus.OK)
-  async getTotalUsers() {
-    const total = await this.usersService.getTotalUsers();
+  // @Get('total')
+  // @ApiOperation({ summary: 'Lấy tổng số lượng user' })
+  // @ApiOkResponse({
+  //   description: 'Tổng số lượng user',
+  //   schema: {
+  //     example: {
+  //       statusCode: 200,
+  //       message: 'Get total users successfully',
+  //       data: { total_users: 15230 },
+  //     },
+  //   },
+  // })
+  // @HttpCode(HttpStatus.OK)
+  // async getTotalUsers() {
+  //   const total = await this.usersService.getTotalUsers();
 
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'Get total users successfully',
-      data: {
-        total_users: total,
-      },
-    };
-  }
+  //   return {
+  //     statusCode: HttpStatus.OK,
+  //     message: 'Get total users successfully',
+  //     data: {
+  //       total_users: total,
+  //     },
+  //   };
+  // }
 }
