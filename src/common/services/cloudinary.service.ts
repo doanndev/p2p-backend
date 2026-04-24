@@ -126,6 +126,12 @@ export class CloudinaryService {
     return fromTypeMap[contentType] || 'jpg';
   }
 
+  private getUploadResourceType(contentType: string): 'image' | 'video' {
+    return (contentType || '').toLowerCase().startsWith('video/')
+      ? 'video'
+      : 'image';
+  }
+
   generateSignedDirectUpload(
     input: SignedDirectUploadInput,
   ): SignedDirectUploadResult {
@@ -142,6 +148,7 @@ export class CloudinaryService {
     const folder = this.normalizeFolder(input.folder || 'uploads');
     const uniqueId = this.generatePublicId('upload');
     const publicId = uniqueId;
+    const resourceType = this.getUploadResourceType(input.content_type);
 
     const timestamp = Math.floor(Date.now() / 1000);
 
@@ -154,7 +161,7 @@ export class CloudinaryService {
     const signature = cloudinary.utils.api_sign_request(signParams, apiSecret);
 
     return {
-      upload_url: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      upload_url: `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
       http_method: 'POST',
       form_fields: {
         api_key: apiKey,
