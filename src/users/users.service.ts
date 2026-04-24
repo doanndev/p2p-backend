@@ -1478,7 +1478,7 @@ export class UsersService {
 
   async submitKycPaper(
     userId: number,
-    paperImageUrl: string,
+    paperVideoUrl: string,
   ): Promise<{
     verification: UserVerify;
     response: {
@@ -1494,8 +1494,8 @@ export class UsersService {
       };
     };
   }> {
-    if (!paperImageUrl || !paperImageUrl.trim()) {
-      throw new BadRequestException('paperImageUrl is required');
+    if (!paperVideoUrl || !paperVideoUrl.trim()) {
+      throw new BadRequestException('paperVideoUrl is required');
     }
 
     const existingVerify = await this.userVerifyRepository.findOne({
@@ -1522,7 +1522,7 @@ export class UsersService {
     }
 
     try {
-      existingVerify.uv_paper_image = paperImageUrl.trim();
+      existingVerify.uv_paper_image = paperVideoUrl.trim();
       existingVerify.uv_status = UserVerifyStatus.PENDING;
       const savedVerify = await this.userVerifyRepository.save(existingVerify);
 

@@ -481,8 +481,7 @@ export class UsersController {
 
   @Post('kyc-retry')
   @ApiOperation({
-    summary:
-      'Gửi lại CCCD sau retry admin bằng URL ảnh đã upload trực tiếp.',
+    summary: 'Gửi lại CCCD sau retry admin bằng URL ảnh đã upload trực tiếp.',
   })
   @ApiBody({ type: KycDto })
   @ApiOkResponse({
@@ -526,7 +525,7 @@ export class UsersController {
     const user = req.user;
     const result = await this.usersService.submitKycPaper(
       user.uid,
-      dto.paperImageUrl,
+      dto.paperVideoUrl,
     );
     return result.response;
   }
