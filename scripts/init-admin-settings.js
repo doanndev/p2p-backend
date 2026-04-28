@@ -5,9 +5,6 @@ const { Client } = require('pg');
 require('dotenv').config();
 
 const DEFAULT_SETTINGS = [
-  { name: 'video.turn_watch_default', type: 'number', value: '10' },
-  { name: 'video.devices_default', type: 'number', value: '20' },
-  { name: 'video.time_gap', type: 'number', value: '15' },
   { name: 'reward.percent_day', type: 'number', value: '0.2' },
   { name: 'reward.percent_week', type: 'number', value: '2.5' },
   { name: 'reward.percent_month', type: 'number', value: '20' },
@@ -32,11 +29,6 @@ const DEFAULT_SETTINGS = [
   },
   { name: 'config.rpc.rate_limit', type: 'number', value: '50' },
   { name: 'transaction.time_lock_balance', type: 'number', value: null },
-  {
-    name: 'transaction.lock_hours_by_level',
-    type: 'json',
-    value: '{"lv1":24,"lv2":12,"lv3":4,"lv4":3,"lv5":2,"lv6":1}',
-  },
   { name: 'smartref.fee', type: 'number', value: '0.5' },
   {
     name: 'wallet.sweep.ceo_wallet_percent',

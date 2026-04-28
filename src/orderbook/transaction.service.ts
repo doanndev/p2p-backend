@@ -67,6 +67,11 @@ export class TransactionService {
     return value.toFixed(8);
   }
 
+  private getOrderbookBuyLockTotal(amount: number): number {
+    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+    return this.toNumber(this.formatAmount(amount + (amount * feePercent) / 100));
+  }
+
   private generateReferenceCode(): string {
     return `TX-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   }
@@ -204,6 +209,10 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
+      const buyLockTotal =
+        orderBook.ob_option === OrderBookOption.BUY
+          ? this.getOrderbookBuyLockTotal(amount)
+          : amount;
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
       orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
       if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
@@ -228,7 +237,7 @@ export class TransactionService {
         }
 
         const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-        if (lockBalance < amount) {
+        if (lockBalance < buyLockTotal) {
           transaction.trans_status = TransactionStatus.FAILED;
           transaction.trans_message =
             transaction.trans_message ?? 'Expired (insufficient lock balance)';
@@ -236,9 +245,9 @@ export class TransactionService {
           return;
         }
 
-        sellerWallet.uw_lock_balance = lockBalance - amount;
+        sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
         sellerWallet.uw_balance =
-          this.toNumber(sellerWallet.uw_balance) + amount;
+          this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
         await manager.save(UserWallet, sellerWallet);
       }
 
@@ -382,16 +391,17 @@ export class TransactionService {
           if (!sellerWallet)
             throw new NotFoundException('Seller wallet not found');
 
+          const sellerLockTotal = this.getOrderbookBuyLockTotal(dto.amount);
           const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
-          if (sellerAvailableBalance < dto.amount) {
+          if (sellerAvailableBalance < sellerLockTotal) {
             throw new BadRequestException(
               'Seller does not have enough available balance',
             );
           }
 
-          sellerWallet.uw_balance = sellerAvailableBalance - dto.amount;
+          sellerWallet.uw_balance = sellerAvailableBalance - sellerLockTotal;
           sellerWallet.uw_lock_balance =
-            this.toNumber(sellerWallet.uw_lock_balance) + dto.amount;
+            this.toNumber(sellerWallet.uw_lock_balance) + sellerLockTotal;
           await manager.save(UserWallet, sellerWallet);
         }
 
@@ -675,11 +685,13 @@ export class TransactionService {
       const sellerLockDebit =
         posterIsSeller && feeAmount > 0
           ? this.toNumber(this.formatAmount(amount + feeAmount))
-          : amount;
+          : posterIsBuyer && feeAmount > 0
+            ? this.toNumber(this.formatAmount(amount + feeAmount))
+            : amount;
 
       const toBuyer =
         posterIsBuyer && feeAmount > 0
-          ? Math.max(0, this.toNumber(this.formatAmount(amount - feeAmount)))
+          ? amount
           : amount;
 
       const sellerWallet = await manager.findOne(UserWallet, {
@@ -812,6 +824,10 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
+      const buyLockTotal =
+        orderBook.ob_option === OrderBookOption.BUY
+          ? this.getOrderbookBuyLockTotal(amount)
+          : amount;
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
       orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
       if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
@@ -831,15 +847,15 @@ export class TransactionService {
           throw new NotFoundException('Seller wallet not found');
 
         const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-        if (lockBalance < amount) {
+        if (lockBalance < buyLockTotal) {
           throw new BadRequestException(
             'Seller lock balance is not enough to unlock',
           );
         }
 
-        sellerWallet.uw_lock_balance = lockBalance - amount;
+        sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
         sellerWallet.uw_balance =
-          this.toNumber(sellerWallet.uw_balance) + amount;
+          this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
         await manager.save(UserWallet, sellerWallet);
       }
 

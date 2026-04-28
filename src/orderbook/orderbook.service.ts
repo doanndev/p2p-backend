@@ -463,45 +463,47 @@ export class OrderbookService {
         }
       }
 
-      const wallet = await manager.findOne(UserWallet, {
-        where: {
-          uw_user_id: userId,
-          uw_wallet_coins: dto.coinId,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
+      if (dto.option === OrderBookOption.SELL) {
+        const wallet = await manager.findOne(UserWallet, {
+          where: {
+            uw_user_id: userId,
+            uw_wallet_coins: dto.coinId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
 
-      if (!wallet) {
-        throw new NotFoundException('Wallet not found for selected coin');
-      }
+        if (!wallet) {
+          throw new NotFoundException('Wallet not found for selected coin');
+        }
 
-      /** Số coin lock vào ví: lệnh bán = amount + phí (hiển thị orderbook vẫn là amount). */
-      const lockTotal = this.toNumber(
-        this.formatAmount(amount + (amount * feePercent) / 100),
-      );
-      const amountStr = this.formatAmount(lockTotal);
-      // Một câu UPDATE nguyên tử: trừ khả dụng + cộng lock, chỉ khi đủ số dư (ACID, tránh lệch decimal khi save entity).
-      const updateResult = await manager
-        .createQueryBuilder()
-        .update(UserWallet)
-        .set({
-          uw_balance: () => 'uw_balance - :amt',
-          uw_lock_balance: () => 'uw_lock_balance + :amt',
-        })
-        .where('uw_id = :uwId')
-        .andWhere('uw_user_id = :userId')
-        .andWhere('uw_wallet_coins = :coinId')
-        .andWhere('uw_balance >= :amt')
-        .setParameters({
-          amt: amountStr,
-          uwId: wallet.uw_id,
-          userId,
-          coinId: dto.coinId,
-        })
-        .execute();
+        /** Số coin lock vào ví: lệnh bán = amount + phí (hiển thị orderbook vẫn là amount). */
+        const lockTotal = this.toNumber(
+          this.formatAmount(amount + (amount * feePercent) / 100),
+        );
+        const amountStr = this.formatAmount(lockTotal);
+        // Một câu UPDATE nguyên tử: trừ khả dụng + cộng lock, chỉ khi đủ số dư (ACID, tránh lệch decimal khi save entity).
+        const updateResult = await manager
+          .createQueryBuilder()
+          .update(UserWallet)
+          .set({
+            uw_balance: () => 'uw_balance - :amt',
+            uw_lock_balance: () => 'uw_lock_balance + :amt',
+          })
+          .where('uw_id = :uwId')
+          .andWhere('uw_user_id = :userId')
+          .andWhere('uw_wallet_coins = :coinId')
+          .andWhere('uw_balance >= :amt')
+          .setParameters({
+            amt: amountStr,
+            uwId: wallet.uw_id,
+            userId,
+            coinId: dto.coinId,
+          })
+          .execute();
 
-      if (!updateResult.affected || updateResult.affected < 1) {
-        throw new BadRequestException('Insufficient available balance');
+        if (!updateResult.affected || updateResult.affected < 1) {
+          throw new BadRequestException('Insufficient available balance');
+        }
       }
 
       const orderBook = manager.create(OrderBook, {
