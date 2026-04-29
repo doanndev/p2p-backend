@@ -40,7 +40,7 @@ type OrderbookBankChangeRequestPayload = {
 const ORDERBOOK_BANK_CHANGE_REQUEST_TTL_SECONDS = 12 * 60 * 60;
 const ORDERBOOK_BANK_CHANGE_REQUEST_INDEX_KEY =
   'orderbook:bank-change-request:index';
-const BUYER_DAILY_USD_LIMIT_BY_LEVEL: Record<number, number> = {
+const BUYER_DAILY_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
   1: 1000,
   2: 5000,
   3: 10000,
@@ -84,9 +84,10 @@ export class OrderbookService {
     return value.toFixed(8);
   }
 
-  private getBuyerDailyUsdLimit(level: number): number {
+  private getBuyerDailyCoinLimit(level: number): number {
     return (
-      BUYER_DAILY_USD_LIMIT_BY_LEVEL[level] ?? BUYER_DAILY_USD_LIMIT_BY_LEVEL[1]
+      BUYER_DAILY_COIN_LIMIT_BY_LEVEL[level] ??
+      BUYER_DAILY_COIN_LIMIT_BY_LEVEL[1]
     );
   }
 
@@ -435,16 +436,16 @@ export class OrderbookService {
       }
 
       if (dto.option === OrderBookOption.BUY) {
-        const dailyLimitUsd = this.getBuyerDailyUsdLimit(currentUser.ulevel);
+        const dailyLimitCoin = this.getBuyerDailyCoinLimit(currentUser.ulevel);
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(startOfDay);
         endOfDay.setDate(endOfDay.getDate() + 1);
 
-        const currentBuyOrderbookUsdRaw = await manager
+        const currentBuyOrderbookCoinRaw = await manager
           .createQueryBuilder(OrderBook, 'ob')
           .select(
-            'COALESCE(SUM(CAST(ob.ob_amount_remaining AS numeric) * CAST(ob.ob_price AS numeric)), 0)',
+            'COALESCE(SUM(CAST(ob.ob_amount_remaining AS numeric)), 0)',
             'total',
           )
           .where('ob.ob_user_id = :userId', { userId })
@@ -453,13 +454,16 @@ export class OrderbookService {
           .andWhere('ob.ob_created_at < :endOfDay', { endOfDay })
           .getRawOne<{ total: string | number | null }>();
 
-        const currentBuyOrderbookUsd = Number(
-          currentBuyOrderbookUsdRaw?.total ?? 0,
+        console.log('currentBuyOrderbookCoinRaw', currentBuyOrderbookCoinRaw);
+
+        const currentBuyOrderbookCoin = Number(
+          currentBuyOrderbookCoinRaw?.total ?? 0,
         );
-        const nextTotalUsd = currentBuyOrderbookUsd + amount * price;
-        if (nextTotalUsd > dailyLimitUsd) {
+        const nextTotalCoin = currentBuyOrderbookCoin + amount;
+
+        if (nextTotalCoin > dailyLimitCoin) {
           throw new BadRequestException(
-            `Buy limit exceeded. Your current level (${currentUser.ulevel}) allows up to ${dailyLimitUsd} USD`,
+            `Buy limit exceeded. Your current level (${currentUser.ulevel}) allows up to ${dailyLimitCoin} USDT`,
           );
         }
       }
@@ -1175,52 +1179,54 @@ export class OrderbookService {
         throw new BadRequestException('Only pending order book can be deleted');
       }
 
-      const amountRemaining = this.toNumber(orderBook.ob_amount_remaining);
-      const unlockTotal =
-        orderBook.ob_option === OrderBookOption.SELL && feePercent > 0
-          ? this.toNumber(
-              this.formatAmount(
-                amountRemaining + (amountRemaining * feePercent) / 100,
-              ),
-            )
-          : amountRemaining;
-      const amountStr = this.formatAmount(unlockTotal);
+      if (orderBook.ob_option === OrderBookOption.SELL) {
+        const amountRemaining = this.toNumber(orderBook.ob_amount_remaining);
+        const unlockTotal =
+          feePercent > 0
+            ? this.toNumber(
+                this.formatAmount(
+                  amountRemaining + (amountRemaining * feePercent) / 100,
+                ),
+              )
+            : amountRemaining;
+        const amountStr = this.formatAmount(unlockTotal);
 
-      const wallet = await manager.findOne(UserWallet, {
-        where: {
-          uw_user_id: userId,
-          uw_wallet_coins: orderBook.ob_coin,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
+        const wallet = await manager.findOne(UserWallet, {
+          where: {
+            uw_user_id: userId,
+            uw_wallet_coins: orderBook.ob_coin,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
 
-      if (!wallet) {
-        throw new NotFoundException('Wallet not found for this order book');
-      }
+        if (!wallet) {
+          throw new NotFoundException('Wallet not found for this order book');
+        }
 
-      const unlockResult = await manager
-        .createQueryBuilder()
-        .update(UserWallet)
-        .set({
-          uw_lock_balance: () => 'uw_lock_balance - :amt',
-          uw_balance: () => 'uw_balance + :amt',
-        })
-        .where('uw_id = :uwId')
-        .andWhere('uw_user_id = :userId')
-        .andWhere('uw_wallet_coins = :coinId')
-        .andWhere('uw_lock_balance >= :amt')
-        .setParameters({
-          amt: amountStr,
-          uwId: wallet.uw_id,
-          userId,
-          coinId: orderBook.ob_coin,
-        })
-        .execute();
+        const unlockResult = await manager
+          .createQueryBuilder()
+          .update(UserWallet)
+          .set({
+            uw_lock_balance: () => 'uw_lock_balance - :amt',
+            uw_balance: () => 'uw_balance + :amt',
+          })
+          .where('uw_id = :uwId')
+          .andWhere('uw_user_id = :userId')
+          .andWhere('uw_wallet_coins = :coinId')
+          .andWhere('uw_lock_balance >= :amt')
+          .setParameters({
+            amt: amountStr,
+            uwId: wallet.uw_id,
+            userId,
+            coinId: orderBook.ob_coin,
+          })
+          .execute();
 
-      if (!unlockResult.affected || unlockResult.affected < 1) {
-        throw new BadRequestException(
-          'Wallet lock balance is not enough to unlock',
-        );
+        if (!unlockResult.affected || unlockResult.affected < 1) {
+          throw new BadRequestException(
+            'Wallet lock balance is not enough to unlock',
+          );
+        }
       }
 
       orderBook.ob_status = OrderBookStatus.FAILED;
