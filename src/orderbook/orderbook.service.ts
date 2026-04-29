@@ -436,6 +436,11 @@ export class OrderbookService {
 
       if (dto.option === OrderBookOption.BUY) {
         const dailyLimitUsd = this.getBuyerDailyUsdLimit(currentUser.ulevel);
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(startOfDay);
+        endOfDay.setDate(endOfDay.getDate() + 1);
+
         const currentBuyOrderbookUsdRaw = await manager
           .createQueryBuilder(OrderBook, 'ob')
           .select(
@@ -444,6 +449,8 @@ export class OrderbookService {
           )
           .where('ob.ob_user_id = :userId', { userId })
           .andWhere('ob.ob_option = :buyOpt', { buyOpt: OrderBookOption.BUY })
+          .andWhere('ob.ob_created_at >= :startOfDay', { startOfDay })
+          .andWhere('ob.ob_created_at < :endOfDay', { endOfDay })
           .getRawOne<{ total: string | number | null }>();
 
         const currentBuyOrderbookUsd = Number(
