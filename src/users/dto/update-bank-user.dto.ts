@@ -14,12 +14,6 @@ export class UpdateBankUserDto {
   @MaxLength(255)
   bankBranch?: string | null;
 
-  @ApiPropertyOptional({ example: 'NGUYEN VAN A' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  bankAccountName?: string;
-
   @ApiPropertyOptional({ example: '0123456789' })
   @IsOptional()
   @IsString()

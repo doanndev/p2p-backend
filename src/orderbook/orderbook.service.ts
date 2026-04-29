@@ -407,6 +407,19 @@ export class OrderbookService {
         );
       }
 
+      const currentUser = await manager.findOne(User, {
+        where: { uid: userId },
+        select: ['uid', 'ulevel', 'uverify'],
+      });
+      if (!currentUser) {
+        throw new NotFoundException('User not found');
+      }
+      if (currentUser.uverify !== true) {
+        throw new ForbiddenException(
+          'Identity not verified. Please verify your identity to continue.',
+        );
+      }
+
       const [coinExists, nationalExists] = await Promise.all([
         manager.exists(Coin, { where: { coin_id: dto.coinId } }),
         manager.exists(NationalCurrency, {
@@ -422,15 +435,7 @@ export class OrderbookService {
       }
 
       if (dto.option === OrderBookOption.BUY) {
-        const user = await manager.findOne(User, {
-          where: { uid: userId },
-          select: ['uid', 'ulevel'],
-        });
-        if (!user) {
-          throw new NotFoundException('User not found');
-        }
-
-        const dailyLimitUsd = this.getBuyerDailyUsdLimit(user.ulevel);
+        const dailyLimitUsd = this.getBuyerDailyUsdLimit(currentUser.ulevel);
         const currentBuyOrderbookUsdRaw = await manager
           .createQueryBuilder(OrderBook, 'ob')
           .select(
@@ -447,7 +452,7 @@ export class OrderbookService {
         const nextTotalUsd = currentBuyOrderbookUsd + amount * price;
         if (nextTotalUsd > dailyLimitUsd) {
           throw new BadRequestException(
-            `Buy limit exceeded. Your current level (${user.ulevel}) allows up to ${dailyLimitUsd} USD`,
+            `Buy limit exceeded. Your current level (${currentUser.ulevel}) allows up to ${dailyLimitUsd} USD`,
           );
         }
       }

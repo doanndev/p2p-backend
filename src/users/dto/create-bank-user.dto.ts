@@ -14,12 +14,6 @@ export class CreateBankUserDto {
   @MaxLength(255)
   bankBranch?: string | null;
 
-  @ApiProperty({ example: 'NGUYEN VAN A' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(255)
-  bankAccountName: string;
-
   @ApiProperty({ example: '0123456789' })
   @IsString()
   @IsNotEmpty()
