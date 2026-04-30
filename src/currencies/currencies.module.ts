@@ -9,5 +9,6 @@ import { NationalCurrency } from '../orderbook/entities/national-currency.entity
   imports: [TypeOrmModule.forFeature([Coin, NationalCurrency])],
   controllers: [CurrenciesController],
   providers: [CurrenciesService],
+  exports: [CurrenciesService],
 })
 export class CurrenciesModule {}

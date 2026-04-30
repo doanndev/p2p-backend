@@ -35,6 +35,7 @@ import {
   TRANSACTION_EXPIRY_DELAY_MS,
 } from './transaction-expiry-queue.service';
 import { SmartRefService } from '../smart-ref/smart-ref.service';
+import { CurrenciesService } from '../currencies/currencies.service';
 
 @Injectable()
 export class TransactionService {
@@ -57,6 +58,7 @@ export class TransactionService {
     private readonly transactionExpiryQueue: TransactionExpiryQueueService,
     private readonly userLevelUpWorker: UserLevelUpWorker,
     private readonly smartRefService: SmartRefService,
+    private readonly currenciesService: CurrenciesService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -69,11 +71,42 @@ export class TransactionService {
 
   private getOrderbookBuyLockTotal(amount: number): number {
     const feePercent = Number(process.env.FEE_PERCENT) || 0;
-    return this.toNumber(this.formatAmount(amount + (amount * feePercent) / 100));
+    return this.toNumber(
+      this.formatAmount(amount + (amount * feePercent) / 100),
+    );
   }
 
   private generateReferenceCode(): string {
     return `TX-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  }
+
+  private async resolveUsdRateForNationalCurrency(
+    nationalSymbol: string,
+  ): Promise<number> {
+    const normalizedNational = (nationalSymbol || '').trim().toUpperCase();
+    if (!normalizedNational) {
+      throw new BadRequestException('National currency symbol is required');
+    }
+
+    if (normalizedNational === 'USD' || normalizedNational === 'USDT') {
+      return 1;
+    }
+
+    const rate = await this.currenciesService.getCoinCurrencyRate(
+      'USDT',
+      normalizedNational,
+    );
+    if (
+      typeof rate?.rate !== 'number' ||
+      Number.isNaN(rate.rate) ||
+      rate.rate <= 0
+    ) {
+      throw new BadRequestException(
+        `Unable to resolve USD rate for national currency ${normalizedNational}`,
+      );
+    }
+
+    return rate.rate;
   }
 
   private toPublicUser(user: User | null | undefined) {
@@ -416,6 +449,11 @@ export class TransactionService {
         const amount = dto.amount;
         const price = this.toNumber(orderBook.ob_price);
         const total = amount * price;
+        const nationalPerUsdRate = await this.resolveUsdRateForNationalCurrency(
+          orderBook.ob_national_symbol,
+        );
+        const priceUsd = price / nationalPerUsdRate;
+        const totalUsd = total / nationalPerUsdRate;
 
         const expiresAt = new Date(Date.now() + TRANSACTION_EXPIRY_DELAY_MS);
         const transaction = manager.create(Transaction, {
@@ -435,9 +473,9 @@ export class TransactionService {
           trans_national_symbol: orderBook.ob_national_symbol,
           trans_amount: this.formatAmount(amount),
           trans_price: this.formatAmount(price),
-          trans_price_usd: this.formatAmount(price),
+          trans_price_usd: this.formatAmount(priceUsd),
           trans_total_price: this.formatAmount(total),
-          trans_total_usd: this.formatAmount(total),
+          trans_total_usd: this.formatAmount(totalUsd),
           trans_dispute_status: false,
           trans_time_bank: null,
           trans_status: TransactionStatus.PENDING,
@@ -689,10 +727,7 @@ export class TransactionService {
             ? this.toNumber(this.formatAmount(amount + feeAmount))
             : amount;
 
-      const toBuyer =
-        posterIsBuyer && feeAmount > 0
-          ? amount
-          : amount;
+      const toBuyer = posterIsBuyer && feeAmount > 0 ? amount : amount;
 
       const sellerWallet = await manager.findOne(UserWallet, {
         where: {

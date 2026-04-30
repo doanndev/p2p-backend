@@ -19,12 +19,14 @@ import { Admin } from '../admins/entities/admin.entity';
 import { TransactionExpiryQueueService } from './transaction-expiry-queue.service';
 import { UsersModule } from '../users/users.module';
 import { SmartRefModule } from '../smart-ref/smart-ref.module';
+import { CurrenciesModule } from '../currencies/currencies.module';
 
 @Module({
   imports: [
     SettingsModule,
     UsersModule,
     SmartRefModule,
+    CurrenciesModule,
     TypeOrmModule.forFeature([
       OrderBook,
       NationalCurrency,
