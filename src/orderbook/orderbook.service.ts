@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -55,6 +56,8 @@ type CreatorTransactionReputation = {
 
 @Injectable()
 export class OrderbookService {
+  private readonly logger = new Logger(OrderbookService.name);
+
   constructor(
     @InjectRepository(OrderBook)
     private readonly orderBookRepository: Repository<OrderBook>,
@@ -497,6 +500,20 @@ export class OrderbookService {
           this.formatAmount(amount + (amount * feePercent) / 100),
         );
         const amountStr = this.formatAmount(lockTotal);
+
+        this.logger.debug(
+          `[orderbook:create:sell-balance-check] ${JSON.stringify({
+            userId,
+            coinId: dto.coinId,
+            amount,
+            feePercent,
+            lockTotal,
+            requestedAmountForWalletDeduction: amountStr,
+            walletBalance: Number(wallet.uw_balance ?? 0),
+            walletLockBalance: Number(wallet.uw_lock_balance ?? 0),
+          })}`,
+        );
+
         // Một câu UPDATE nguyên tử: trừ khả dụng + cộng lock, chỉ khi đủ số dư (ACID, tránh lệch decimal khi save entity).
         const updateResult = await manager
           .createQueryBuilder()
@@ -518,6 +535,19 @@ export class OrderbookService {
           .execute();
 
         if (!updateResult.affected || updateResult.affected < 1) {
+          this.logger.warn(
+            `[orderbook:create:sell-balance-insufficient] ${JSON.stringify({
+              userId,
+              coinId: dto.coinId,
+              amount,
+              feePercent,
+              lockTotal,
+              requestedAmountForWalletDeduction: amountStr,
+              walletBalance: Number(wallet.uw_balance ?? 0),
+              walletLockBalance: Number(wallet.uw_lock_balance ?? 0),
+              updateAffected: updateResult.affected ?? 0,
+            })}`,
+          );
           throw new BadRequestException('Insufficient available balance');
         }
       }
