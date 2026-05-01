@@ -114,7 +114,23 @@ export function createSocketAuthMiddleware(
       const adminToken =
         (socket.handshake.auth?.admin_access_token as string | undefined) ||
         cookies['admin_access_token'];
-      const token = adminToken || userToken;
+      const selectedTokenType = isAdminOrigin ? 'admin' : 'user';
+      const token = isAdminOrigin ? adminToken : userToken;
+
+      logger?.debug(
+        `[socket-auth:token-selection] ${JSON.stringify({
+          socketId: socket.id,
+          namespace: socket.nsp?.name,
+          origin: socketOrigin,
+          isAdminOrigin,
+          isUserOrigin,
+          hasUserToken: Boolean(userToken),
+          hasAdminToken: Boolean(adminToken),
+          selectedTokenType,
+          selectedTokenPresent: Boolean(token),
+        })}`,
+      );
+
       if (!token) {
         return next(new Error('unauthorized'));
       }
@@ -127,7 +143,7 @@ export function createSocketAuthMiddleware(
         return next(new Error('unauthorized'));
       }
 
-      if (adminToken) {
+      if (selectedTokenType === 'admin') {
         // Nếu là admin token thì origin phải là admin origin
         if (!isAdminOrigin) {
           logger?.warn(
