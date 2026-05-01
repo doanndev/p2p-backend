@@ -29,7 +29,10 @@ function roomName(transactionId: number) {
 
 @WebSocketGateway({
   namespace: '/chat',
-  cors: { origin: true, credentials: true },
+  cors: {
+    origin: true, // Cho phép tất cả origins (middleware sẽ xác thực)
+    credentials: true,
+  },
 })
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect

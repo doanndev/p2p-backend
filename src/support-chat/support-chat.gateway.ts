@@ -35,7 +35,10 @@ function supportRoomName(conversationId: number) {
 
 @WebSocketGateway({
   namespace: '/support-chat',
-  cors: { origin: true, credentials: true },
+  cors: {
+    origin: true, // Cho phép tất cả origins (middleware sẽ xác thực)
+    credentials: true,
+  },
 })
 export class SupportChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect

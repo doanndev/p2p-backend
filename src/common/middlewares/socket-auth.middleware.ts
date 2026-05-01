@@ -48,11 +48,65 @@ export function createSocketAuthMiddleware(
     logger,
   } = options;
 
+  // Lấy danh sách URLs được phép
+  const frontendUrlsRaw =
+    configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
+  const frontendUrls = frontendUrlsRaw
+    .split(',')
+    .map((url) => url.trim())
+    .filter((url) => url);
+
+  const adminFrontendUrlsRaw =
+    configService.get<string>('ADMIN_FRONTEND_URLS') || '';
+  const adminFrontendUrls = adminFrontendUrlsRaw
+    .split(',')
+    .map((url) => url.trim())
+    .filter((url) => url);
+
+  /**
+   * Kiểm tra xem origin có khớp với danh sách URLs được phép không
+   */
+  function matchesUrls(origin: string, urls: string[]): boolean {
+    if (!origin) return false;
+    return urls.some((url) => {
+      const normalizedUrl = url.replace(/\/$/, '');
+      const regex = new RegExp(
+        `^https?://([a-z0-9-]+\\.)?${normalizedUrl
+          .replace('http://', '')
+          .replace('https://', '')
+          .replace(/\./g, '\\.')}(:\\d+)?$`,
+      );
+      return regex.test(origin);
+    });
+  }
+
   return async (socket: AuthenticatedSocket, next: NextFn) => {
     try {
       const cookieHeader =
         (socket.handshake.headers?.cookie as string | undefined) ?? undefined;
       const cookies = parseCookie(cookieHeader);
+
+      // Lấy origin từ handshake headers
+      const socketOrigin =
+        (socket.handshake.headers.origin as string | undefined) ||
+        (socket.handshake.headers.referer as string | undefined) ||
+        '';
+
+      // Xác định origin type
+      const isAdminOrigin = matchesUrls(socketOrigin, adminFrontendUrls);
+      const isUserOrigin = matchesUrls(socketOrigin, frontendUrls);
+      const originType = isAdminOrigin ? 'admin' : 'user';
+
+      logger?.debug(
+        `[socket-auth:origin-check] ${JSON.stringify({
+          socketId: socket.id,
+          namespace: socket.nsp?.name,
+          origin: socketOrigin,
+          isAdminOrigin,
+          isUserOrigin,
+          originType,
+        })}`,
+      );
 
       const userToken =
         (socket.handshake.auth?.access_token as string | undefined) ||
@@ -74,6 +128,24 @@ export function createSocketAuthMiddleware(
       }
 
       if (adminToken) {
+        // Nếu là admin token thì origin phải là admin origin
+        if (!isAdminOrigin) {
+          logger?.warn(
+            `[socket-auth:origin-mismatch] ${JSON.stringify({
+              socketId: socket.id,
+              namespace: socket.nsp?.name,
+              origin: socketOrigin,
+              tokenType: 'admin',
+              expectedOrigin: 'admin_frontend',
+            })}`,
+          );
+          return next(
+            new Error(
+              'Admin token can only be used from authorized admin origins.',
+            ),
+          );
+        }
+
         const admin = await adminRepository.findOne({
           where: { admin_id: actorId },
         });
@@ -85,6 +157,24 @@ export function createSocketAuthMiddleware(
           ? { type: 'admin', id: admin.admin_id, admin }
           : { type: 'admin', id: admin.admin_id };
         return next();
+      }
+
+      // Nếu là user token thì origin phải là user origin hoặc không có origin
+      if (isAdminOrigin) {
+        logger?.warn(
+          `[socket-auth:origin-mismatch] ${JSON.stringify({
+            socketId: socket.id,
+            namespace: socket.nsp?.name,
+            origin: socketOrigin,
+            tokenType: 'user',
+            expectedOrigin: 'frontend',
+          })}`,
+        );
+        return next(
+          new Error(
+            'Invalid token type for admin origin. Please use admin credentials.',
+          ),
+        );
       }
 
       const user = await userRepository.findOne({
