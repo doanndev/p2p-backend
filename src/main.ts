@@ -23,7 +23,18 @@ async function bootstrap() {
   // Lấy danh sách các domain từ biến môi trường, nếu không thì mặc định là localhost
   const frontendUrlsRaw =
     configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
-  const frontendUrls = frontendUrlsRaw.split(','); // Tách các URL nếu có nhiều hơn 1 domain
+  const frontendUrls = frontendUrlsRaw.split(',').map((url) => url.trim()); // Tách các URL nếu có nhiều hơn 1 domain
+
+  // Lấy danh sách admin frontend URLs
+  const adminFrontendUrlsRaw =
+    configService.get<string>('ADMIN_FRONTEND_URLS') || '';
+  const adminFrontendUrls = adminFrontendUrlsRaw
+    .split(',')
+    .map((url) => url.trim())
+    .filter((url) => url); // Filter out empty strings
+
+  // Gộp tất cả URLs được phép cho CORS
+  const allAllowedUrls = [...frontendUrls, ...adminFrontendUrls];
 
   const port = 8000;
 
@@ -35,9 +46,13 @@ async function bootstrap() {
         return callback(null, true);
       }
 
-      const isAllowed = frontendUrls.some((url) => {
+      const isAllowed = allAllowedUrls.some((url) => {
+        const normalizedUrl = url.replace(/\/$/, ''); // Loại bỏ trailing slash
         const regex = new RegExp(
-          `^https?://([a-z0-9-]+\.)?${url.replace('http://', '').replace('https://', '')}$`,
+          `^https?://([a-z0-9-]+\\.)?${normalizedUrl
+            .replace('http://', '')
+            .replace('https://', '')
+            .replace(/\./g, '\\.')}(:\\d+)?$`,
         );
         return regex.test(origin);
       });

@@ -22,7 +22,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         (request) => {
           let token = null;
           if (request && request.cookies) {
-            token = request.cookies['access_token'];
+            // Kiểm tra origin type để lấy token phù hợp
+            const originType = (request as any).originType || 'user';
+
+            // Nếu request từ admin origin, lấy admin_access_token
+            if (originType === 'admin') {
+              token = request.cookies['admin_access_token'];
+            } else {
+              // Nếu request từ user origin, lấy access_token
+              token = request.cookies['access_token'];
+            }
           }
           return token;
         },
@@ -34,6 +43,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(request: any, payload: any): Promise<User> {
+    const originType = (request as any).originType || 'user';
     const userId = payload.sub;
     const user = await this.userRepository.findOne({
       where: { uid: userId },
@@ -41,6 +51,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user) {
       throw new UnauthorizedException('User not found');
+    }
+
+    // Nếu request đến từ admin origin nhưng token không phải admin token thì reject
+    // (Admin access_token sẽ được xử lý bởi AdminJwtStrategy)
+    if (originType === 'admin') {
+      throw new UnauthorizedException(
+        'Invalid token type for admin origin. Please use admin credentials.',
+      );
     }
 
     // Check if user is blocked
