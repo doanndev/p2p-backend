@@ -399,7 +399,7 @@ export class OrderbookService {
         ? undefined
         : this.toNumber(dto.nationalMax);
 
-    const feePercent = Number(process.env.FEE_PERCENT);
+    const feePercent = Number(process.env.FEE_PERCENT) || 0;
 
     const result = await this.dataSource.transaction(async (manager) => {
       if (dto.option === OrderBookOption.SELL && !dto.buId) {
@@ -1192,7 +1192,7 @@ export class OrderbookService {
   }
 
   async deleteOrderBook(userId: number, id: number) {
-    const feePercent = Number(process.env.FEE_PERCENT);
+    const feePercent = Number(process.env.FEE_PERCENT) || 0;
 
     return this.dataSource.transaction(async (manager) => {
       const orderBook = await manager.findOne(OrderBook, {

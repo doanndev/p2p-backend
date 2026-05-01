@@ -676,7 +676,7 @@ export class TransactionService {
   async confirmReceived(userId: number, id: number) {
     const refferalFeePercent =
       await this.adminSettingsConfigService.getSmartrefFeePercent();
-    const feePercent = Number(process.env.FEE_PERCENT);
+    const feePercent = Number(process.env.FEE_PERCENT) || 0;
 
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {

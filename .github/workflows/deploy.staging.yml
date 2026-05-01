@@ -123,6 +123,7 @@ jobs:
             echo "APP_DESCRIPTION=${{ secrets.APP_DESCRIPTION }}" >> "$ENV_FILE"
             echo "APP_LOGO=${{ secrets.APP_LOGO }}" >> "$ENV_FILE"
             echo "COINGECKO_SIMPLE_PRICE_URL=${{ secrets.COINGECKO_SIMPLE_PRICE_URL }}" >> "$ENV_FILE"
+            echo "FEE_PERCENT=${{ secrets.FEE_PERCENT }}" >> "$ENV_FILE"
 
             docker pull "$IMAGE"
             docker rm -f "$CONTAINER_NAME" || true
