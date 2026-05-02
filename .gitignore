@@ -65,3 +65,7 @@ src/super-admin/
 #documents
 documents/
 index.html
+
+.claudeignore
+CLAUDE.md
+.cursor/*

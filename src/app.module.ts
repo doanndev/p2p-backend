@@ -1,9 +1,12 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
 import { appConfig } from './config/app.config'; // Import file config
+import { BlockedUserMiddleware } from './middleware/blocked-user.middleware';
+import { User } from './users/entities/user.entity';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RpcRateLimitModule } from './common/rpc-rate-limit.module';
@@ -25,6 +28,17 @@ import { SmartRefModule } from './smart-ref/smart-ref.module';
     ScheduleModule.forRoot(),
     BullMqModule,
     RpcRateLimitModule,
+    TypeOrmModule.forFeature([User]),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET') || 'your-secret-key',
+        signOptions: {
+          expiresIn: '15m',
+        },
+      }),
+      inject: [ConfigService],
+    }),
     TypeOrmModule.forRootAsync({
       useFactory: (configService: ConfigService) =>
         databaseConfig(configService),
@@ -42,7 +56,7 @@ import { SmartRefModule } from './smart-ref/smart-ref.module';
     SmartRefModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
-  providers: [AppService],
+  providers: [AppService, BlockedUserMiddleware],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

@@ -8,7 +8,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User, UserStatus } from '../../users/entities/user.entity';
+import { User } from '../../users/entities/user.entity';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -61,12 +61,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       );
     }
 
-    // Check if user is blocked
-    if (user.ustatus === UserStatus.BLOCK) {
-      throw new ForbiddenException(
-        'Your account has been blocked. Please contact support for assistance.',
-      );
-    }
+    // Trạng thái block được kiểm tra tập trung ở BlockedUserMiddleware
 
     // Check email activation - but allow bypass for verify email endpoints
     const shouldBypassEmailCheck = request?._emailVerificationBypass === true;
