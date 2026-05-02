@@ -126,7 +126,7 @@ export class UsersController {
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.usersService.login(loginDto);
+    const result = await this.usersService.login(loginDto, res);
 
     // Set httpOnly cookies với domain nếu có
     const accessTokenOptions: any = {
@@ -196,7 +196,7 @@ export class UsersController {
     @Body() googleLoginDto: GoogleLoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.usersService.loginWithGoogle(googleLoginDto);
+    const result = await this.usersService.loginWithGoogle(googleLoginDto, res);
 
     const accessTokenOptions: any = {
       httpOnly: result.cookieOptions.access_token.httpOnly,
@@ -254,7 +254,7 @@ export class UsersController {
       throw new HttpException('Refresh token not found in cookies', 419);
     }
 
-    const result = await this.usersService.refreshToken(refreshToken);
+    const result = await this.usersService.refreshToken(refreshToken, res);
 
     // Set httpOnly cookies với domain nếu có
     const accessTokenOptions: any = {
@@ -808,22 +808,7 @@ export class UsersController {
     // Call logout service
     const result = await this.usersService.logout(userId, ipAddress, userAgent);
 
-    // Clear cookies by setting them to expire in the past
-    res.cookie('access_token', '', {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      expires: new Date(0),
-      path: '/',
-    });
-
-    res.cookie('refresh_token', '', {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      expires: new Date(0),
-      path: '/',
-    });
+    this.usersService.clearAuthCookies(res);
 
     return result;
   }

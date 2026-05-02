@@ -3,6 +3,7 @@ import {
   Injectable,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
   InternalServerErrorException,
   HttpException,
   HttpStatus,
@@ -11,6 +12,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Response } from 'express';
 import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, UserSex, UserStatus } from './entities/user.entity';
@@ -125,6 +127,24 @@ export class UsersService {
       path: '/',
       ...(domain && { domain }),
     };
+  }
+
+  /**
+   * Xóa cookie auth (logout phía client). Dùng cho logout, user bị block, v.v.
+   * Khớp thuộc tính với getCookieOptions() để browser thật sự gỡ cookie đã set.
+   */
+  clearAuthCookies(res: Response): void {
+    const base = this.getCookieOptions();
+    const cleared = {
+      httpOnly: base.httpOnly,
+      secure: base.secure,
+      sameSite: base.sameSite,
+      path: base.path,
+      expires: new Date(0),
+      ...(base.domain && { domain: base.domain }),
+    };
+    res.cookie('access_token', '', cleared);
+    res.cookie('refresh_token', '', cleared);
   }
 
   async register(registerDto: RegisterDto): Promise<User> {
@@ -318,7 +338,10 @@ export class UsersService {
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{
+  async login(
+    loginDto: LoginDto,
+    res?: Response,
+  ): Promise<{
     user: User;
     tokens: { access_token: string; refresh_token: string };
     response: {
@@ -372,7 +395,10 @@ export class UsersService {
 
     // Check if user is blocked
     if (user.ustatus === UserStatus.BLOCK) {
-      throw new BadRequestException(
+      if (res) {
+        this.clearAuthCookies(res);
+      }
+      throw new ForbiddenException(
         'Your account has been blocked. Please contact support for assistance.',
       );
     }
@@ -428,7 +454,10 @@ export class UsersService {
     };
   }
 
-  async loginWithGoogle(googleLoginDto: GoogleLoginDto): Promise<{
+  async loginWithGoogle(
+    googleLoginDto: GoogleLoginDto,
+    res?: Response,
+  ): Promise<{
     user: User;
     tokens: { access_token: string; refresh_token: string };
     response: {
@@ -574,7 +603,10 @@ export class UsersService {
     }
 
     if (user.ustatus === UserStatus.BLOCK) {
-      throw new BadRequestException(
+      if (res) {
+        this.clearAuthCookies(res);
+      }
+      throw new ForbiddenException(
         'Your account has been blocked. Please contact support for assistance.',
       );
     }
@@ -660,7 +692,10 @@ export class UsersService {
     };
   }
 
-  async refreshToken(refreshToken: string): Promise<{
+  async refreshToken(
+    refreshToken: string,
+    res?: Response,
+  ): Promise<{
     user: User;
     tokens: { access_token: string; refresh_token: string };
     response: {
@@ -714,7 +749,10 @@ export class UsersService {
 
       // Check if user is blocked
       if (user.ustatus === UserStatus.BLOCK) {
-        throw new BadRequestException(
+        if (res) {
+          this.clearAuthCookies(res);
+        }
+        throw new ForbiddenException(
           'Your account has been blocked. Please contact support for assistance.',
         );
       }
