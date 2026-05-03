@@ -27,6 +27,7 @@ import { UserSecurityController } from './user-security.controller';
 import { UserSecurityService } from './user-security.service';
 import { UserLevelUpWorker } from './user-level-up.worker';
 import { SmartRefModule } from '../smart-ref/smart-ref.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { SmartRefModule } from '../smart-ref/smart-ref.module';
     ConfigModule,
     SystemsModule,
     SmartRefModule,
+    NotificationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

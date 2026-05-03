@@ -47,6 +47,8 @@ import { UserVerifyStatus } from './entities/user-verify.entity';
 import { UserWallet, WalletType } from '../wallets/entities/user-wallet.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { SmartRefService } from '../smart-ref/smart-ref.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from './entities/notification.entity';
 
 @Injectable()
 export class UsersService {
@@ -80,6 +82,7 @@ export class UsersService {
     private configService: ConfigService,
     private googleAuthService: GoogleAuthService,
     private smartRefService: SmartRefService,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -1586,6 +1589,17 @@ export class UsersService {
             );
           });
       }
+
+      await this.notificationsService.createForUser({
+        userId,
+        type: NotificationType.SYSTEM,
+        title: 'KYC submitted for review',
+        message: 'Your KYC paper proof has been received and is pending admin review.',
+        data: {
+          verification_id: savedVerify.uv_id,
+          status: savedVerify.uv_status,
+        },
+      });
 
       const response = {
         statusCode: 200,

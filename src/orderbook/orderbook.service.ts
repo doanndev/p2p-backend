@@ -31,6 +31,8 @@ import {
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CacheService } from '../systems/cache.service';
 import { EmailService } from '../systems/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../users/entities/notification.entity';
 type OrderbookBankChangeRequestPayload = {
   orderbookId: number;
   bankUserId: number;
@@ -77,6 +79,7 @@ export class OrderbookService {
     private readonly cacheService: CacheService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -979,6 +982,19 @@ export class OrderbookService {
         .catch(() => undefined);
     }
 
+    await this.notificationsService.createForUser({
+      userId,
+      type: NotificationType.SYSTEM,
+      title: 'Bank change request submitted',
+      message:
+        'Your orderbook bank change request has been submitted and is waiting for admin approval.',
+      data: {
+        orderbook_id: orderBookId,
+        bank_user_id: bankUserId,
+        requested_at: payload.requestedAt,
+      },
+    });
+
     return {
       message: 'Bank change request submitted and waiting for admin approval',
       orderbookId: orderBookId,
@@ -1134,6 +1150,21 @@ export class OrderbookService {
       this.getOrderbookBankChangeRequestKey(orderbookId),
     );
     await this.removeOrderbookBankChangeRequestFromIndex(orderbookId);
+
+    await this.notificationsService.createForUser({
+      userId: request.requestedByUserId,
+      type: NotificationType.SYSTEM,
+      title: approve
+        ? 'Bank change request approved'
+        : 'Bank change request rejected',
+      message: approve
+        ? `Your bank change request for orderbook #${orderbookId} has been approved.`
+        : `Your bank change request for orderbook #${orderbookId} has been rejected.`,
+      data: {
+        orderbook_id: orderbookId,
+        approved: approve,
+      },
+    });
 
     return {
       message: approve

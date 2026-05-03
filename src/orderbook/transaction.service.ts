@@ -36,6 +36,8 @@ import {
 } from './transaction-expiry-queue.service';
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CurrenciesService } from '../currencies/currencies.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../users/entities/notification.entity';
 
 @Injectable()
 export class TransactionService {
@@ -59,6 +61,7 @@ export class TransactionService {
     private readonly userLevelUpWorker: UserLevelUpWorker,
     private readonly smartRefService: SmartRefService,
     private readonly currenciesService: CurrenciesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -290,6 +293,23 @@ export class TransactionService {
         'Expired: no action within the allowed time window';
       await manager.save(Transaction, transaction);
     });
+
+    const updated = await this.transactionRepository.findOne({
+      where: { trans_id: transactionId },
+    });
+    if (updated) {
+      await this.notifyUsers(
+        [updated.trans_user_buy, updated.trans_user_sell],
+        'Transaction expired',
+        updated.trans_message ||
+          'The transaction expired before the required action was completed.',
+        {
+          transaction_id: updated.trans_id,
+          reference_code: updated.transs_reference_code,
+          status: updated.trans_status,
+        },
+      );
+    }
   }
 
   private async sendPaymentConfirmedEmailToSeller(
@@ -335,6 +355,20 @@ export class TransactionService {
       totalPrice: transaction.trans_total_price,
       nationalSymbol: transaction.trans_national_symbol,
     });
+  }
+
+  private async notifyUsers(userIds: number[], title: string, message: string, data: Record<string, any>) {
+    await Promise.allSettled(
+      [...new Set(userIds.filter(Boolean))].map((userId) =>
+        this.notificationsService.createForUser({
+          userId,
+          type: NotificationType.SYSTEM,
+          title,
+          message,
+          data,
+        }),
+      ),
+    );
   }
 
   private async loadTransactionWithUsers(
@@ -509,6 +543,17 @@ export class TransactionService {
         );
       });
 
+    await this.notifyUsers(
+      [response.user_buy?.id, response.user_sell?.id],
+      'New transaction created',
+      `A new transaction ${response.reference_code} has been created and is awaiting payment confirmation.`,
+      {
+        transaction_id: response.id,
+        reference_code: response.reference_code,
+        status: response.status,
+      },
+    );
+
     return response;
   }
 
@@ -670,7 +715,19 @@ export class TransactionService {
       this.transactionRepository,
       saved.trans_id,
     );
-    return this.toTransactionResponse(hydrated ?? saved);
+    const response = this.toTransactionResponse(hydrated ?? saved);
+    await this.notificationsService.createForUser({
+      userId: saved.trans_user_sell,
+      type: NotificationType.SYSTEM,
+      title: 'Buyer confirmed payment',
+      message: `Buyer has marked payment as completed for transaction ${saved.transs_reference_code}. Please verify and confirm receipt.`,
+      data: {
+        transaction_id: saved.trans_id,
+        reference_code: saved.transs_reference_code,
+        status: saved.trans_status,
+      },
+    });
+    return response;
   }
 
   async confirmReceived(userId: number, id: number) {
@@ -824,6 +881,17 @@ export class TransactionService {
       });
     }
 
+    await this.notifyUsers(
+      [result.buyerId, result.sellerId],
+      'Transaction completed',
+      `Transaction ${result.response.reference_code} has been completed successfully.`,
+      {
+        transaction_id: result.response.id,
+        reference_code: result.response.reference_code,
+        status: result.response.status,
+      },
+    );
+
     return result.response;
   }
 
@@ -902,6 +970,18 @@ export class TransactionService {
         saved.trans_id,
       );
       return this.toTransactionResponse(hydrated ?? saved);
+    }).then(async (response) => {
+      await this.notifyUsers(
+        [response.user_buy?.id, response.user_sell?.id],
+        'Transaction cancelled',
+        `Transaction ${response.reference_code} has been cancelled.`,
+        {
+          transaction_id: response.id,
+          reference_code: response.reference_code,
+          status: response.status,
+        },
+      );
+      return response;
     });
   }
 
@@ -987,7 +1067,20 @@ export class TransactionService {
     }
 
     const hydrated = await this.findDisputeWithRelations(saved.dispute_id);
-    return this.toDisputeResponse(hydrated ?? saved);
+    const response = this.toDisputeResponse(hydrated ?? saved);
+    await this.notificationsService.createForUser({
+      userId: dispute.dispute_responder_id,
+      type: NotificationType.SECURITY,
+      title: 'New dispute opened',
+      message: `A dispute has been opened for transaction ${tx.transs_reference_code}. Please review the dispute details.`,
+      data: {
+        dispute_id: response.id,
+        transaction_id: tx.trans_id,
+        reference_code: tx.transs_reference_code,
+        status: response.status,
+      },
+    });
+    return response;
   }
 
   async getMyDisputes(userId: number) {

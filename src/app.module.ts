@@ -21,6 +21,7 @@ import { SupportChatModule } from './support-chat/support-chat.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { BullMqModule } from './infrastructure/bullmq/bullmq.module';
 import { SmartRefModule } from './smart-ref/smart-ref.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { SmartRefModule } from './smart-ref/smart-ref.module';
     SupportChatModule,
     CurrenciesModule,
     SmartRefModule,
+    NotificationsModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
   providers: [AppService, BlockedUserMiddleware],

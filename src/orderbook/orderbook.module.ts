@@ -20,6 +20,7 @@ import { TransactionExpiryQueueService } from './transaction-expiry-queue.servic
 import { UsersModule } from '../users/users.module';
 import { SmartRefModule } from '../smart-ref/smart-ref.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { CurrenciesModule } from '../currencies/currencies.module';
     UsersModule,
     SmartRefModule,
     CurrenciesModule,
+    NotificationsModule,
     TypeOrmModule.forFeature([
       OrderBook,
       NationalCurrency,

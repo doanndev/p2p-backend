@@ -8,6 +8,7 @@ import {
   Notification,
   NotificationType,
 } from '../users/entities/notification.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const UNLOCK_BATCH_SIZE = 100;
 
@@ -19,6 +20,7 @@ export class P2pCoinUnlockSchedulerService {
     private readonly dataSource: DataSource,
     @InjectRepository(Notification)
     private readonly notificationRepository: Repository<Notification>,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async notifyBuyerUnlockFailure(
@@ -39,16 +41,14 @@ export class P2pCoinUnlockSchedulerService {
         return;
       }
 
-      const row = this.notificationRepository.create({
-        notif_user_id: buyerId,
-        notif_type: NotificationType.SYSTEM,
-        notif_title: 'Transaction settlement issue',
-        notif_message:
+      await this.notificationsService.createForUser({
+        userId: buyerId,
+        type: NotificationType.SYSTEM,
+        title: 'Transaction settlement issue',
+        message:
           'An error occurred while releasing coins for your completed trade. Please contact support for assistance.',
-        notif_data: { transaction_id: transId },
-        notif_is_read: false,
+        data: { transaction_id: transId },
       });
-      await this.notificationRepository.save(row);
     } catch (err) {
       this.logger.error(
         `Failed to persist unlock-failure notification user=${buyerId} trans=${transId}`,
