@@ -60,8 +60,8 @@ export class NotificationsController {
   }
 
   @Sse('stream')
-  @ApiOperation({ summary: 'Nhận thông báo realtime qua SSE' })
-  @ApiOkResponse({ description: 'SSE stream connected' })
+  @ApiOperation({ summary: 'Nhận thông báo realtime qua' })
+  @ApiOkResponse({ description: 'Stream connected' })
   stream(
     @Req() req: Request & { user: { uid: number } },
   ): Observable<MessageEvent> {
