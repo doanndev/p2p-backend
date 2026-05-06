@@ -631,9 +631,8 @@ export class OrderbookService {
   async getOrderBooks(query: QueryOrderbooksDto) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const qb = this.orderBookRepository
-      .createQueryBuilder('ob')
-      .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING });
+    const qb = this.orderBookRepository.createQueryBuilder('ob');
+    // .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING });
 
     // Không join user ở đây: skip/take + join kích hoạt DISTINCT pagination của TypeORM
     // và dễ lỗi khi ORDER BY theo alias từ addSelect (mixed buy/sell sort).
@@ -859,9 +858,9 @@ export class OrderbookService {
     if (!orderBook) {
       throw new NotFoundException('Order book not found');
     }
-    if (orderBook.ob_status !== OrderBookStatus.PENDING) {
-      throw new NotFoundException('Order book not found');
-    }
+    // if (orderBook.ob_status !== OrderBookStatus.PENDING) {
+    //   throw new NotFoundException('Order book not found');
+    // }
 
     const setting = await this.settingBankOrderRepository.findOne({
       where: { sbo_order_book: id },
