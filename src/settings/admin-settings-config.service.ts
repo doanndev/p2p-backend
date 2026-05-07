@@ -224,6 +224,26 @@ export class AdminSettingsConfigService {
     return Math.min(fromDb, 100);
   }
 
+  /**
+   * Phí giao dịch orderbook, đơn vị %: `transaction.fee_percent`.
+   * Ưu tiên key mới, fallback key cũ `transaction.fee`, sau đó fallback `.env` (`FEE_PERCENT`), cuối cùng là 0.
+   */
+  async getTransactionFeePercent(): Promise<number> {
+    const fromDbNew = await this.getSettingNumber('transaction.fee_percent');
+    const fromDbLegacy = await this.getSettingNumber('transaction.fee');
+    const fromDb = fromDbNew ?? fromDbLegacy;
+    if (fromDb != null && Number.isFinite(fromDb) && fromDb >= 0) {
+      return Math.min(fromDb, 100);
+    }
+
+    const fromEnv = Number(this.configService.get<string>('FEE_PERCENT'));
+    if (Number.isFinite(fromEnv) && fromEnv >= 0) {
+      return Math.min(fromEnv, 100);
+    }
+
+    return 0;
+  }
+
   /** Lock giờ theo level cho P2P: `transaction.lock_hours_by_level`. */
   async getP2pLockHoursByLevel(): Promise<Record<string, number>> {
     const raw = await this.getSettingRaw('transaction.lock_hours_by_level');
