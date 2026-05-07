@@ -29,6 +29,11 @@ const DEFAULT_SETTINGS = [
   },
   { name: 'config.rpc.rate_limit', type: 'number', value: '50' },
   { name: 'transaction.time_lock_balance', type: 'number', value: null },
+  {
+    name: 'transaction.fee_percent',
+    type: 'number',
+    value: process.env.FEE_PERCENT || '0',
+  },
   { name: 'smartref.fee', type: 'number', value: '0.5' },
   {
     name: 'wallet.sweep.ceo_wallet_percent',
@@ -133,6 +138,7 @@ function mergeFromLegacy(defaults, legacy) {
     'transaction.time_lock_balance',
     legacy.as_time_lock_transaction_balance,
   );
+  setIfPresent('transaction.fee_percent', legacy.as_transaction_fee);
   setIfPresent('transaction.fee', legacy.as_transaction_fee);
 
   return Array.from(map.values());
@@ -188,4 +194,3 @@ async function main() {
 }
 
 main();
-
