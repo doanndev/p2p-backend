@@ -23,6 +23,8 @@ import { BullMqModule } from './infrastructure/bullmq/bullmq.module';
 import { SmartRefModule } from './smart-ref/smart-ref.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SentryModule } from '@sentry/nestjs/setup';
+import { APP_FILTER } from '@nestjs/core';
+import { AllExceptionsSentryFilter } from './exceptions/all-exceptions-sentry.filter';
 
 @Module({
   imports: [
@@ -60,7 +62,14 @@ import { SentryModule } from '@sentry/nestjs/setup';
     NotificationsModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
-  providers: [AppService, BlockedUserMiddleware],
+  providers: [
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsSentryFilter,
+    },
+    AppService,
+    BlockedUserMiddleware,
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
