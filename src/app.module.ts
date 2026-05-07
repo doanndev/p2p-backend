@@ -22,9 +22,11 @@ import { CurrenciesModule } from './currencies/currencies.module';
 import { BullMqModule } from './infrastructure/bullmq/bullmq.module';
 import { SmartRefModule } from './smart-ref/smart-ref.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SentryModule } from '@sentry/nestjs/setup';
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     BullMqModule,
