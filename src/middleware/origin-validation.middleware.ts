@@ -44,8 +44,22 @@ export class OriginValidationMiddleware implements NestMiddleware {
     // Kiểm tra xem origin có phải từ regular frontend không
     const isFrontendOrigin = this.matchesUrls(origin, this.frontendUrls);
 
+    const hasUserToken = Boolean(req.cookies?.['access_token']);
+    const hasAdminToken = Boolean(req.cookies?.['admin_access_token']);
+
+    // Khi origin khớp cả admin và user (thường gặp ở môi trường localhost),
+    // ưu tiên phân loại theo loại token đang có để tránh chọn sai strategy.
+    let originType: 'admin' | 'user' = 'user';
+    if (isAdminOrigin && !isFrontendOrigin) {
+      originType = 'admin';
+    } else if (isAdminOrigin && isFrontendOrigin) {
+      if (hasAdminToken && !hasUserToken) {
+        originType = 'admin';
+      }
+    }
+
     // Ghi lại thông tin origin vào request object
-    (req as any).originType = isAdminOrigin ? 'admin' : 'user';
+    (req as any).originType = originType;
     (req as any).isValidOrigin = isAdminOrigin || isFrontendOrigin || !origin;
 
     next();

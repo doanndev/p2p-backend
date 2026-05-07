@@ -402,7 +402,11 @@ export class OrderbookService {
         ? undefined
         : this.toNumber(dto.nationalMax);
 
-    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+      this.adminSettingsConfigService.getTransactionFeePercent(),
+      this.adminSettingsConfigService.getSmartrefFeePercent(),
+    ]);
+    const totalLockFeePercent = transactionFeePercent + smartrefFeePercent;
 
     const result = await this.dataSource.transaction(async (manager) => {
       if (dto.option === OrderBookOption.SELL && !dto.buId) {
@@ -498,9 +502,9 @@ export class OrderbookService {
           throw new NotFoundException('Wallet not found for selected coin');
         }
 
-        /** Số coin lock vào ví: lệnh bán = amount + phí (hiển thị orderbook vẫn là amount). */
+        /** Số coin lock vào ví: lệnh bán = amount + (transaction fee + smartref fee). */
         const lockTotal = this.toNumber(
-          this.formatAmount(amount + (amount * feePercent) / 100),
+          this.formatAmount(amount + (amount * totalLockFeePercent) / 100),
         );
         const amountStr = this.formatAmount(lockTotal);
 
@@ -509,7 +513,9 @@ export class OrderbookService {
             userId,
             coinId: dto.coinId,
             amount,
-            feePercent,
+            transactionFeePercent,
+            smartrefFeePercent,
+            totalLockFeePercent,
             lockTotal,
             requestedAmountForWalletDeduction: amountStr,
             walletBalance: Number(wallet.uw_balance ?? 0),
@@ -543,7 +549,9 @@ export class OrderbookService {
               userId,
               coinId: dto.coinId,
               amount,
-              feePercent,
+              transactionFeePercent,
+              smartrefFeePercent,
+              totalLockFeePercent,
               lockTotal,
               requestedAmountForWalletDeduction: amountStr,
               walletBalance: Number(wallet.uw_balance ?? 0),
@@ -608,8 +616,6 @@ export class OrderbookService {
 
     // Chia hoa hồng smartref cho các referral của người bán (chỉ áp dụng cho SELL orders - async, không chặn response)
     if (dto.option === OrderBookOption.SELL) {
-      const smartrefFeePercent =
-        await this.adminSettingsConfigService.getSmartrefFeePercent();
       if (smartrefFeePercent > 0) {
         const smartrefRewardAmount = this.toNumber(
           this.formatAmount((amount * smartrefFeePercent) / 100),
@@ -1222,7 +1228,11 @@ export class OrderbookService {
   }
 
   async deleteOrderBook(userId: number, id: number) {
-    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+      this.adminSettingsConfigService.getTransactionFeePercent(),
+      this.adminSettingsConfigService.getSmartrefFeePercent(),
+    ]);
+    const totalUnlockFeePercent = transactionFeePercent + smartrefFeePercent;
 
     return this.dataSource.transaction(async (manager) => {
       const orderBook = await manager.findOne(OrderBook, {
@@ -1242,10 +1252,11 @@ export class OrderbookService {
       if (orderBook.ob_option === OrderBookOption.SELL) {
         const amountRemaining = this.toNumber(orderBook.ob_amount_remaining);
         const unlockTotal =
-          feePercent > 0
+          totalUnlockFeePercent > 0
             ? this.toNumber(
                 this.formatAmount(
-                  amountRemaining + (amountRemaining * feePercent) / 100,
+                  amountRemaining +
+                    (amountRemaining * totalUnlockFeePercent) / 100,
                 ),
               )
             : amountRemaining;

@@ -114,8 +114,15 @@ export function createSocketAuthMiddleware(
       const adminToken =
         (socket.handshake.auth?.admin_access_token as string | undefined) ||
         cookies['admin_access_token'];
-      const selectedTokenType = isAdminOrigin ? 'admin' : 'user';
-      const token = isAdminOrigin ? adminToken : userToken;
+      const selectedTokenType =
+        isAdminOrigin && !isUserOrigin
+          ? 'admin'
+          : isAdminOrigin && isUserOrigin
+            ? adminToken && !userToken
+              ? 'admin'
+              : 'user'
+            : 'user';
+      const token = selectedTokenType === 'admin' ? adminToken : userToken;
 
       logger?.debug(
         `[socket-auth:token-selection] ${JSON.stringify({
