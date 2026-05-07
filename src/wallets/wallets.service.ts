@@ -106,6 +106,9 @@ export class WalletsService implements OnModuleInit {
 
   private static readonly TRON_TRC20_FEE_LIMIT_SUN = 100_000_000;
 
+  /** Phí rút nền tảng (đơn vị coin đang rút/chuyển). 0 = không thu phí. */
+  private static readonly WITHDRAW_FEE = 0;
+
   private debugShortAddr(addr: string, head = 8, tail = 6): string {
     const s = (addr || '').trim();
     if (!s) return '(empty)';
@@ -2348,15 +2351,15 @@ export class WalletsService implements OnModuleInit {
     await this.checkAndSyncBalance(senderUserId, coin.coin_id, network);
 
     const freeWithdrawInfo = await this.checkFreeWithdraw(senderUserId);
-    const WITHDRAW_FEE = 1;
+    const fee = WalletsService.WITHDRAW_FEE;
     let creditAmount = amount;
     const isFreeWithdraw = freeWithdrawInfo.isFree;
 
     if (!isFreeWithdraw) {
-      creditAmount = amount - WITHDRAW_FEE;
+      creditAmount = amount - fee;
       if (creditAmount <= 0) {
         throw new BadRequestException(
-          `Transfer amount must be greater than withdrawal fee (${WITHDRAW_FEE})`,
+          `Transfer amount must be greater than withdrawal fee (${fee})`,
         );
       }
     }
@@ -2609,16 +2612,16 @@ export class WalletsService implements OnModuleInit {
 
     // 3.5. Kiểm tra free withdraw để tính phí (nếu có)
     const freeWithdrawInfo = await this.checkFreeWithdraw(userId);
-    const WITHDRAW_FEE = 1; // Phí rút tiền: 1 USDT (hoặc 1 đơn vị của coin đang rút)
+    const fee = WalletsService.WITHDRAW_FEE;
     let onchainAmount = amount; // Số tiền sẽ rút onchain
     const isFreeWithdraw = freeWithdrawInfo.isFree;
 
-    // Nếu không phải free withdraw, trừ phí 1 USDT
+    // Nếu không phải free withdraw, trừ phí nền tảng (WITHDRAW_FEE)
     if (!isFreeWithdraw) {
-      onchainAmount = amount - WITHDRAW_FEE;
+      onchainAmount = amount - fee;
       if (onchainAmount <= 0) {
         throw new BadRequestException(
-          `Withdraw amount must be greater than withdrawal fee (${WITHDRAW_FEE})`,
+          `Withdraw amount must be greater than withdrawal fee (${fee})`,
         );
       }
     }
