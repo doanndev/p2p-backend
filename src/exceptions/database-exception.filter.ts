@@ -6,10 +6,13 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { QueryFailedError } from 'typeorm';
+import * as Sentry from '@sentry/nestjs';
 
 @Catch(QueryFailedError)
 export class DatabaseExceptionFilter implements ExceptionFilter {
   catch(exception: QueryFailedError, host: ArgumentsHost) {
+    Sentry.captureException(exception);
+
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
