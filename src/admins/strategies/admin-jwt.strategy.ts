@@ -20,22 +20,16 @@ export class AdminJwtStrategy extends PassportStrategy(Strategy, 'admin-jwt') {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         (request) => {
-          let token = null;
-          if (request && request.cookies) {
-            // Ưu tiên lấy admin_access_token nếu có
-            token = request.cookies['admin_access_token'];
-
-            // Nếu không có admin_access_token, kiểm tra xem đây có phải admin origin không
-            // Nếu là admin origin thì reject (vì phải có admin_access_token)
-            if (!token) {
-              const originType = (request as any).originType || 'user';
-              if (originType === 'admin') {
-                // Origin là admin nhưng không có token admin -> invalid
-                // Hãy để code tiếp theo xử lý lỗi
-              }
-            }
+          if (!request || !request.cookies) {
+            return null;
           }
-          return token;
+
+          const originType = (request as any).originType || 'user';
+          if (originType !== 'admin') {
+            return null;
+          }
+
+          return request.cookies['admin_access_token'] || null;
         },
       ]),
       ignoreExpiration: false,

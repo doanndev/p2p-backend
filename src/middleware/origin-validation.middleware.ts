@@ -46,18 +46,15 @@ export class OriginValidationMiddleware implements NestMiddleware {
     // Kiểm tra xem origin có phải từ regular frontend không
     const isFrontendOrigin = this.matchesUrls(origin, this.frontendUrls);
 
-    const hasUserToken = Boolean(req.cookies?.['access_token']);
-    const hasAdminToken = Boolean(req.cookies?.['admin_access_token']);
-
-    // Khi origin khớp cả admin và user (thường gặp ở môi trường localhost),
-    // ưu tiên phân loại theo loại token đang có để tránh chọn sai strategy.
+    // Origin classification must be independent from cookie content.
+    // Client may send both user/admin cookies, but origin must drive auth strategy.
     let originType: 'admin' | 'user' = 'user';
     if (isAdminOrigin && !isFrontendOrigin) {
       originType = 'admin';
     } else if (isAdminOrigin && isFrontendOrigin) {
-      if (hasAdminToken && !hasUserToken) {
-        originType = 'admin';
-      }
+      // When both lists match (common in localhost/shared domains), prefer admin
+      // so admin routes consistently use admin strategy for admin-origin requests.
+      originType = 'admin';
     }
 
     // Ghi lại thông tin origin vào request object
