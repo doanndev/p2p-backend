@@ -8,16 +8,21 @@ export class UpdateCoinDto {
   @MaxLength(255)
   name?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/coins/usdt-new.png', description: 'Logo coin mới' })
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/coins/usdt-new.png',
+    description: 'Logo coin mới',
+  })
   @IsString()
   @IsOptional()
   @MaxLength(255)
   logo?: string;
 
-  @ApiPropertyOptional({ example: 'https://tether.to', description: 'Website mới' })
+  @ApiPropertyOptional({
+    example: 'https://tether.to',
+    description: 'Website mới',
+  })
   @IsString()
   @IsOptional()
   @MaxLength(255)
   website?: string;
 }
-

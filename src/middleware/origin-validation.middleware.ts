@@ -36,7 +36,9 @@ export class OriginValidationMiddleware implements NestMiddleware {
   }
 
   use(req: Request, res: Response, next: NextFunction): void {
-    const origin = req.headers.origin || '';
+    const originHeader = req.headers.origin as string | undefined;
+    const refererHeader = req.headers.referer as string | undefined;
+    const origin = this.extractRequestOrigin(originHeader, refererHeader);
 
     // Kiểm tra xem origin có phải từ admin frontend không
     const isAdminOrigin = this.matchesUrls(origin, this.adminFrontendUrls);
@@ -44,18 +46,15 @@ export class OriginValidationMiddleware implements NestMiddleware {
     // Kiểm tra xem origin có phải từ regular frontend không
     const isFrontendOrigin = this.matchesUrls(origin, this.frontendUrls);
 
-    const hasUserToken = Boolean(req.cookies?.['access_token']);
-    const hasAdminToken = Boolean(req.cookies?.['admin_access_token']);
-
-    // Khi origin khớp cả admin và user (thường gặp ở môi trường localhost),
-    // ưu tiên phân loại theo loại token đang có để tránh chọn sai strategy.
+    // Origin classification must be independent from cookie content.
+    // Client may send both user/admin cookies, but origin must drive auth strategy.
     let originType: 'admin' | 'user' = 'user';
     if (isAdminOrigin && !isFrontendOrigin) {
       originType = 'admin';
     } else if (isAdminOrigin && isFrontendOrigin) {
-      if (hasAdminToken && !hasUserToken) {
-        originType = 'admin';
-      }
+      // When both lists match (common in localhost/shared domains), prefer admin
+      // so admin routes consistently use admin strategy for admin-origin requests.
+      originType = 'admin';
     }
 
     // Ghi lại thông tin origin vào request object
@@ -77,9 +76,28 @@ export class OriginValidationMiddleware implements NestMiddleware {
     return urls.some((url) => {
       const normalizedUrl = url.replace(/\/$/, ''); // Loại bỏ trailing slash
       const regex = new RegExp(
-        `^${normalizedUrl.replace('http://', 'https?://').replace(/\./g, '\\.')}(:\\d+)?$`,
+        `^https?://([a-z0-9-]+\\.)?${normalizedUrl
+          .replace('http://', '')
+          .replace('https://', '')
+          .replace(/\./g, '\\.')}(:\\d+)?$`,
       );
       return regex.test(origin);
     });
+  }
+
+  private extractRequestOrigin(origin?: string, referer?: string): string {
+    if (origin) {
+      return origin;
+    }
+
+    if (!referer) {
+      return '';
+    }
+
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return '';
+    }
   }
 }

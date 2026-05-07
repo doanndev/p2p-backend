@@ -70,4 +70,3 @@ export class AdminPermissionReadSettingsGuard implements CanActivate {
     return true;
   }
 }
-

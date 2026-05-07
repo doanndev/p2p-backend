@@ -1,2 +1,1 @@
-export class CreateConversationDto {
-}
+export class CreateConversationDto {}

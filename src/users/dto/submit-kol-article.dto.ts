@@ -11,4 +11,3 @@ export class SubmitKolArticleDto {
   @IsUrl({}, { message: 'Article URL must be a valid URL' })
   articleUrl: string;
 }
-

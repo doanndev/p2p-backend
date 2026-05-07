@@ -20,20 +20,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         (request) => {
-          let token = null;
-          if (request && request.cookies) {
-            // Kiểm tra origin type để lấy token phù hợp
-            const originType = (request as any).originType || 'user';
-
-            // Nếu request từ admin origin, lấy admin_access_token
-            if (originType === 'admin') {
-              token = request.cookies['admin_access_token'];
-            } else {
-              // Nếu request từ user origin, lấy access_token
-              token = request.cookies['access_token'];
-            }
+          if (!request || !request.cookies) {
+            return null;
           }
-          return token;
+
+          const originType = (request as any).originType || 'user';
+          if (originType === 'admin') {
+            return null;
+          }
+
+          return request.cookies['access_token'] || null;
         },
       ]),
       ignoreExpiration: false,

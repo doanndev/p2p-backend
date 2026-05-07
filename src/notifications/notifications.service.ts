@@ -71,7 +71,7 @@ export class NotificationsService implements OnModuleInit {
           });
         },
       );
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (error) {
       if (retry >= 4) {
         this.logger.warn('Failed to subscribe notifications Redis channel');

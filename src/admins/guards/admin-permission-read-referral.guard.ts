@@ -69,4 +69,3 @@ export class AdminPermissionReadReferralGuard implements CanActivate {
     return true;
   }
 }
-

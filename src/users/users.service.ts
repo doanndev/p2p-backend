@@ -1594,7 +1594,8 @@ export class UsersService {
         userId,
         type: NotificationType.SYSTEM,
         title: 'KYC submitted for review',
-        message: 'Your KYC paper proof has been received and is pending admin review.',
+        message:
+          'Your KYC paper proof has been received and is pending admin review.',
         data: {
           verification_id: savedVerify.uv_id,
           status: savedVerify.uv_status,

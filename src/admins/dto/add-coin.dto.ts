@@ -14,16 +14,21 @@ export class AddCoinDto {
   @MaxLength(255)
   symbol: string;
 
-  @ApiProperty({ example: 'https://cdn.example.com/coins/usdt.png', description: 'Link logo coin' })
+  @ApiProperty({
+    example: 'https://cdn.example.com/coins/usdt.png',
+    description: 'Link logo coin',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
   logo: string;
 
-  @ApiPropertyOptional({ example: 'https://tether.to', description: 'Website chính thức' })
+  @ApiPropertyOptional({
+    example: 'https://tether.to',
+    description: 'Website chính thức',
+  })
   @IsString()
   @IsOptional()
   @MaxLength(255)
   website?: string;
 }
-

@@ -489,5 +489,4 @@ export class AdminsKycService {
     // Should not reach here
     throw new BadRequestException('Invalid status update');
   }
-
 }

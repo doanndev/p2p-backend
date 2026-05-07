@@ -124,7 +124,8 @@ export class UserSecurityController {
 **Lưu ý:** 2FA chưa coi là bật cho đến khi verify thành công. Nếu đã bật 2FA thì API trả **409**.`,
   })
   @ApiOkResponse({
-    description: 'Trả secret + QR; chưa coi là đã bật 2FA cho đến khi verify-setup.',
+    description:
+      'Trả secret + QR; chưa coi là đã bật 2FA cho đến khi verify-setup.',
     schema: { example: swaggerTwoFaSetupOk },
   })
   @ApiConflictResponse({
