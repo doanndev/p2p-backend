@@ -36,7 +36,9 @@ export class OriginValidationMiddleware implements NestMiddleware {
   }
 
   use(req: Request, res: Response, next: NextFunction): void {
-    const origin = req.headers.origin || '';
+    const originHeader = req.headers.origin as string | undefined;
+    const refererHeader = req.headers.referer as string | undefined;
+    const origin = this.extractRequestOrigin(originHeader, refererHeader);
 
     // Kiểm tra xem origin có phải từ admin frontend không
     const isAdminOrigin = this.matchesUrls(origin, this.adminFrontendUrls);
@@ -77,9 +79,28 @@ export class OriginValidationMiddleware implements NestMiddleware {
     return urls.some((url) => {
       const normalizedUrl = url.replace(/\/$/, ''); // Loại bỏ trailing slash
       const regex = new RegExp(
-        `^${normalizedUrl.replace('http://', 'https?://').replace(/\./g, '\\.')}(:\\d+)?$`,
+        `^https?://([a-z0-9-]+\\.)?${normalizedUrl
+          .replace('http://', '')
+          .replace('https://', '')
+          .replace(/\./g, '\\.')}(:\\d+)?$`,
       );
       return regex.test(origin);
     });
+  }
+
+  private extractRequestOrigin(origin?: string, referer?: string): string {
+    if (origin) {
+      return origin;
+    }
+
+    if (!referer) {
+      return '';
+    }
+
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return '';
+    }
   }
 }

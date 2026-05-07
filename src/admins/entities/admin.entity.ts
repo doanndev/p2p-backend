@@ -62,7 +62,12 @@ export class Admin {
   @Column({ name: 'admin_last_login', type: 'timestamp', nullable: true })
   admin_last_login: Date | null;
 
-  @Column({ name: 'admin_last_ip', type: 'varchar', length: 45, nullable: true })
+  @Column({
+    name: 'admin_last_ip',
+    type: 'varchar',
+    length: 45,
+    nullable: true,
+  })
   admin_last_ip: string | null;
 
   @Column({
@@ -105,4 +110,3 @@ export class Admin {
   @OneToMany(() => VerifyLog, (verifyLog) => verifyLog.admin)
   verify_logs: VerifyLog[];
 }
-

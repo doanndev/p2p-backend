@@ -124,7 +124,10 @@ export class AdminWalletController {
   @HttpCode(HttpStatus.CREATED)
   async addCoin(@Body() addCoinDto: AddCoinDto, @Request() req: any) {
     const admin = req.user;
-    const result = await this.adminsWalletOpsService.addCoin(addCoinDto, admin.admin_id);
+    const result = await this.adminsWalletOpsService.addCoin(
+      addCoinDto,
+      admin.admin_id,
+    );
     return result;
   }
 
@@ -266,7 +269,9 @@ export class AdminWalletController {
   @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
   @HttpCode(HttpStatus.OK)
   async searchWallet(@Body() searchWalletDto: SearchWalletDto) {
-    const result = await this.adminsWalletOpsService.searchWallet(searchWalletDto.q);
+    const result = await this.adminsWalletOpsService.searchWallet(
+      searchWalletDto.q,
+    );
     return result;
   }
 

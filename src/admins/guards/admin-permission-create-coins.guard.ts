@@ -69,4 +69,3 @@ export class AdminPermissionCreateCoinsGuard implements CanActivate {
     return true;
   }
 }
-

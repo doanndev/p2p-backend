@@ -69,4 +69,3 @@ export class AdminPermissionReadStakingGuard implements CanActivate {
     return true;
   }
 }
-

@@ -14,16 +14,21 @@ export class AddNetworkDto {
   @MaxLength(255)
   symbol: string;
 
-  @ApiProperty({ example: 'https://cdn.example.com/networks/bsc.png', description: 'Logo network' })
+  @ApiProperty({
+    example: 'https://cdn.example.com/networks/bsc.png',
+    description: 'Logo network',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
   logo: string;
 
-  @ApiProperty({ example: 'https://bscscan.com', description: 'Link explorer của network' })
+  @ApiProperty({
+    example: 'https://bscscan.com',
+    description: 'Link explorer của network',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
   scan: string;
 }
-

@@ -168,7 +168,10 @@ export class AdminsController {
     @Request() req: any,
   ) {
     const admin = req.user;
-    return await this.adminsAuthService.createAdmin(createAdminDto, admin.admin_id);
+    return await this.adminsAuthService.createAdmin(
+      createAdminDto,
+      admin.admin_id,
+    );
   }
 
   @Get('me')
@@ -186,7 +189,9 @@ export class AdminsController {
   @HttpCode(HttpStatus.OK)
   async getCurrentAdmin(@Request() req: any) {
     const admin = req.user; // Admin from JWT token
-    const adminInfo = await this.adminsAuthService.getCurrentAdmin(admin.admin_id);
+    const adminInfo = await this.adminsAuthService.getCurrentAdmin(
+      admin.admin_id,
+    );
 
     return {
       statusCode: HttpStatus.OK,
