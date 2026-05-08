@@ -669,7 +669,27 @@ export class OrderbookService {
       });
     }
 
-    if (query.option === OrderBookOption.SELL) {
+    if (query.sortPrice || query.sortAmount) {
+      if (query.sortPrice) {
+        qb.orderBy('ob.ob_price', query.sortPrice === 'asc' ? 'ASC' : 'DESC');
+      }
+
+      if (query.sortAmount) {
+        if (query.sortPrice) {
+          qb.addOrderBy(
+            'ob.ob_amount',
+            query.sortAmount === 'asc' ? 'ASC' : 'DESC',
+          );
+        } else {
+          qb.orderBy(
+            'ob.ob_amount',
+            query.sortAmount === 'asc' ? 'ASC' : 'DESC',
+          );
+        }
+      }
+
+      qb.addOrderBy('ob.ob_id', 'DESC');
+    } else if (query.option === OrderBookOption.SELL) {
       qb.orderBy('ob.ob_price', 'ASC').addOrderBy('ob.ob_id', 'DESC');
     } else if (query.option === OrderBookOption.BUY) {
       qb.orderBy('ob.ob_price', 'DESC').addOrderBy('ob.ob_id', 'DESC');
@@ -989,7 +1009,7 @@ export class OrderbookService {
 
     await this.notificationsService.createForUser({
       userId,
-      type: NotificationType.SYSTEM,
+      type: NotificationType.ORDERBOOK,
       title: 'Bank change request submitted',
       message:
         'Your orderbook bank change request has been submitted and is waiting for admin approval.',
@@ -1158,7 +1178,7 @@ export class OrderbookService {
 
     await this.notificationsService.createForUser({
       userId: request.requestedByUserId,
-      type: NotificationType.SYSTEM,
+      type: NotificationType.ORDERBOOK,
       title: approve
         ? 'Bank change request approved'
         : 'Bank change request rejected',

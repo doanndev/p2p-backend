@@ -43,7 +43,7 @@ export class P2pCoinUnlockSchedulerService {
 
       await this.notificationsService.createForUser({
         userId: buyerId,
-        type: NotificationType.SYSTEM,
+        type: NotificationType.TRANSACTION,
         title: 'Transaction settlement issue',
         message:
           'An error occurred while releasing coins for your completed trade. Please contact support for assistance.',

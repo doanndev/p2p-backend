@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { NotificationsService } from './notifications.service';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { NotificationsStreamService } from './notifications-stream.service';
+import { NotificationType } from '../users/entities/notification.entity';
 
 @ApiTags('Notifications')
 @ApiCookieAuth('access_token')
@@ -42,7 +43,12 @@ export class NotificationsController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'isRead', required: false, type: Boolean })
-  @ApiQuery({ name: 'type', required: false, type: String })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: NotificationType,
+    description: 'Lọc theo loại thông báo/module',
+  })
   getNotifications(@Req() req: any, @Query() query: QueryNotificationsDto) {
     return this.notificationsService.listForUser(req.user.uid, query);
   }

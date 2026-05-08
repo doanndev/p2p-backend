@@ -13,6 +13,12 @@ export class RegisterDto {
   })
   phone?: string;
 
+  @ApiPropertyOptional({
+    example: '123456789',
+    description: 'Telegram ID hoặc username Telegram',
+  })
+  telegramId?: string;
+
   @ApiProperty({
     example: 'StrongPassword@123',
     description: 'Mật khẩu tài khoản',

@@ -367,7 +367,7 @@ export class TransactionService {
       [...new Set(userIds.filter(Boolean))].map((userId) =>
         this.notificationsService.createForUser({
           userId,
-          type: NotificationType.SYSTEM,
+          type: NotificationType.TRANSACTION,
           title,
           message,
           data,
@@ -723,7 +723,7 @@ export class TransactionService {
     const response = this.toTransactionResponse(hydrated ?? saved);
     await this.notificationsService.createForUser({
       userId: saved.trans_user_sell,
-      type: NotificationType.SYSTEM,
+      type: NotificationType.TRANSACTION,
       title: 'Buyer confirmed payment',
       message: `Buyer has marked payment as completed for transaction ${saved.transs_reference_code}. Please verify and confirm receipt.`,
       data: {
@@ -1077,7 +1077,7 @@ export class TransactionService {
     const response = this.toDisputeResponse(hydrated ?? saved);
     await this.notificationsService.createForUser({
       userId: dispute.dispute_responder_id,
-      type: NotificationType.SECURITY,
+      type: NotificationType.TRANSACTION,
       title: 'New dispute opened',
       message: `A dispute has been opened for transaction ${tx.transs_reference_code}. Please review the dispute details.`,
       data: {

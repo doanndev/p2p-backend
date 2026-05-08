@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserSex, UserStatus } from '../users/entities/user.entity';
+import { BankUser } from '../users/entities/bank-user.entity';
 import {
   KolRegister,
   KolRegisterStatus,
@@ -34,6 +35,8 @@ export class AdminsUsersOpsService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(BankUser)
+    private bankUserRepository: Repository<BankUser>,
     @InjectRepository(KolRegister)
     private kolRegisterRepository: Repository<KolRegister>,
     @InjectRepository(KolArticle)
@@ -914,6 +917,145 @@ export class AdminsUsersOpsService {
         ka_article_url: kolArticle.ka_article_url,
         ka_status: kolArticle.ka_status,
         created_at: kolArticle.created_at,
+      },
+    };
+  }
+
+  async getBankUsersPaginated(
+    page = 1,
+    limit = 20,
+    sortBy: 'created_at' | 'username' | 'bank_name' = 'created_at',
+    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    userName?: string,
+    bankName?: string,
+    bankAccountNumber?: string,
+    bankAccountName?: string,
+  ): Promise<{
+    statusCode: number;
+    data: Array<{
+      uid: number;
+      uname: string;
+      email: string;
+      phone: string | null;
+      display_name: string;
+      bu_id: number;
+      bu_bank_name: string;
+      bu_bank_branch: string | null;
+      bu_bank_account_name: string;
+      bu_bank_account_number: string;
+      created_at: Date;
+      updated_at: Date;
+    }>;
+    meta: {
+      page: number;
+      limit: number;
+      total: number;
+      total_pages: number;
+    };
+  }> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const currentPage = Math.max(page, 1);
+    const skip = (currentPage - 1) * safeLimit;
+    const orderDirection = sortOrder === 'ASC' ? 'ASC' : 'DESC';
+
+    const sortableColumns = {
+      created_at: 'bu.created_at',
+      username: 'u.uname',
+      bank_name: 'bu.bu_bank_name',
+    } as const;
+    const orderColumn = sortableColumns[sortBy] ?? sortableColumns.created_at;
+
+    // Build query
+    let query = this.bankUserRepository
+      .createQueryBuilder('bu')
+      .innerJoin(User, 'u', 'u.uid = bu.bu_user_id')
+      .select('u.uid', 'uid')
+      .addSelect('u.uname', 'uname')
+      .addSelect('u.uemail', 'uemail')
+      .addSelect('u.uphone', 'uphone')
+      .addSelect('u.ufulllname', 'ufulllname')
+      .addSelect('bu.bu_id', 'bu_id')
+      .addSelect('bu.bu_bank_name', 'bu_bank_name')
+      .addSelect('bu.bu_bank_branch', 'bu_bank_branch')
+      .addSelect('bu.bu_bank_account_name', 'bu_bank_account_name')
+      .addSelect('bu.bu_bank_account_number', 'bu_bank_account_number')
+      .addSelect('bu.created_at', 'created_at')
+      .addSelect('bu.updated_at', 'updated_at');
+
+    // Apply filters
+    if (userName) {
+      query = query.andWhere(
+        '(LOWER(u.uname) ILIKE LOWER(:userName) OR LOWER(u.ufulllname) ILIKE LOWER(:userName))',
+        { userName: `%${userName}%` },
+      );
+    }
+
+    if (bankName) {
+      query = query.andWhere('LOWER(bu.bu_bank_name) ILIKE LOWER(:bankName)', {
+        bankName: `%${bankName}%`,
+      });
+    }
+
+    if (bankAccountNumber) {
+      query = query.andWhere(
+        'LOWER(bu.bu_bank_account_number) ILIKE LOWER(:accountNumber)',
+        { accountNumber: `%${bankAccountNumber}%` },
+      );
+    }
+
+    if (bankAccountName) {
+      query = query.andWhere(
+        'LOWER(bu.bu_bank_account_name) ILIKE LOWER(:accountName)',
+        { accountName: `%${bankAccountName}%` },
+      );
+    }
+
+    const [rawItems, total] = await Promise.all([
+      query
+        .orderBy(orderColumn, orderDirection)
+        .addOrderBy('bu.created_at', 'DESC')
+        .offset(skip)
+        .limit(safeLimit)
+        .getRawMany<{
+          uid: string;
+          uname: string;
+          uemail: string;
+          uphone: string | null;
+          ufulllname: string;
+          bu_id: string;
+          bu_bank_name: string;
+          bu_bank_branch: string | null;
+          bu_bank_account_name: string;
+          bu_bank_account_number: string;
+          created_at: Date;
+          updated_at: Date;
+        }>(),
+      query.getCount(),
+    ]);
+
+    const mapped = rawItems.map((item) => ({
+      uid: Number(item.uid),
+      uname: item.uname,
+      email: item.uemail,
+      phone: item.uphone,
+      display_name: item.ufulllname,
+      bu_id: Number(item.bu_id),
+      bu_bank_name: item.bu_bank_name,
+      bu_bank_branch: item.bu_bank_branch,
+      bu_bank_account_name: item.bu_bank_account_name,
+      bu_bank_account_number: item.bu_bank_account_number,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+    }));
+
+    return {
+      statusCode: 200,
+      data: mapped,
+      meta: {
+        page: currentPage,
+        limit: safeLimit,
+        total,
+        total_pages: Math.ceil(total / safeLimit) || 1,
       },
     };
   }

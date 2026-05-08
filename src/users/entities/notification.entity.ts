@@ -9,8 +9,17 @@ import {
 import { User } from './user.entity';
 
 export enum NotificationType {
+  // Legacy generic types (keep for backward compatibility with existing rows)
   SYSTEM = 'system',
   SECURITY = 'security',
+  // Module-based types for frontend filtering
+  USER = 'user',
+  ORDERBOOK = 'orderbook',
+  TRANSACTION = 'transaction',
+  WALLET = 'wallet',
+  KYC = 'kyc',
+  CHAT = 'chat',
+  SUPPORT_CHAT = 'support_chat',
 }
 
 @Entity('notifications')
