@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import * as cookieParser from 'cookie-parser';
 import { DatabaseExceptionFilter } from './exceptions/database-exception.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import './instrument';
+import { SensitiveApiSentryInterceptor } from './common/interceptors/sensitive-api-sentry.interceptor';
 
 async function bootstrap() {
   const nestLoggerLevels =
@@ -69,6 +71,7 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+  app.useGlobalInterceptors(new SensitiveApiSentryInterceptor());
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Backend 2.5 API')
