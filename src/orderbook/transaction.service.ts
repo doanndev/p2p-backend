@@ -72,11 +72,54 @@ export class TransactionService {
     return value.toFixed(8);
   }
 
-  private getOrderbookBuyLockTotal(amount: number): number {
-    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+  /** Same as orderbook sell create: tx fee % + smartref % from admin settings. */
+  private async getP2pOrderbookFeePercentTotal(): Promise<number> {
+    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+      this.adminSettingsConfigService.getTransactionFeePercent(),
+      this.adminSettingsConfigService.getSmartrefFeePercent(),
+    ]);
+    return transactionFeePercent + smartrefFeePercent;
+  }
+
+  /**
+   * Locked coin for a trade amount — must match seller lock debit on execute
+   * and buy-orderbook seller lock on create/cancel/expiry.
+   */
+  private computeSellerLockCoinAmount(
+    amount: number,
+    totalFeePercent: number,
+  ): number {
     return this.toNumber(
-      this.formatAmount(amount + (amount * feePercent) / 100),
+      this.formatAmount(amount + (amount * totalFeePercent) / 100),
     );
+  }
+
+  private computeSellerLockDebitForExecute(
+    amount: number,
+    totalFeePercent: number,
+    orderBook: OrderBook | null,
+    transUserSell: number,
+    transUserBuy: number,
+  ): number {
+    const posterIsSeller =
+      orderBook != null &&
+      orderBook.ob_option === OrderBookOption.SELL &&
+      orderBook.ob_user_id === transUserSell;
+    const posterIsBuyer =
+      orderBook != null &&
+      orderBook.ob_option === OrderBookOption.BUY &&
+      orderBook.ob_user_id === transUserBuy;
+    if (posterIsSeller || posterIsBuyer) {
+      return this.computeSellerLockCoinAmount(amount, totalFeePercent);
+    }
+    return amount;
+  }
+
+  private async computeBuyOrderbookSellerLockCoinAmount(
+    amount: number,
+  ): Promise<number> {
+    const totalFeePercent = await this.getP2pOrderbookFeePercentTotal();
+    return this.computeSellerLockCoinAmount(amount, totalFeePercent);
   }
 
   private generateReferenceCode(): string {
@@ -247,7 +290,7 @@ export class TransactionService {
       const amount = this.toNumber(transaction.trans_amount);
       const buyLockTotal =
         orderBook.ob_option === OrderBookOption.BUY
-          ? this.getOrderbookBuyLockTotal(amount)
+          ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
           : amount;
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
       orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
@@ -463,7 +506,8 @@ export class TransactionService {
           if (!sellerWallet)
             throw new NotFoundException('Seller wallet not found');
 
-          const sellerLockTotal = this.getOrderbookBuyLockTotal(dto.amount);
+          const sellerLockTotal =
+            await this.computeBuyOrderbookSellerLockCoinAmount(dto.amount);
           const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
           if (sellerAvailableBalance < sellerLockTotal) {
             throw new BadRequestException(
@@ -736,9 +780,10 @@ export class TransactionService {
   }
 
   async confirmReceived(userId: number, id: number) {
-    const refferalFeePercent =
-      await this.adminSettingsConfigService.getSmartrefFeePercent();
-    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+    const [totalFeePercent, smartrefFeePercent] = await Promise.all([
+      this.getP2pOrderbookFeePercentTotal(),
+      this.adminSettingsConfigService.getSmartrefFeePercent(),
+    ]);
 
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
@@ -761,9 +806,6 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
-      const feeAmount = this.toNumber(
-        this.formatAmount((amount * (refferalFeePercent + feePercent)) / 100),
-      );
 
       let orderBook: OrderBook | null = null;
       if (transaction.trans_order_book != null) {
@@ -773,23 +815,15 @@ export class TransactionService {
         });
       }
 
-      const posterIsSeller =
-        orderBook != null &&
-        orderBook.ob_option === OrderBookOption.SELL &&
-        orderBook.ob_user_id === transaction.trans_user_sell;
-      const posterIsBuyer =
-        orderBook != null &&
-        orderBook.ob_option === OrderBookOption.BUY &&
-        orderBook.ob_user_id === transaction.trans_user_buy;
+      const sellerLockDebit = this.computeSellerLockDebitForExecute(
+        amount,
+        totalFeePercent,
+        orderBook,
+        transaction.trans_user_sell,
+        transaction.trans_user_buy,
+      );
 
-      const sellerLockDebit =
-        posterIsSeller && feeAmount > 0
-          ? this.toNumber(this.formatAmount(amount + feeAmount))
-          : posterIsBuyer && feeAmount > 0
-            ? this.toNumber(this.formatAmount(amount + feeAmount))
-            : amount;
-
-      const toBuyer = posterIsBuyer && feeAmount > 0 ? amount : amount;
+      const toBuyer = amount;
 
       const sellerWallet = await manager.findOne(UserWallet, {
         where: {
@@ -835,7 +869,7 @@ export class TransactionService {
         sellerId: transaction.trans_user_sell,
         transactionId: saved.trans_id,
         amount,
-        smartrefFeePercent: refferalFeePercent,
+        smartrefFeePercent,
       };
     });
 
@@ -935,7 +969,7 @@ export class TransactionService {
         const amount = this.toNumber(transaction.trans_amount);
         const buyLockTotal =
           orderBook.ob_option === OrderBookOption.BUY
-            ? this.getOrderbookBuyLockTotal(amount)
+            ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
             : amount;
         const remaining = this.toNumber(orderBook.ob_amount_remaining);
         orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
