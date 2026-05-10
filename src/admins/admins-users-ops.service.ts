@@ -972,7 +972,7 @@ export class AdminsUsersOpsService {
     const orderDirection = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
     const sortableColumns = {
-      created_at: 'bu.created_at',
+      created_at: 'u.created_at',
       username: 'u.uname',
       bank_name: 'bu.bu_bank_name',
     } as const;
@@ -992,8 +992,8 @@ export class AdminsUsersOpsService {
       .addSelect('bu.bu_bank_branch', 'bu_bank_branch')
       .addSelect('bu.bu_bank_account_name', 'bu_bank_account_name')
       .addSelect('bu.bu_bank_account_number', 'bu_bank_account_number')
-      .addSelect('bu.created_at', 'created_at')
-      .addSelect('bu.updated_at', 'updated_at');
+      .addSelect('u.created_at', 'created_at')
+      .addSelect('u.created_at', 'updated_at');
 
     // Apply filters
     if (userName) {
@@ -1026,7 +1026,7 @@ export class AdminsUsersOpsService {
     const [rawItems, total] = await Promise.all([
       query
         .orderBy(orderColumn, orderDirection)
-        .addOrderBy('bu.created_at', 'DESC')
+        .addOrderBy('u.created_at', 'DESC')
         .offset(skip)
         .limit(safeLimit)
         .getRawMany<{

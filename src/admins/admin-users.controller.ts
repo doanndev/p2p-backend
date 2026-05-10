@@ -132,17 +132,6 @@ export class AdminUsersController {
     return result;
   }
 
-  @Get('need-levelup')
-  @ApiOperation({ summary: 'Danh sách user đang chờ duyệt level-up' })
-  @ApiOkResponse({
-    description: 'Danh sách user need_levelup=true',
-  })
-  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
-  @HttpCode(HttpStatus.OK)
-  async getUsersNeedLevelUp() {
-    return this.adminsUsersOpsService.getUsersNeedLevelUp();
-  }
-
   @Get('bank-users')
   @ApiOperation({ summary: 'Danh sách bank user phân trang (với filter)' })
   @ApiQuery({
