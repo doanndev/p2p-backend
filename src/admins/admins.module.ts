@@ -48,10 +48,12 @@ import { AdminPermissionCreateNetworksGuard } from './guards/admin-permission-cr
 import { AdminPermissionUpdateNetworksGuard } from './guards/admin-permission-update-networks.guard';
 import { AdminSuperAdminGuard } from './guards/admin-super-admin.guard';
 import { SettingsModule } from '../settings/settings.module';
+import { OrderbookModule } from '../orderbook/orderbook.module';
 
 @Module({
   imports: [
     forwardRef(() => SettingsModule),
+    OrderbookModule,
     TypeOrmModule.forFeature([
       AdminRole,
       Permission,

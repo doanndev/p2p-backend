@@ -18,7 +18,7 @@ import {
   TransactionType,
 } from './entities/transaction.entity';
 import { Dispute, DisputeStatus, DisputeType } from './entities/dispute.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserStatus } from '../users/entities/user.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
@@ -38,6 +38,7 @@ import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
+import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
 
 @Injectable()
 export class TransactionService {
@@ -70,6 +71,38 @@ export class TransactionService {
 
   private formatAmount(value: number): string {
     return value.toFixed(8);
+  }
+
+  private assertTransactionAmountWithinOrderbookBounds(
+    orderBook: OrderBook,
+    amount: number,
+  ): void {
+    const rawMin = orderBook.ob_national_min;
+    const rawMax = orderBook.ob_national_max;
+    const configuredMin =
+      rawMin != null && String(rawMin).trim() !== ''
+        ? this.toNumber(rawMin)
+        : null;
+    const configuredMax =
+      rawMax != null && String(rawMax).trim() !== ''
+        ? this.toNumber(rawMax)
+        : null;
+
+    const effectiveMin =
+      configuredMin != null
+        ? configuredMin
+        : DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN;
+
+    if (amount < effectiveMin) {
+      throw new BadRequestException(
+        `Transaction amount must be at least ${effectiveMin}`,
+      );
+    }
+    if (configuredMax != null && amount > configuredMax) {
+      throw new BadRequestException(
+        `Transaction amount must not exceed ${configuredMax}`,
+      );
+    }
   }
 
   /** Same as orderbook sell create: tx fee % + smartref % from admin settings. */
@@ -466,6 +499,11 @@ export class TransactionService {
           );
         }
 
+        this.assertTransactionAmountWithinOrderbookBounds(
+          orderBook,
+          dto.amount,
+        );
+
         const remaining = this.toNumber(orderBook.ob_amount_remaining);
         if (dto.amount <= 0 || dto.amount > remaining) {
           throw new BadRequestException('Invalid transaction amount');
@@ -799,6 +837,20 @@ export class TransactionService {
           'You are not a participant in this transaction',
         );
       }
+
+      const viewerForTradeBlock = await manager.findOne(User, {
+        where: { uid: userId },
+        select: ['ustatus'],
+      });
+      if (
+        viewerForTradeBlock?.ustatus === UserStatus.BLOCK_TRADE &&
+        transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED
+      ) {
+        throw new ForbiddenException(
+          'Trading is blocked for your account. Please contact support.',
+        );
+      }
+
       if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
         throw new BadRequestException(
           'Only payment_confirmed transaction can be executed',
@@ -1169,5 +1221,20 @@ export class TransactionService {
     const d = await this.findDisputeWithRelations(disputeId);
     if (!d) throw new NotFoundException('Dispute not found');
     return this.toDisputeResponse(d);
+  }
+
+  /** Admin trade-block: cancel every pending tx where user is buyer or seller. */
+  async cancelAllPendingTransactionsForUser(userId: number): Promise<number> {
+    const txs = await this.transactionRepository
+      .createQueryBuilder('t')
+      .where('t.trans_status = :st', { st: TransactionStatus.PENDING })
+      .andWhere('(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)', {
+        uid: userId,
+      })
+      .getMany();
+    for (const tx of txs) {
+      await this.cancelTransaction(userId, tx.trans_id);
+    }
+    return txs.length;
   }
 }

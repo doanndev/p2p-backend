@@ -24,6 +24,8 @@ import {
   Transaction,
   TransactionStatus,
 } from '../orderbook/entities/transaction.entity';
+import { OrderbookService } from '../orderbook/orderbook.service';
+import { TransactionService } from '../orderbook/transaction.service';
 import {
   WalletHistory,
   WalletHistoryOption,
@@ -47,6 +49,8 @@ export class AdminsUsersOpsService {
     private transactionRepository: Repository<Transaction>,
     @InjectRepository(WalletHistory)
     private walletHistoryRepository: Repository<WalletHistory>,
+    private readonly transactionService: TransactionService,
+    private readonly orderbookService: OrderbookService,
   ) {}
 
   async getUsersPaginated(
@@ -754,6 +758,15 @@ export class AdminsUsersOpsService {
     }
 
     const oldStatus = user.ustatus;
+
+    if (
+      status === UserStatus.BLOCK_TRADE &&
+      oldStatus !== UserStatus.BLOCK_TRADE
+    ) {
+      await this.transactionService.cancelAllPendingTransactionsForUser(uid);
+      await this.orderbookService.failPendingOrderBooksForTradeBlockedUser(uid);
+    }
+
     await this.userRepository.update({ uid }, { ustatus: status });
 
     // Create admin log

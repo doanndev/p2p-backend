@@ -179,7 +179,11 @@ export class AdminUsersController {
   }
 
   @Post(':id/update-status')
-  @ApiOperation({ summary: 'Cập nhật trạng thái tài khoản user' })
+  @ApiOperation({
+    summary: 'Cập nhật trạng thái tài khoản user',
+    description:
+      '`block_trade`: hủy mọi transaction pending của user, đóng (FAILED) orderbook pending của user, rồi đặt status. `payment_confirmed` không bị hủy — user vẫn có thể gọi confirm-received để kết thúc.',
+  })
   @ApiBody({ type: UpdateUserStatusDto })
   @ApiOkResponse({
     description: 'Cập nhật trạng thái user thành công',

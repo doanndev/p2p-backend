@@ -39,18 +39,27 @@ export class CreateOrderbookDto {
   @Min(0.00000001)
   price: number;
 
-  @ApiProperty({ example: 1000000, required: false })
+  @ApiProperty({
+    example: 10,
+    required: false,
+    description:
+      'Số coin tối thiểu mỗi giao dịch (optional). Khi không gửi, server dùng min mặc định 10 khi tạo transaction.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(0.00000001)
   nationalMin?: number;
 
-  @ApiProperty({ example: 10000000, required: false })
+  @ApiProperty({
+    example: 500,
+    required: false,
+    description: 'Số coin tối đa mỗi giao dịch (optional).',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(0.00000001)
   nationalMax?: number;
 
   @ApiProperty({ example: 'USDT' })

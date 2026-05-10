@@ -22,6 +22,8 @@ export enum UserStatus {
   ACTIVE = 'active',
   BLOCK_WITHDRAW = 'block_withdraw',
   BLOCK = 'block',
+  /** Chặt giao dịch P2P (orderbook/transaction); không giống BLOCK toàn tài khoản */
+  BLOCK_TRADE = 'block_trade',
 }
 
 @Entity('users')

@@ -33,6 +33,7 @@ import { CacheService } from '../systems/cache.service';
 import { EmailService } from '../systems/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
+import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
 type OrderbookBankChangeRequestPayload = {
   orderbookId: number;
   bankUserId: number;
@@ -88,6 +89,36 @@ export class OrderbookService {
 
   private formatAmount(value: number): string {
     return value.toFixed(8);
+  }
+
+  /**
+   * Per-transaction coin bounds on orderbook; both optional.
+   * If both set, min must be <= max.
+   */
+  private assertPerTransactionAmountBounds(
+    min?: number | null,
+    max?: number | null,
+  ): void {
+    if (
+      min != null &&
+      max != null &&
+      !Number.isNaN(min) &&
+      !Number.isNaN(max) &&
+      min > max
+    ) {
+      throw new BadRequestException(
+        'nationalMin cannot be greater than nationalMax',
+      );
+    }
+    const effectiveFloor =
+      min != null && !Number.isNaN(min)
+        ? min
+        : DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN;
+    if (max != null && !Number.isNaN(max) && max < effectiveFloor) {
+      throw new BadRequestException(
+        'nationalMax cannot be less than the minimum per-transaction amount (nationalMin, or 10 if nationalMin is unset)',
+      );
+    }
   }
 
   private getBuyerDailyCoinLimit(level: number): number {
@@ -393,14 +424,15 @@ export class OrderbookService {
   async createOrderBook(userId: number, dto: CreateOrderbookDto) {
     const amount = this.toNumber(dto.amount);
     const price = this.toNumber(dto.price);
-    const nationalMin =
+    const nationalMinCfg =
       dto.nationalMin === undefined
         ? undefined
         : this.toNumber(dto.nationalMin);
-    const nationalMax =
+    const nationalMaxCfg =
       dto.nationalMax === undefined
         ? undefined
         : this.toNumber(dto.nationalMax);
+    this.assertPerTransactionAmountBounds(nationalMinCfg, nationalMaxCfg);
 
     const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
       this.adminSettingsConfigService.getTransactionFeePercent(),
@@ -575,9 +607,13 @@ export class OrderbookService {
         ob_amount_remaining: this.formatAmount(amount),
         ob_price: this.formatAmount(price),
         ob_national_min:
-          nationalMin === undefined ? null : this.formatAmount(nationalMin),
+          nationalMinCfg === undefined
+            ? null
+            : this.formatAmount(nationalMinCfg),
         ob_national_max:
-          nationalMax === undefined ? null : this.formatAmount(nationalMax),
+          nationalMaxCfg === undefined
+            ? null
+            : this.formatAmount(nationalMaxCfg),
         ob_status: OrderBookStatus.PENDING,
         ob_description:
           dto.description === undefined || dto.description === null
@@ -637,8 +673,10 @@ export class OrderbookService {
   async getOrderBooks(query: QueryOrderbooksDto) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
-    const qb = this.orderBookRepository.createQueryBuilder('ob');
-    // .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING });
+    const qb = this.orderBookRepository
+      .createQueryBuilder('ob')
+      .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING })
+      .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0');
 
     // Không join user ở đây: skip/take + join kích hoạt DISTINCT pagination của TypeORM
     // và dễ lỗi khi ORDER BY theo alias từ addSelect (mixed buy/sell sort).
@@ -725,20 +763,6 @@ export class OrderbookService {
         : [];
     const userById = new Map(users.map((u) => [u.uid, u]));
 
-    const orderBookIds = rows.map((row) => row.ob_id);
-    const bankSettingRows = orderBookIds.length
-      ? await this.settingBankOrderRepository.find({
-          where: { sbo_order_book: In(orderBookIds) },
-          relations: ['bank_user'],
-        })
-      : [];
-    const bankByOrderBookId = new Map<number, BankUser>();
-    for (const setting of bankSettingRows) {
-      if (!bankByOrderBookId.has(setting.sbo_order_book) && setting.bank_user) {
-        bankByOrderBookId.set(setting.sbo_order_book, setting.bank_user);
-      }
-    }
-
     const { sellCreators, buyCreators } =
       await this.buildCreatorTransactionReputationMaps(rows);
 
@@ -777,10 +801,6 @@ export class OrderbookService {
           national_max: book.ob_national_max,
           status: book.ob_status,
           description: book.ob_description,
-          bank_user:
-            book.ob_option === OrderBookOption.SELL
-              ? this.toBankUserResponse(bankByOrderBookId.get(book.ob_id))
-              : null,
           created_at: book.ob_created_at,
         };
       }),
@@ -876,7 +896,7 @@ export class OrderbookService {
     }));
   }
 
-  async getOrderBookDetail(id: number) {
+  async getOrderBookDetail(id: number, viewerUserId: number) {
     const orderBook = await this.orderBookRepository.findOne({
       where: { ob_id: id },
       relations: ['user'],
@@ -884,17 +904,39 @@ export class OrderbookService {
     if (!orderBook) {
       throw new NotFoundException('Order book not found');
     }
+    if (this.toNumber(orderBook.ob_amount_remaining) <= 0) {
+      throw new NotFoundException('Order book not found');
+    }
     // if (orderBook.ob_status !== OrderBookStatus.PENDING) {
     //   throw new NotFoundException('Order book not found');
     // }
 
-    const setting = await this.settingBankOrderRepository.findOne({
-      where: { sbo_order_book: id },
-      relations: ['bank_user'],
-    });
+    let bankInfor = null as ReturnType<OrderbookService['toBankUserResponse']>;
+    let bankUser = null as ReturnType<OrderbookService['toBankUserResponse']>;
 
-    const bankInfor = this.toBankUserResponse(setting?.bank_user);
-    const shouldIncludeBankUser = orderBook.ob_option === OrderBookOption.SELL;
+    const participantTx = await this.transactionRepository
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.bank_user', 'bu')
+      .where('t.trans_order_book = :obId', { obId: id })
+      .andWhere('(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)', {
+        uid: viewerUserId,
+      })
+      .orderBy('t.trans_id', 'DESC')
+      .getOne();
+
+    if (participantTx) {
+      if (orderBook.ob_option === OrderBookOption.SELL) {
+        const setting = await this.settingBankOrderRepository.findOne({
+          where: { sbo_order_book: id },
+          relations: ['bank_user'],
+        });
+        bankInfor = this.toBankUserResponse(setting?.bank_user);
+        bankUser = bankInfor;
+      } else {
+        bankInfor = this.toBankUserResponse(participantTx.bank_user);
+        bankUser = bankInfor;
+      }
+    }
 
     const reputation = await this.getCreatorTransactionReputation(
       orderBook.ob_user_id,
@@ -919,7 +961,7 @@ export class OrderbookService {
       status: orderBook.ob_status,
       description: orderBook.ob_description,
       bank_infor: bankInfor,
-      bank_user: shouldIncludeBankUser ? bankInfor : null,
+      bank_user: bankUser,
     };
   }
 
@@ -1217,6 +1259,25 @@ export class OrderbookService {
     if (dto.price !== undefined) {
       orderBook.ob_price = this.formatAmount(dto.price);
     }
+    if (dto.nationalMin !== undefined || dto.nationalMax !== undefined) {
+      const nextMin =
+        dto.nationalMin !== undefined
+          ? dto.nationalMin === null
+            ? null
+            : this.toNumber(dto.nationalMin)
+          : orderBook.ob_national_min != null
+            ? this.toNumber(orderBook.ob_national_min)
+            : null;
+      const nextMax =
+        dto.nationalMax !== undefined
+          ? dto.nationalMax === null
+            ? null
+            : this.toNumber(dto.nationalMax)
+          : orderBook.ob_national_max != null
+            ? this.toNumber(orderBook.ob_national_max)
+            : null;
+      this.assertPerTransactionAmountBounds(nextMin, nextMax);
+    }
     if (dto.nationalMin !== undefined) {
       orderBook.ob_national_min =
         dto.nationalMin === null ? null : this.formatAmount(dto.nationalMin);
@@ -1325,5 +1386,21 @@ export class OrderbookService {
 
       return { message: 'Order book deleted successfully' };
     });
+  }
+
+  /**
+   * Admin trade-block: mark remaining pending listings FAILED và unlock ví (giống delete).
+   */
+  async failPendingOrderBooksForTradeBlockedUser(
+    userId: number,
+  ): Promise<number> {
+    const obs = await this.orderBookRepository.find({
+      where: { ob_user_id: userId, ob_status: OrderBookStatus.PENDING },
+      select: ['ob_id'],
+    });
+    for (const ob of obs) {
+      await this.deleteOrderBook(userId, ob.ob_id);
+    }
+    return obs.length;
   }
 }
