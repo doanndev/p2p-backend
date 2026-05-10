@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrderbookController } from './orderbook.controller';
 import { OrderbookService } from './orderbook.service';
@@ -25,9 +25,9 @@ import { TradeBlockedGuard } from '../common/guards/trade-blocked.guard';
 
 @Module({
   imports: [
-    SettingsModule,
-    UsersModule,
-    SmartRefModule,
+    forwardRef(() => SettingsModule),
+    forwardRef(() => UsersModule),
+    forwardRef(() => SmartRefModule),
     CurrenciesModule,
     NotificationsModule,
     TypeOrmModule.forFeature([

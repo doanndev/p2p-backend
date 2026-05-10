@@ -156,6 +156,7 @@ const TRANSACTION_RESPONSE_EXAMPLE = {
   status: 'pending',
   message: null,
   lock_released_at: null,
+  coin_unlock_at: null,
   expired_at: '2026-03-25T09:00:00.000Z',
   payment_proof_urls: ['https://cdn.example.com/proof/slip-1.jpg'],
 };

@@ -16,6 +16,10 @@ const UNLOCK_BATCH_SIZE = 100;
 export class P2pCoinUnlockSchedulerService {
   private readonly logger = new Logger(P2pCoinUnlockSchedulerService.name);
 
+  private toNumber(value: string | number): number {
+    return typeof value === 'number' ? value : Number(value);
+  }
+
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Notification)
@@ -41,14 +45,21 @@ export class P2pCoinUnlockSchedulerService {
         return;
       }
 
-      await this.notificationsService.createForUser({
-        userId: buyerId,
-        type: NotificationType.TRANSACTION,
-        title: 'Transaction settlement issue',
-        message:
-          'An error occurred while releasing coins for your completed trade. Please contact support for assistance.',
-        data: { transaction_id: transId },
-      });
+      void this.notificationsService
+        .createForUser({
+          userId: buyerId,
+          type: NotificationType.TRANSACTION,
+          title: 'Transaction settlement issue',
+          message:
+            'An error occurred while releasing coins for your completed trade. Please contact support for assistance.',
+          data: { transaction_id: transId },
+        })
+        .catch((sendErr) => {
+          this.logger.error(
+            `createForUser failed after unlock dedup buyer=${buyerId} trans=${transId}`,
+            sendErr instanceof Error ? sendErr.stack : sendErr,
+          );
+        });
     } catch (err) {
       this.logger.error(
         `Failed to persist unlock-failure notification user=${buyerId} trans=${transId}`,
@@ -57,7 +68,8 @@ export class P2pCoinUnlockSchedulerService {
     }
   }
 
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  /** SELL listing: sau `confirm_received`, coin buyer ở `uw_lock_balance` đến `trans_coin_unlock_at`; chạy thường xuyên để gần với delay 10 phút. */
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async releaseDueBuyerLocks(): Promise<void> {
     const now = new Date();
     const due = await this.dataSource
@@ -88,7 +100,7 @@ export class P2pCoinUnlockSchedulerService {
             return;
           }
 
-          const amount = Number(tx.trans_amount);
+          const amount = this.toNumber(tx.trans_amount);
           const buyerWallet = await manager.findOne(UserWallet, {
             where: {
               uw_user_id: tx.trans_user_buy,
@@ -100,7 +112,7 @@ export class P2pCoinUnlockSchedulerService {
             throw new Error('Buyer wallet not found');
           }
 
-          const lockBal = Number(buyerWallet.uw_lock_balance);
+          const lockBal = this.toNumber(buyerWallet.uw_lock_balance);
           if (lockBal < amount) {
             throw new Error(
               `Insufficient buyer lock_balance: need ${amount}, have ${lockBal}`,
@@ -108,7 +120,8 @@ export class P2pCoinUnlockSchedulerService {
           }
 
           buyerWallet.uw_lock_balance = lockBal - amount;
-          buyerWallet.uw_balance = Number(buyerWallet.uw_balance) + amount;
+          buyerWallet.uw_balance =
+            this.toNumber(buyerWallet.uw_balance) + amount;
 
           await manager.save(UserWallet, buyerWallet);
           tx.trans_lock_released_at = new Date();
@@ -121,7 +134,15 @@ export class P2pCoinUnlockSchedulerService {
           `P2P coin unlock failed trans_id=${row.trans_id} buyer=${row.trans_user_buy}: ${msg}`,
           stack,
         );
-        await this.notifyBuyerUnlockFailure(row.trans_user_buy, row.trans_id);
+        void this.notifyBuyerUnlockFailure(
+          row.trans_user_buy,
+          row.trans_id,
+        ).catch((nErr) => {
+          this.logger.error(
+            `notifyBuyerUnlockFailure hook failed trans=${row.trans_id}`,
+            nErr instanceof Error ? nErr.stack : nErr,
+          );
+        });
       }
     }
   }

@@ -38,7 +38,10 @@ import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
-import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
+import {
+  DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
+  P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
+} from './orderbook.constants';
 
 @Injectable()
 export class TransactionService {
@@ -247,6 +250,9 @@ export class TransactionService {
       lock_released_at: t.trans_lock_released_at
         ? t.trans_lock_released_at.toISOString()
         : null,
+      coin_unlock_at: t.trans_coin_unlock_at
+        ? t.trans_coin_unlock_at.toISOString()
+        : null,
       payment_proof_urls: t.trans_payment_proof_urls ?? [],
     };
   }
@@ -374,7 +380,7 @@ export class TransactionService {
       where: { trans_id: transactionId },
     });
     if (updated) {
-      await this.notifyUsers(
+      void this.notifyUsers(
         [updated.trans_user_buy, updated.trans_user_sell],
         'Transaction expired',
         updated.trans_message ||
@@ -384,7 +390,12 @@ export class TransactionService {
           reference_code: updated.transs_reference_code,
           status: updated.trans_status,
         },
-      );
+      ).catch((err) => {
+        console.error(
+          `Failed notify on transaction ${updated.trans_id} expiry:`,
+          err,
+        );
+      });
     }
   }
 
@@ -630,7 +641,7 @@ export class TransactionService {
         );
       });
 
-    await this.notifyUsers(
+    void this.notifyUsers(
       [response.user_buy?.id, response.user_sell?.id],
       'New transaction created',
       `A new transaction ${response.reference_code} has been created and is awaiting payment confirmation.`,
@@ -639,7 +650,12 @@ export class TransactionService {
         reference_code: response.reference_code,
         status: response.status,
       },
-    );
+    ).catch((err) => {
+      console.error(
+        `Failed notify on create transaction ${response.reference_code}:`,
+        err,
+      );
+    });
 
     return response;
   }
@@ -803,17 +819,24 @@ export class TransactionService {
       saved.trans_id,
     );
     const response = this.toTransactionResponse(hydrated ?? saved);
-    await this.notificationsService.createForUser({
-      userId: saved.trans_user_sell,
-      type: NotificationType.TRANSACTION,
-      title: 'Buyer confirmed payment',
-      message: `Buyer has marked payment as completed for transaction ${saved.transs_reference_code}. Please verify and confirm receipt.`,
-      data: {
-        transaction_id: saved.trans_id,
-        reference_code: saved.transs_reference_code,
-        status: saved.trans_status,
-      },
-    });
+    void this.notificationsService
+      .createForUser({
+        userId: saved.trans_user_sell,
+        type: NotificationType.TRANSACTION,
+        title: 'Buyer confirmed payment',
+        message: `Buyer has marked payment as completed for transaction ${saved.transs_reference_code}. Please verify and confirm receipt.`,
+        data: {
+          transaction_id: saved.trans_id,
+          reference_code: saved.transs_reference_code,
+          status: saved.trans_status,
+        },
+      })
+      .catch((err) => {
+        console.error(
+          `Failed seller notification after payment_confirmed tx ${saved.trans_id}:`,
+          err,
+        );
+      });
     return response;
   }
 
@@ -901,13 +924,27 @@ export class TransactionService {
       }
 
       sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
-      buyerWallet.uw_balance = this.toNumber(buyerWallet.uw_balance) + toBuyer;
+
+      const isSellListing =
+        orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
+
+      if (isSellListing) {
+        const buyerLock = this.toNumber(buyerWallet.uw_lock_balance);
+        buyerWallet.uw_lock_balance = buyerLock + toBuyer;
+        transaction.trans_coin_unlock_at = new Date(
+          Date.now() + P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
+        );
+        transaction.trans_lock_released_at = null;
+      } else {
+        buyerWallet.uw_balance =
+          this.toNumber(buyerWallet.uw_balance) + toBuyer;
+        transaction.trans_coin_unlock_at = null;
+        transaction.trans_lock_released_at = new Date();
+      }
 
       await manager.save(UserWallet, sellerWallet);
       await manager.save(UserWallet, buyerWallet);
 
-      transaction.trans_coin_unlock_at = null;
-      transaction.trans_lock_released_at = new Date();
       transaction.trans_status = TransactionStatus.EXECUTED;
       const saved = await manager.save(Transaction, transaction);
 
@@ -925,12 +962,12 @@ export class TransactionService {
       };
     });
 
-    // Chia hoa hồng smartref cho các referral của người bán
+    // Side effects after commit: không await — trả response ngay; lỗi chỉ log (nên có queue/retry ở production).
     if (result.smartrefFeePercent > 0) {
       const smartrefRewardAmount = this.toNumber(
         this.formatAmount((result.amount * result.smartrefFeePercent) / 100),
       );
-      await this.smartRefService
+      void this.smartRefService
         .disputeSmartref(result.sellerId, smartrefRewardAmount)
         .catch((error) => {
           console.error(
@@ -960,19 +997,20 @@ export class TransactionService {
         });
     }
 
-    const executedTransaction = await this.transactionRepository.findOne({
-      where: { trans_id: result.transactionId },
-    });
-    if (executedTransaction) {
-      void this.sendExecutedEmailToBuyer(executedTransaction).catch((error) => {
+    void this.transactionRepository
+      .findOne({ where: { trans_id: result.transactionId } })
+      .then((executedTransaction) => {
+        if (!executedTransaction) return;
+        return this.sendExecutedEmailToBuyer(executedTransaction);
+      })
+      .catch((error) => {
         console.error(
-          `Failed to send executed email for transaction ${executedTransaction.trans_id}:`,
+          `Failed executed-email path for transaction ${result.transactionId}:`,
           error,
         );
       });
-    }
 
-    await this.notifyUsers(
+    void this.notifyUsers(
       [result.buyerId, result.sellerId],
       'Transaction completed',
       `Transaction ${result.response.reference_code} has been completed successfully.`,
@@ -981,7 +1019,12 @@ export class TransactionService {
         reference_code: result.response.reference_code,
         status: result.response.status,
       },
-    );
+    ).catch((error) => {
+      console.error(
+        `Failed notify users after tx ${result.transactionId} executed:`,
+        error,
+      );
+    });
 
     return result.response;
   }
@@ -1063,8 +1106,8 @@ export class TransactionService {
         );
         return this.toTransactionResponse(hydrated ?? saved);
       })
-      .then(async (response) => {
-        await this.notifyUsers(
+      .then((response) => {
+        void this.notifyUsers(
           [response.user_buy?.id, response.user_sell?.id],
           'Transaction cancelled',
           `Transaction ${response.reference_code} has been cancelled.`,
@@ -1073,7 +1116,12 @@ export class TransactionService {
             reference_code: response.reference_code,
             status: response.status,
           },
-        );
+        ).catch((err) => {
+          console.error(
+            `Failed notify on cancel transaction ${response.reference_code}:`,
+            err,
+          );
+        });
         return response;
       });
   }
@@ -1161,18 +1209,25 @@ export class TransactionService {
 
     const hydrated = await this.findDisputeWithRelations(saved.dispute_id);
     const response = this.toDisputeResponse(hydrated ?? saved);
-    await this.notificationsService.createForUser({
-      userId: dispute.dispute_responder_id,
-      type: NotificationType.TRANSACTION,
-      title: 'New dispute opened',
-      message: `A dispute has been opened for transaction ${tx.transs_reference_code}. Please review the dispute details.`,
-      data: {
-        dispute_id: response.id,
-        transaction_id: tx.trans_id,
-        reference_code: tx.transs_reference_code,
-        status: response.status,
-      },
-    });
+    void this.notificationsService
+      .createForUser({
+        userId: dispute.dispute_responder_id,
+        type: NotificationType.TRANSACTION,
+        title: 'New dispute opened',
+        message: `A dispute has been opened for transaction ${tx.transs_reference_code}. Please review the dispute details.`,
+        data: {
+          dispute_id: response.id,
+          transaction_id: tx.trans_id,
+          reference_code: tx.transs_reference_code,
+          status: response.status,
+        },
+      })
+      .catch((err) => {
+        console.error(
+          `Failed notify responder for dispute ${response.id}:`,
+          err,
+        );
+      });
     return response;
   }
 

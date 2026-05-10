@@ -53,7 +53,7 @@ import { OrderbookModule } from '../orderbook/orderbook.module';
 @Module({
   imports: [
     forwardRef(() => SettingsModule),
-    OrderbookModule,
+    forwardRef(() => OrderbookModule),
     TypeOrmModule.forFeature([
       AdminRole,
       Permission,

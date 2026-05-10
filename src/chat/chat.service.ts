@@ -90,6 +90,9 @@ export class ChatService {
       status: transaction.trans_status,
       message: transaction.trans_message,
       lock_released_at: transaction.trans_lock_released_at,
+      coin_unlock_at: transaction.trans_coin_unlock_at
+        ? transaction.trans_coin_unlock_at.toISOString()
+        : null,
       created_at: transaction.trans_created_at,
       expired_at: transaction.trans_expired_at,
       payment_proof_urls: transaction.trans_payment_proof_urls ?? [],
