@@ -26,8 +26,8 @@ import { TradeBlockedGuard } from '../common/guards/trade-blocked.guard';
 @Module({
   imports: [
     forwardRef(() => SettingsModule),
-    UsersModule,
-    SmartRefModule,
+    forwardRef(() => UsersModule),
+    forwardRef(() => SmartRefModule),
     CurrenciesModule,
     NotificationsModule,
     TypeOrmModule.forFeature([

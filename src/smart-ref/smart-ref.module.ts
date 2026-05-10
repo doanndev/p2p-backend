@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WalletsModule } from '../wallets/wallets.module';
 import { Admin } from '../admins/entities/admin.entity';
@@ -17,7 +17,7 @@ import { SmartRefService } from './smart-ref.service';
 
 @Module({
   imports: [
-    WalletsModule,
+    forwardRef(() => WalletsModule),
     TypeOrmModule.forFeature([
       User,
       RefWithdrawHistory,
