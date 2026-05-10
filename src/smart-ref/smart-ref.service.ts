@@ -11,7 +11,10 @@ import { SettingRewardSmartref } from './entities/setting-reward-smartref.entity
 import { SmartRefReward } from './entities/smart-ref-reward.entity';
 import { WalletsService } from '../wallets/wallets.service';
 import { CacheService } from '../systems/cache.service';
-import { Transaction, TransactionStatus } from '../orderbook/entities/transaction.entity';
+import {
+  Transaction,
+  TransactionStatus,
+} from '../orderbook/entities/transaction.entity';
 
 type SmartRefLevelSettingResponse = {
   level: number;
@@ -526,7 +529,9 @@ export class SmartRefService {
     }
 
     const allUserIds = new Set<number>([userId]);
-    const queue: Array<{ id: number; depth: number }> = [{ id: userId, depth: 0 }];
+    const queue: Array<{ id: number; depth: number }> = [
+      { id: userId, depth: 0 },
+    ];
     while (queue.length > 0) {
       const current = queue.shift()!;
       if (current.depth >= cappedDepth) continue;
@@ -545,7 +550,8 @@ export class SmartRefService {
 
     const buildNode = (id: number, depth: number): any => {
       const u = userById.get(id);
-      const childrenIds = depth >= cappedDepth ? [] : childrenMap.get(id) ?? [];
+      const childrenIds =
+        depth >= cappedDepth ? [] : (childrenMap.get(id) ?? []);
       return {
         user: u
           ? {

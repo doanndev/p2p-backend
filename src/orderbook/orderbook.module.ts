@@ -21,6 +21,7 @@ import { UsersModule } from '../users/users.module';
 import { SmartRefModule } from '../smart-ref/smart-ref.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TradeBlockedGuard } from '../common/guards/trade-blocked.guard';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     TransactionService,
     TransactionExpiryQueueService,
     P2pCoinUnlockSchedulerService,
+    TradeBlockedGuard,
   ],
   exports: [OrderbookService, TransactionService],
 })

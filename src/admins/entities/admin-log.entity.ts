@@ -59,7 +59,12 @@ export class AdminLog {
   @Column({ name: 'log_description', type: 'text' })
   log_description: string;
 
-  @Column({ name: 'log_ip_address', type: 'varchar', length: 45, nullable: true })
+  @Column({
+    name: 'log_ip_address',
+    type: 'varchar',
+    length: 45,
+    nullable: true,
+  })
   log_ip_address: string | null;
 
   @Column({ name: 'log_user_agent', type: 'text', nullable: true })
@@ -68,7 +73,12 @@ export class AdminLog {
   @Column({ name: 'log_target_id', type: 'integer', nullable: true })
   log_target_id: number | null;
 
-  @Column({ name: 'log_target_type', type: 'varchar', length: 50, nullable: true })
+  @Column({
+    name: 'log_target_type',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+  })
   log_target_type: string | null;
 
   @Column({ name: 'log_old_data', type: 'json', nullable: true })
@@ -87,4 +97,3 @@ export class AdminLog {
   @JoinColumn({ name: 'log_admin_id' })
   admin: Admin;
 }
-

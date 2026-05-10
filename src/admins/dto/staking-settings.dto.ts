@@ -3,4 +3,3 @@ export class StakingSettingsDto {
   percentWeek?: number;
   percentMonth?: number;
 }
-

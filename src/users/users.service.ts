@@ -180,8 +180,16 @@ export class UsersService {
       });
     }
 
+    const normalizedPhone = registerDto.phone?.trim();
+    const normalizedTelegramId = registerDto.telegramId?.trim();
+
     // Check each unique field separately to return detailed conflict errors
-    const errors: { uname?: string; email?: string; phone?: string } = {};
+    const errors: {
+      uname?: string;
+      email?: string;
+      phone?: string;
+      telegramId?: string;
+    } = {};
 
     const existingByUname = await this.userRepository.findOne({
       where: { uname: registerDto.uname },
@@ -193,11 +201,19 @@ export class UsersService {
     });
     if (existingByEmail) errors.email = 'Email already registered';
 
-    if (registerDto.phone?.trim()) {
+    if (normalizedPhone) {
       const existingByPhone = await this.userRepository.findOne({
-        where: { uphone: registerDto.phone.trim() },
+        where: { uphone: normalizedPhone },
       });
       if (existingByPhone) errors.phone = 'Phone number already registered';
+    }
+
+    if (normalizedTelegramId) {
+      const existingByTelegram = await this.userRepository.findOne({
+        where: { utelegram: normalizedTelegramId },
+      });
+      if (existingByTelegram)
+        errors.telegramId = 'Telegram ID already registered';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -214,8 +230,8 @@ export class UsersService {
     const user = this.userRepository.create({
       uname: registerDto.uname,
       uemail: registerDto.email,
-      uphone: registerDto.phone || null,
-      utelegram: null,
+      uphone: normalizedPhone || null,
+      utelegram: normalizedTelegramId || null,
       uggauth: null,
       ugoogle_sub: null,
       upassword: hashedPassword,
@@ -1592,9 +1608,10 @@ export class UsersService {
 
       await this.notificationsService.createForUser({
         userId,
-        type: NotificationType.SYSTEM,
+        type: NotificationType.USER,
         title: 'KYC submitted for review',
-        message: 'Your KYC paper proof has been received and is pending admin review.',
+        message:
+          'Your KYC paper proof has been received and is pending admin review.',
         data: {
           verification_id: savedVerify.uv_id,
           status: savedVerify.uv_status,

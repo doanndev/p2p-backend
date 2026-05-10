@@ -63,9 +63,11 @@ export class OrderBook {
   @Column({ name: 'ob_price', type: 'decimal' })
   ob_price: string;
 
+  /** Per-transaction coin amount lower bound (optional; JSON key `national_min` for FE compat). */
   @Column({ name: 'ob_national_min', type: 'decimal', nullable: true })
   ob_national_min: string | null;
 
+  /** Per-transaction coin amount upper bound (optional; JSON key `national_max`). */
   @Column({ name: 'ob_national_max', type: 'decimal', nullable: true })
   ob_national_max: string | null;
 

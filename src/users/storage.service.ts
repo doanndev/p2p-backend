@@ -17,10 +17,17 @@ export class StorageService {
   generateImageHash(): string {
     const timestamp = Date.now();
     const random = Math.random().toString();
-    return crypto.createHash('md5').update(`${timestamp}-${random}`).digest('hex');
+    return crypto
+      .createHash('md5')
+      .update(`${timestamp}-${random}`)
+      .digest('hex');
   }
 
-  async saveImage(file: Express.Multer.File, userId: number, imageHash: string): Promise<string> {
+  async saveImage(
+    file: Express.Multer.File,
+    userId: number,
+    imageHash: string,
+  ): Promise<string> {
     // Create user directory
     const userDir = path.join(this.uploadPath, userId.toString());
     if (!fs.existsSync(userDir)) {
@@ -44,7 +51,9 @@ export class StorageService {
     }
 
     if (attempts >= 10) {
-      throw new Error('Unable to generate unique filename after multiple attempts');
+      throw new Error(
+        'Unable to generate unique filename after multiple attempts',
+      );
     }
 
     // Save file from buffer
@@ -58,4 +67,3 @@ export class StorageService {
     return path.join(this.uploadPath, storedPath);
   }
 }
-

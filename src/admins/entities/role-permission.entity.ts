@@ -38,4 +38,3 @@ export class RolePermission {
   @JoinColumn({ name: 'rp_permission_id' })
   permission: Permission;
 }
-

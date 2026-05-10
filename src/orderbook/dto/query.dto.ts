@@ -69,6 +69,15 @@ export class QueryOrderbooksDto {
   @IsEnum(AmountSortOrder)
   sortAmount?: AmountSortOrder;
 
+  @ApiPropertyOptional({
+    enum: AmountSortOrder,
+    description:
+      'Sắp xếp theo giá. Khi truyền sortPrice/sortAmount thì sẽ ưu tiên sort theo params thay vì sort mặc định theo option.',
+  })
+  @IsOptional()
+  @IsEnum(AmountSortOrder)
+  sortPrice?: AmountSortOrder;
+
   @ApiPropertyOptional({ enum: OrderBookOption })
   @IsOptional()
   @IsEnum(OrderBookOption)

@@ -22,6 +22,7 @@ import { AdminJwtStrategy } from './strategies/admin-jwt.strategy';
 import { AdminJwtAuthGuard } from './guards/admin-jwt-auth.guard';
 import { AdminPermissionGuard } from './guards/admin-permission.guard';
 import { User } from '../users/entities/user.entity';
+import { BankUser } from '../users/entities/bank-user.entity';
 import { WalletHistory } from '../wallets/entities/wallet-history.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { WalletTransfer } from '../wallets/entities/wallet-transfer.entity';
@@ -47,10 +48,12 @@ import { AdminPermissionCreateNetworksGuard } from './guards/admin-permission-cr
 import { AdminPermissionUpdateNetworksGuard } from './guards/admin-permission-update-networks.guard';
 import { AdminSuperAdminGuard } from './guards/admin-super-admin.guard';
 import { SettingsModule } from '../settings/settings.module';
+import { OrderbookModule } from '../orderbook/orderbook.module';
 
 @Module({
   imports: [
     forwardRef(() => SettingsModule),
+    OrderbookModule,
     TypeOrmModule.forFeature([
       AdminRole,
       Permission,
@@ -58,6 +61,7 @@ import { SettingsModule } from '../settings/settings.module';
       Admin,
       AdminLog,
       User,
+      BankUser,
       WalletHistory,
       UserWallet,
       WalletTransfer,

@@ -26,4 +26,3 @@ export class AdminSuperAdminGuard implements CanActivate {
     return true;
   }
 }
-

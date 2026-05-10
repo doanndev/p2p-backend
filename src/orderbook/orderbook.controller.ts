@@ -25,6 +25,7 @@ import {
 import { OrderbookService } from './orderbook.service';
 import { TransactionService } from './transaction.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { TradeBlockedGuard } from '../common/guards/trade-blocked.guard';
 import { VerifiedUserGuard } from '../common/guards/verified-user.guard';
 import { CreateOrderbookDto } from './dto/create-orderbook.dto';
 import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
@@ -58,8 +59,8 @@ const ORDERBOOK_CREATE_RESPONSE_EXAMPLE = {
   amount: '100.00000000',
   amount_remaining: '80.00000000',
   price: '25000.00000000',
-  national_min: '500000.00000000',
-  national_max: '2000000.00000000',
+  national_min: '10.00000000',
+  national_max: '500.00000000',
   status: 'pending',
   description: 'Giao dịch trong giờ hành chính',
 };
@@ -84,8 +85,8 @@ const ORDERBOOK_PUBLIC_RESPONSE_EXAMPLE = {
   amount: '100.00000000',
   amount_remaining: '80.00000000',
   price: '25000.00000000',
-  national_min: '500000.00000000',
-  national_max: '2000000.00000000',
+  national_min: '10.00000000',
+  national_max: '500.00000000',
   status: 'pending',
   description: 'Giao dịch trong giờ hành chính',
   created_at: '2026-03-26T01:23:45.000Z',
@@ -200,7 +201,7 @@ export class OrderbookController {
   ) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @UsePipes(
     new ValidationPipe({
       transform: true,
@@ -230,7 +231,7 @@ export class OrderbookController {
   @ApiOperation({
     summary: 'Lấy danh sách order book',
     description:
-      'Chỉ trả về orderbook trạng thái pending. Hỗ trợ lọc theo ngày tạo, option, coin, national currency, khoảng amount (áp vào amount_remaining). Sort giá tự động: option sell từ thấp lên cao, option buy từ cao xuống thấp.',
+      'Chỉ trả về orderbook trạng thái pending và còn khả năng khớp (`amount_remaining` > 0). Không trả thông tin ngân hàng trong danh sách (xem chi tiết orderbook). Hỗ trợ lọc theo ngày tạo, option, coin, national currency, khoảng amount (áp vào amount_remaining). Có thể truyền sortPrice/sortAmount để chủ động sắp xếp; nếu không truyền thì sort mặc định: option sell từ thấp lên cao, option buy từ cao xuống thấp.',
   })
   @ApiOkResponse({
     description: 'Danh sách order book đang pending',
@@ -248,7 +249,7 @@ export class OrderbookController {
 
   /** Đặt trước @Get(':id') để không bị coi id = "my". */
   @Get('my')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TradeBlockedGuard)
   @UsePipes(
     new ValidationPipe({
       transform: true,
@@ -271,7 +272,7 @@ export class OrderbookController {
 
   /** Đặt trước @Get(':id') để không bị coi id = "transactions". */
   @Get('transactions/list')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @UsePipes(
     new ValidationPipe({
       transform: true,
@@ -299,7 +300,7 @@ export class OrderbookController {
   }
 
   @Get('transactions/:id')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @ApiOperation({
     summary: 'Lấy chi tiết transaction',
     description:
@@ -317,21 +318,22 @@ export class OrderbookController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, TradeBlockedGuard)
   @ApiOperation({
     summary: 'Lấy chi tiết order book',
     description:
-      'Chỉ trả về khi orderbook còn pending; các trạng thái khác trả 404 (không lộ tồn tại).',
+      'Yêu cầu đăng nhập (cookie `access_token`). Nếu `amount_remaining` = 0 thì 404. Thông tin ngân hàng (`bank_infor` / `bank_user`) chỉ có khi user hiện tại là buyer hoặc seller của ít nhất một transaction gắn orderbook này: lệnh SELL lấy bank từ cấu hình orderbook; lệnh BUY lấy bank từ transaction (seller đã chọn khi tạo giao dịch). Không thỏa điều kiện thì hai field này là null.',
   })
   @ApiOkResponse({
     description: 'Chi tiết order book',
     schema: { example: ORDERBOOK_DETAIL_RESPONSE_EXAMPLE },
   })
-  getOrderBookDetail(@Param('id') id: string) {
-    return this.orderbookService.getOrderBookDetail(Number(id));
+  getOrderBookDetail(@Request() req: any, @Param('id') id: string) {
+    return this.orderbookService.getOrderBookDetail(Number(id), req.user.uid);
   }
 
   @Post(':id/bank-user')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TradeBlockedGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Tạo yêu cầu đổi bank cho orderbook (chờ admin duyệt)',
@@ -402,7 +404,7 @@ export class OrderbookController {
   }
 
   @Put(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TradeBlockedGuard)
   @ApiOperation({ summary: 'Cập nhật order book' })
   @ApiBody({ type: UpdateOrderbookDto })
   @ApiOkResponse({
@@ -423,7 +425,7 @@ export class OrderbookController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, TradeBlockedGuard)
   @ApiOperation({ summary: 'Soft delete order book và unlock số dư còn lại' })
   @ApiOkResponse({
     description: 'Xóa order book thành công',
@@ -434,7 +436,7 @@ export class OrderbookController {
   }
 
   @Post('transactions')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo transaction cho order book' })
   @ApiBody({ type: CreateTransactionDto })
@@ -447,7 +449,7 @@ export class OrderbookController {
   }
 
   @Post('transactions/:id/confirm-payment')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @UsePipes(
     new ValidationPipe({
       transform: true,
@@ -503,7 +505,7 @@ export class OrderbookController {
   }
 
   @Post('transactions/:id/cancel')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @ApiOperation({ summary: 'Huỷ transaction khi đang pending' })
   @ApiOkResponse({
     description: 'Transaction đã bị huỷ',
@@ -519,7 +521,7 @@ export class OrderbookController {
   }
 
   @Post('transactions/:id/disputes')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'User tạo dispute cho transaction' })
   @ApiBody({ type: CreateDisputeDto })
@@ -536,7 +538,7 @@ export class OrderbookController {
   }
 
   @Get('disputes')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @ApiOperation({ summary: 'User lấy danh sách dispute do mình tạo' })
   @ApiOkResponse({
     description: 'Danh sách dispute',
@@ -547,7 +549,7 @@ export class OrderbookController {
   }
 
   @Get('disputes/:id')
-  @UseGuards(JwtAuthGuard, VerifiedUserGuard)
+  @UseGuards(JwtAuthGuard, VerifiedUserGuard, TradeBlockedGuard)
   @ApiOperation({ summary: 'User lấy chi tiết dispute do mình tạo' })
   @ApiOkResponse({
     description: 'Chi tiết dispute',

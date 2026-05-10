@@ -18,7 +18,7 @@ import {
   TransactionType,
 } from './entities/transaction.entity';
 import { Dispute, DisputeStatus, DisputeType } from './entities/dispute.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserStatus } from '../users/entities/user.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
@@ -38,6 +38,7 @@ import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
+import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
 
 @Injectable()
 export class TransactionService {
@@ -72,11 +73,86 @@ export class TransactionService {
     return value.toFixed(8);
   }
 
-  private getOrderbookBuyLockTotal(amount: number): number {
-    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+  private assertTransactionAmountWithinOrderbookBounds(
+    orderBook: OrderBook,
+    amount: number,
+  ): void {
+    const rawMin = orderBook.ob_national_min;
+    const rawMax = orderBook.ob_national_max;
+    const configuredMin =
+      rawMin != null && String(rawMin).trim() !== ''
+        ? this.toNumber(rawMin)
+        : null;
+    const configuredMax =
+      rawMax != null && String(rawMax).trim() !== ''
+        ? this.toNumber(rawMax)
+        : null;
+
+    const effectiveMin =
+      configuredMin != null
+        ? configuredMin
+        : DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN;
+
+    if (amount < effectiveMin) {
+      throw new BadRequestException(
+        `Transaction amount must be at least ${effectiveMin}`,
+      );
+    }
+    if (configuredMax != null && amount > configuredMax) {
+      throw new BadRequestException(
+        `Transaction amount must not exceed ${configuredMax}`,
+      );
+    }
+  }
+
+  /** Same as orderbook sell create: tx fee % + smartref % from admin settings. */
+  private async getP2pOrderbookFeePercentTotal(): Promise<number> {
+    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+      this.adminSettingsConfigService.getTransactionFeePercent(),
+      this.adminSettingsConfigService.getSmartrefFeePercent(),
+    ]);
+    return transactionFeePercent + smartrefFeePercent;
+  }
+
+  /**
+   * Locked coin for a trade amount — must match seller lock debit on execute
+   * and buy-orderbook seller lock on create/cancel/expiry.
+   */
+  private computeSellerLockCoinAmount(
+    amount: number,
+    totalFeePercent: number,
+  ): number {
     return this.toNumber(
-      this.formatAmount(amount + (amount * feePercent) / 100),
+      this.formatAmount(amount + (amount * totalFeePercent) / 100),
     );
+  }
+
+  private computeSellerLockDebitForExecute(
+    amount: number,
+    totalFeePercent: number,
+    orderBook: OrderBook | null,
+    transUserSell: number,
+    transUserBuy: number,
+  ): number {
+    const posterIsSeller =
+      orderBook != null &&
+      orderBook.ob_option === OrderBookOption.SELL &&
+      orderBook.ob_user_id === transUserSell;
+    const posterIsBuyer =
+      orderBook != null &&
+      orderBook.ob_option === OrderBookOption.BUY &&
+      orderBook.ob_user_id === transUserBuy;
+    if (posterIsSeller || posterIsBuyer) {
+      return this.computeSellerLockCoinAmount(amount, totalFeePercent);
+    }
+    return amount;
+  }
+
+  private async computeBuyOrderbookSellerLockCoinAmount(
+    amount: number,
+  ): Promise<number> {
+    const totalFeePercent = await this.getP2pOrderbookFeePercentTotal();
+    return this.computeSellerLockCoinAmount(amount, totalFeePercent);
   }
 
   private generateReferenceCode(): string {
@@ -247,7 +323,7 @@ export class TransactionService {
       const amount = this.toNumber(transaction.trans_amount);
       const buyLockTotal =
         orderBook.ob_option === OrderBookOption.BUY
-          ? this.getOrderbookBuyLockTotal(amount)
+          ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
           : amount;
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
       orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
@@ -357,12 +433,17 @@ export class TransactionService {
     });
   }
 
-  private async notifyUsers(userIds: number[], title: string, message: string, data: Record<string, any>) {
+  private async notifyUsers(
+    userIds: number[],
+    title: string,
+    message: string,
+    data: Record<string, any>,
+  ) {
     await Promise.allSettled(
       [...new Set(userIds.filter(Boolean))].map((userId) =>
         this.notificationsService.createForUser({
           userId,
-          type: NotificationType.SYSTEM,
+          type: NotificationType.TRANSACTION,
           title,
           message,
           data,
@@ -418,6 +499,11 @@ export class TransactionService {
           );
         }
 
+        this.assertTransactionAmountWithinOrderbookBounds(
+          orderBook,
+          dto.amount,
+        );
+
         const remaining = this.toNumber(orderBook.ob_amount_remaining);
         if (dto.amount <= 0 || dto.amount > remaining) {
           throw new BadRequestException('Invalid transaction amount');
@@ -458,7 +544,8 @@ export class TransactionService {
           if (!sellerWallet)
             throw new NotFoundException('Seller wallet not found');
 
-          const sellerLockTotal = this.getOrderbookBuyLockTotal(dto.amount);
+          const sellerLockTotal =
+            await this.computeBuyOrderbookSellerLockCoinAmount(dto.amount);
           const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
           if (sellerAvailableBalance < sellerLockTotal) {
             throw new BadRequestException(
@@ -718,7 +805,7 @@ export class TransactionService {
     const response = this.toTransactionResponse(hydrated ?? saved);
     await this.notificationsService.createForUser({
       userId: saved.trans_user_sell,
-      type: NotificationType.SYSTEM,
+      type: NotificationType.TRANSACTION,
       title: 'Buyer confirmed payment',
       message: `Buyer has marked payment as completed for transaction ${saved.transs_reference_code}. Please verify and confirm receipt.`,
       data: {
@@ -731,9 +818,10 @@ export class TransactionService {
   }
 
   async confirmReceived(userId: number, id: number) {
-    const refferalFeePercent =
-      await this.adminSettingsConfigService.getSmartrefFeePercent();
-    const feePercent = Number(process.env.FEE_PERCENT) || 0;
+    const [totalFeePercent, smartrefFeePercent] = await Promise.all([
+      this.getP2pOrderbookFeePercentTotal(),
+      this.adminSettingsConfigService.getSmartrefFeePercent(),
+    ]);
 
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
@@ -749,6 +837,20 @@ export class TransactionService {
           'You are not a participant in this transaction',
         );
       }
+
+      const viewerForTradeBlock = await manager.findOne(User, {
+        where: { uid: userId },
+        select: ['ustatus'],
+      });
+      if (
+        viewerForTradeBlock?.ustatus === UserStatus.BLOCK_TRADE &&
+        transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED
+      ) {
+        throw new ForbiddenException(
+          'Trading is blocked for your account. Please contact support.',
+        );
+      }
+
       if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
         throw new BadRequestException(
           'Only payment_confirmed transaction can be executed',
@@ -756,9 +858,6 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
-      const feeAmount = this.toNumber(
-        this.formatAmount((amount * (refferalFeePercent + feePercent)) / 100),
-      );
 
       let orderBook: OrderBook | null = null;
       if (transaction.trans_order_book != null) {
@@ -768,23 +867,15 @@ export class TransactionService {
         });
       }
 
-      const posterIsSeller =
-        orderBook != null &&
-        orderBook.ob_option === OrderBookOption.SELL &&
-        orderBook.ob_user_id === transaction.trans_user_sell;
-      const posterIsBuyer =
-        orderBook != null &&
-        orderBook.ob_option === OrderBookOption.BUY &&
-        orderBook.ob_user_id === transaction.trans_user_buy;
+      const sellerLockDebit = this.computeSellerLockDebitForExecute(
+        amount,
+        totalFeePercent,
+        orderBook,
+        transaction.trans_user_sell,
+        transaction.trans_user_buy,
+      );
 
-      const sellerLockDebit =
-        posterIsSeller && feeAmount > 0
-          ? this.toNumber(this.formatAmount(amount + feeAmount))
-          : posterIsBuyer && feeAmount > 0
-            ? this.toNumber(this.formatAmount(amount + feeAmount))
-            : amount;
-
-      const toBuyer = posterIsBuyer && feeAmount > 0 ? amount : amount;
+      const toBuyer = amount;
 
       const sellerWallet = await manager.findOne(UserWallet, {
         where: {
@@ -830,7 +921,7 @@ export class TransactionService {
         sellerId: transaction.trans_user_sell,
         transactionId: saved.trans_id,
         amount,
-        smartrefFeePercent: refferalFeePercent,
+        smartrefFeePercent,
       };
     });
 
@@ -896,93 +987,95 @@ export class TransactionService {
   }
 
   async cancelTransaction(userId: number, id: number) {
-    return this.dataSource.transaction(async (manager) => {
-      const transaction = await manager.findOne(Transaction, {
-        where: { trans_id: id },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!transaction) throw new NotFoundException('Transaction not found');
-      if (
-        transaction.trans_user_buy !== userId &&
-        transaction.trans_user_sell !== userId
-      ) {
-        throw new ForbiddenException(
-          'You are not a participant in this transaction',
-        );
-      }
-      if (transaction.trans_status !== TransactionStatus.PENDING) {
-        throw new BadRequestException(
-          'Only pending transaction can be cancelled',
-        );
-      }
-
-      const orderBook = await manager.findOne(OrderBook, {
-        where: { ob_id: transaction.trans_order_book ?? 0 },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!orderBook) {
-        throw new NotFoundException(
-          'Order book not found for this transaction',
-        );
-      }
-
-      const amount = this.toNumber(transaction.trans_amount);
-      const buyLockTotal =
-        orderBook.ob_option === OrderBookOption.BUY
-          ? this.getOrderbookBuyLockTotal(amount)
-          : amount;
-      const remaining = this.toNumber(orderBook.ob_amount_remaining);
-      orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
-      if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
-        orderBook.ob_status = OrderBookStatus.PENDING;
-      }
-      await manager.save(OrderBook, orderBook);
-
-      if (orderBook.ob_option === OrderBookOption.BUY) {
-        const sellerWallet = await manager.findOne(UserWallet, {
-          where: {
-            uw_user_id: transaction.trans_user_sell,
-            uw_wallet_coins: transaction.trans_coin,
-          },
+    return this.dataSource
+      .transaction(async (manager) => {
+        const transaction = await manager.findOne(Transaction, {
+          where: { trans_id: id },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!sellerWallet)
-          throw new NotFoundException('Seller wallet not found');
-
-        const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-        if (lockBalance < buyLockTotal) {
+        if (!transaction) throw new NotFoundException('Transaction not found');
+        if (
+          transaction.trans_user_buy !== userId &&
+          transaction.trans_user_sell !== userId
+        ) {
+          throw new ForbiddenException(
+            'You are not a participant in this transaction',
+          );
+        }
+        if (transaction.trans_status !== TransactionStatus.PENDING) {
           throw new BadRequestException(
-            'Seller lock balance is not enough to unlock',
+            'Only pending transaction can be cancelled',
           );
         }
 
-        sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
-        sellerWallet.uw_balance =
-          this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
-        await manager.save(UserWallet, sellerWallet);
-      }
+        const orderBook = await manager.findOne(OrderBook, {
+          where: { ob_id: transaction.trans_order_book ?? 0 },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!orderBook) {
+          throw new NotFoundException(
+            'Order book not found for this transaction',
+          );
+        }
 
-      transaction.trans_status = TransactionStatus.CANCELLED;
-      const saved = await manager.save(Transaction, transaction);
+        const amount = this.toNumber(transaction.trans_amount);
+        const buyLockTotal =
+          orderBook.ob_option === OrderBookOption.BUY
+            ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
+            : amount;
+        const remaining = this.toNumber(orderBook.ob_amount_remaining);
+        orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
+        if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
+          orderBook.ob_status = OrderBookStatus.PENDING;
+        }
+        await manager.save(OrderBook, orderBook);
 
-      const hydrated = await this.loadTransactionWithUsers(
-        (manager as any).getRepository(Transaction),
-        saved.trans_id,
-      );
-      return this.toTransactionResponse(hydrated ?? saved);
-    }).then(async (response) => {
-      await this.notifyUsers(
-        [response.user_buy?.id, response.user_sell?.id],
-        'Transaction cancelled',
-        `Transaction ${response.reference_code} has been cancelled.`,
-        {
-          transaction_id: response.id,
-          reference_code: response.reference_code,
-          status: response.status,
-        },
-      );
-      return response;
-    });
+        if (orderBook.ob_option === OrderBookOption.BUY) {
+          const sellerWallet = await manager.findOne(UserWallet, {
+            where: {
+              uw_user_id: transaction.trans_user_sell,
+              uw_wallet_coins: transaction.trans_coin,
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!sellerWallet)
+            throw new NotFoundException('Seller wallet not found');
+
+          const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
+          if (lockBalance < buyLockTotal) {
+            throw new BadRequestException(
+              'Seller lock balance is not enough to unlock',
+            );
+          }
+
+          sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
+          sellerWallet.uw_balance =
+            this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
+          await manager.save(UserWallet, sellerWallet);
+        }
+
+        transaction.trans_status = TransactionStatus.CANCELLED;
+        const saved = await manager.save(Transaction, transaction);
+
+        const hydrated = await this.loadTransactionWithUsers(
+          (manager as any).getRepository(Transaction),
+          saved.trans_id,
+        );
+        return this.toTransactionResponse(hydrated ?? saved);
+      })
+      .then(async (response) => {
+        await this.notifyUsers(
+          [response.user_buy?.id, response.user_sell?.id],
+          'Transaction cancelled',
+          `Transaction ${response.reference_code} has been cancelled.`,
+          {
+            transaction_id: response.id,
+            reference_code: response.reference_code,
+            status: response.status,
+          },
+        );
+        return response;
+      });
   }
 
   private toDisputeResponse(d: Dispute) {
@@ -1070,7 +1163,7 @@ export class TransactionService {
     const response = this.toDisputeResponse(hydrated ?? saved);
     await this.notificationsService.createForUser({
       userId: dispute.dispute_responder_id,
-      type: NotificationType.SECURITY,
+      type: NotificationType.TRANSACTION,
       title: 'New dispute opened',
       message: `A dispute has been opened for transaction ${tx.transs_reference_code}. Please review the dispute details.`,
       data: {
@@ -1128,5 +1221,20 @@ export class TransactionService {
     const d = await this.findDisputeWithRelations(disputeId);
     if (!d) throw new NotFoundException('Dispute not found');
     return this.toDisputeResponse(d);
+  }
+
+  /** Admin trade-block: cancel every pending tx where user is buyer or seller. */
+  async cancelAllPendingTransactionsForUser(userId: number): Promise<number> {
+    const txs = await this.transactionRepository
+      .createQueryBuilder('t')
+      .where('t.trans_status = :st', { st: TransactionStatus.PENDING })
+      .andWhere('(t.trans_user_buy = :uid OR t.trans_user_sell = :uid)', {
+        uid: userId,
+      })
+      .getMany();
+    for (const tx of txs) {
+      await this.cancelTransaction(userId, tx.trans_id);
+    }
+    return txs.length;
   }
 }

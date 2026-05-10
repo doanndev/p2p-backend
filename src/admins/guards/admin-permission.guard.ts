@@ -7,7 +7,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Admin, AdminLevel } from '../entities/admin.entity';
-import { Permission, PermissionResource, PermissionAction } from '../entities/permission.entity';
+import {
+  Permission,
+  PermissionResource,
+  PermissionAction,
+} from '../entities/permission.entity';
 import { RolePermission } from '../entities/role-permission.entity';
 
 @Injectable()
@@ -70,4 +74,3 @@ export class AdminPermissionGuard implements CanActivate {
     return true;
   }
 }
-

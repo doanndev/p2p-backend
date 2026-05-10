@@ -1,4 +1,13 @@
-import { IsOptional, IsNumber, IsArray, Min, Max, ArrayMinSize, ValidateIf, IsString } from 'class-validator';
+import {
+  IsOptional,
+  IsNumber,
+  IsArray,
+  Min,
+  Max,
+  ArrayMinSize,
+  ValidateIf,
+  IsString,
+} from 'class-validator';
 
 export class SmartRefLevelSettingsDto {
   @IsOptional()
@@ -18,4 +27,3 @@ export class SmartRefLevelSettingsDto {
   @IsString()
   logIpAddress?: string;
 }
-

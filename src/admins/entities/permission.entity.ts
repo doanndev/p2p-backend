@@ -37,7 +37,12 @@ export class Permission {
   @PrimaryGeneratedColumn({ name: 'permission_id', type: 'integer' })
   permission_id: number;
 
-  @Column({ name: 'permission_name', type: 'varchar', length: 100, unique: true })
+  @Column({
+    name: 'permission_name',
+    type: 'varchar',
+    length: 100,
+    unique: true,
+  })
   permission_name: string;
 
   @Column({
@@ -71,7 +76,9 @@ export class Permission {
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updated_at: Date;
 
-  @OneToMany(() => RolePermission, (rolePermission) => rolePermission.permission)
+  @OneToMany(
+    () => RolePermission,
+    (rolePermission) => rolePermission.permission,
+  )
   role_permissions: RolePermission[];
 }
-

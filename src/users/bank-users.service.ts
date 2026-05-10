@@ -85,7 +85,9 @@ export class BankUsersService {
     }
   }
 
-  private async saveCreateBankRequestIndex(requestIds: string[]): Promise<void> {
+  private async saveCreateBankRequestIndex(
+    requestIds: string[],
+  ): Promise<void> {
     const uniqueIds = [...new Set(requestIds)].filter(
       (requestId) => requestId.trim().length > 0,
     );
@@ -102,7 +104,9 @@ export class BankUsersService {
     await this.saveCreateBankRequestIndex(current);
   }
 
-  private async removeCreateBankRequestFromIndex(requestId: string): Promise<void> {
+  private async removeCreateBankRequestFromIndex(
+    requestId: string,
+  ): Promise<void> {
     const current = await this.getCreateBankRequestIndex();
     const next = current.filter((id) => id !== requestId);
     await this.saveCreateBankRequestIndex(next);
@@ -111,7 +115,9 @@ export class BankUsersService {
   private async getCreateBankRequest(
     requestId: string,
   ): Promise<CreateBankRequestPayload | null> {
-    const raw = await this.cacheService.get(this.getCreateBankRequestKey(requestId));
+    const raw = await this.cacheService.get(
+      this.getCreateBankRequestKey(requestId),
+    );
     if (!raw) return null;
 
     try {
@@ -213,7 +219,9 @@ export class BankUsersService {
       .filter((pair) => pair.request === null)
       .map((pair) => pair.requestId);
     if (missingIds.length > 0) {
-      await this.saveCreateBankRequestIndex(validRequests.map((r) => r.requestId));
+      await this.saveCreateBankRequestIndex(
+        validRequests.map((r) => r.requestId),
+      );
     }
     const myPendingCount = validRequests.filter(
       (request) => request.requestedByUserId === userId,
@@ -228,7 +236,8 @@ export class BankUsersService {
       requestId,
       requestedByUserId: userId,
       bankName: dto.bankName.trim(),
-      bankBranch: dto.bankBranch === undefined ? null : (dto.bankBranch ?? null),
+      bankBranch:
+        dto.bankBranch === undefined ? null : (dto.bankBranch ?? null),
       bankAccountName: requestUser.ufulllname.trim(),
       bankAccountNumber: dto.bankAccountNumber.trim(),
       requestedAt: new Date().toISOString(),
@@ -273,7 +282,9 @@ export class BankUsersService {
       .filter((pair) => pair.request === null)
       .map((pair) => pair.requestId);
     if (missingIds.length > 0) {
-      await this.saveCreateBankRequestIndex(validRequests.map((r) => r.requestId));
+      await this.saveCreateBankRequestIndex(
+        validRequests.map((r) => r.requestId),
+      );
     }
     if (validRequests.length === 0) {
       return { statusCode: 200, data: [] };

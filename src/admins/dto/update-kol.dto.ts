@@ -7,11 +7,14 @@ export enum UpdateKolStatus {
 }
 
 export class UpdateKolDto {
-  @ApiPropertyOptional({ enum: UpdateKolStatus, example: UpdateKolStatus.SUCCESS, description: 'Kết quả duyệt hồ sơ KOL' })
+  @ApiPropertyOptional({
+    enum: UpdateKolStatus,
+    example: UpdateKolStatus.SUCCESS,
+    description: 'Kết quả duyệt hồ sơ KOL',
+  })
   @IsOptional()
   @IsEnum(UpdateKolStatus, {
     message: 'Status must be either "success" or "fail"',
   })
   status?: UpdateKolStatus;
 }
-

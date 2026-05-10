@@ -7,10 +7,22 @@ export class RegisterDto {
   @ApiProperty({ example: 'john@example.com', description: 'Email người dùng' })
   email: string;
 
-  @ApiPropertyOptional({ example: '+84901234567', description: 'Số điện thoại' })
+  @ApiPropertyOptional({
+    example: '+84901234567',
+    description: 'Số điện thoại',
+  })
   phone?: string;
 
-  @ApiProperty({ example: 'StrongPassword@123', description: 'Mật khẩu tài khoản' })
+  @ApiPropertyOptional({
+    example: '123456789',
+    description: 'Telegram ID hoặc username Telegram',
+  })
+  telegramId?: string;
+
+  @ApiProperty({
+    example: 'StrongPassword@123',
+    description: 'Mật khẩu tài khoản',
+  })
   password: string;
 
   @ApiProperty({ example: 'John Doe', description: 'Tên hiển thị' })
