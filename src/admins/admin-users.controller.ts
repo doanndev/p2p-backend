@@ -120,6 +120,110 @@ export class AdminUsersController {
     return result;
   }
 
+  @Get('need-levelup')
+  @ApiOperation({ summary: 'Danh sách user đang chờ duyệt level-up' })
+  @ApiOkResponse({
+    description: 'Danh sách user need_levelup=true',
+  })
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
+  @HttpCode(HttpStatus.OK)
+  async getUsersNeedLevelUp() {
+    return this.adminsUsersOpsService.getUsersNeedLevelUp();
+  }
+
+  @Get('bank-users')
+  @ApiOperation({ summary: 'Danh sách bank user phân trang (với filter)' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    example: 1,
+    description: 'Trang (mặc định 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    example: 20,
+    description: 'Số lượng item mỗi trang (mặc định 20, tối đa 100)',
+  })
+  @ApiQuery({
+    name: 'userName',
+    required: false,
+    example: 'john_doe',
+    description: 'Tìm kiếm theo username hoặc full name',
+  })
+  @ApiQuery({
+    name: 'bankName',
+    required: false,
+    example: 'Agribank',
+    description: 'Tìm kiếm theo tên ngân hàng',
+  })
+  @ApiQuery({
+    name: 'bankAccountNumber',
+    required: false,
+    example: '1234567890',
+    description: 'Tìm kiếm theo số tài khoản ngân hàng',
+  })
+  @ApiQuery({
+    name: 'bankAccountName',
+    required: false,
+    example: 'Nguyễn Văn A',
+    description: 'Tìm kiếm theo tên chủ tài khoản',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['created_at', 'username', 'bank_name'],
+    example: 'created_at',
+    description: 'Cột sắp xếp',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    required: false,
+    enum: ['ASC', 'DESC'],
+    example: 'DESC',
+    description: 'Hướng sắp xếp',
+  })
+  @ApiOkResponse({
+    description: 'Danh sách bank user',
+    schema: {
+      example: {
+        statusCode: 200,
+        data: [
+          {
+            uid: 120,
+            uname: 'john_doe',
+            email: 'john@example.com',
+            phone: '0912345678',
+            display_name: 'Nguyễn Văn John',
+            bu_id: 5,
+            bu_bank_name: 'Agribank',
+            bu_bank_branch: 'Chi nhánh Hà Nội',
+            bu_bank_account_name: 'Nguyễn Văn John',
+            bu_bank_account_number: '1234567890',
+            created_at: '2024-01-15T10:30:00Z',
+            updated_at: '2024-01-15T10:30:00Z',
+          },
+        ],
+        meta: { page: 1, limit: 20, total: 50, total_pages: 3 },
+      },
+    },
+  })
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
+  @HttpCode(HttpStatus.OK)
+  async getBankUsers(@Query() queryDto: QueryBankUsersDto) {
+    const result = await this.adminsUsersOpsService.getBankUsersPaginated(
+      queryDto.page || 1,
+      queryDto.limit || 20,
+      queryDto.sortBy || 'created_at',
+      queryDto.sortOrder || 'DESC',
+      queryDto.userName,
+      queryDto.bankName,
+      queryDto.bankAccountNumber,
+      queryDto.bankAccountName,
+    );
+    return result;
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Chi tiết user theo id' })
   @ApiOkResponse({
@@ -142,17 +246,6 @@ export class AdminUsersController {
     const uid = parseInt(id, 10);
     const result = await this.adminsUsersOpsService.getUserById(uid);
     return result;
-  }
-
-  @Get('need-levelup')
-  @ApiOperation({ summary: 'Danh sách user đang chờ duyệt level-up' })
-  @ApiOkResponse({
-    description: 'Danh sách user need_levelup=true',
-  })
-  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
-  @HttpCode(HttpStatus.OK)
-  async getUsersNeedLevelUp() {
-    return this.adminsUsersOpsService.getUsersNeedLevelUp();
   }
 
   @Post(':id/update-kol')
@@ -262,99 +355,6 @@ export class AdminUsersController {
       articleId,
       updateKolArticleStatusDto.status,
       admin.admin_id,
-    );
-    return result;
-  }
-
-  @Get('bank-users')
-  @ApiOperation({ summary: 'Danh sách bank user phân trang (với filter)' })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    example: 1,
-    description: 'Trang (mặc định 1)',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    example: 20,
-    description: 'Số lượng item mỗi trang (mặc định 20, tối đa 100)',
-  })
-  @ApiQuery({
-    name: 'userName',
-    required: false,
-    example: 'john_doe',
-    description: 'Tìm kiếm theo username hoặc full name',
-  })
-  @ApiQuery({
-    name: 'bankName',
-    required: false,
-    example: 'Agribank',
-    description: 'Tìm kiếm theo tên ngân hàng',
-  })
-  @ApiQuery({
-    name: 'bankAccountNumber',
-    required: false,
-    example: '1234567890',
-    description: 'Tìm kiếm theo số tài khoản ngân hàng',
-  })
-  @ApiQuery({
-    name: 'bankAccountName',
-    required: false,
-    example: 'Nguyễn Văn A',
-    description: 'Tìm kiếm theo tên chủ tài khoản',
-  })
-  @ApiQuery({
-    name: 'sortBy',
-    required: false,
-    enum: ['created_at', 'username', 'bank_name'],
-    example: 'created_at',
-    description: 'Cột sắp xếp',
-  })
-  @ApiQuery({
-    name: 'sortOrder',
-    required: false,
-    enum: ['ASC', 'DESC'],
-    example: 'DESC',
-    description: 'Hướng sắp xếp',
-  })
-  @ApiOkResponse({
-    description: 'Danh sách bank user',
-    schema: {
-      example: {
-        statusCode: 200,
-        data: [
-          {
-            uid: 120,
-            uname: 'john_doe',
-            email: 'john@example.com',
-            phone: '0912345678',
-            display_name: 'Nguyễn Văn John',
-            bu_id: 5,
-            bu_bank_name: 'Agribank',
-            bu_bank_branch: 'Chi nhánh Hà Nội',
-            bu_bank_account_name: 'Nguyễn Văn John',
-            bu_bank_account_number: '1234567890',
-            created_at: '2024-01-15T10:30:00Z',
-            updated_at: '2024-01-15T10:30:00Z',
-          },
-        ],
-        meta: { page: 1, limit: 20, total: 50, total_pages: 3 },
-      },
-    },
-  })
-  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
-  @HttpCode(HttpStatus.OK)
-  async getBankUsers(@Query() queryDto: QueryBankUsersDto) {
-    const result = await this.adminsUsersOpsService.getBankUsersPaginated(
-      queryDto.page || 1,
-      queryDto.limit || 20,
-      queryDto.sortBy || 'created_at',
-      queryDto.sortOrder || 'DESC',
-      queryDto.userName,
-      queryDto.bankName,
-      queryDto.bankAccountNumber,
-      queryDto.bankAccountName,
     );
     return result;
   }

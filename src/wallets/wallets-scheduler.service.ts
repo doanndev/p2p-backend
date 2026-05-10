@@ -9,11 +9,6 @@ import {
   WalletHistoryOption,
   WalletHistoryStatus,
 } from './entities/wallet-history.entity';
-import {
-  WalletTransfer,
-  WalletTransferFrom,
-  WalletTransferStatus,
-} from './entities/wallet-transfer.entity';
 import { WalletDepositTracker } from './entities/wallet-deposit-tracker.entity';
 import { UserWallet } from './entities/user-wallet.entity';
 import { UserWalletNetwork } from './entities/user-wallet-network.entity';
@@ -53,8 +48,6 @@ export class WalletsSchedulerService implements OnModuleInit {
     private coinRepository: Repository<Coin>,
     @InjectRepository(CoinNetwork)
     private coinNetworkRepository: Repository<CoinNetwork>,
-    @InjectRepository(WalletTransfer)
-    private walletTransferRepository: Repository<WalletTransfer>,
     @InjectRepository(UserWalletNetwork)
     private useWalletNetworkRepository: Repository<UserWalletNetwork>,
     private cacheService: CacheService,
@@ -906,15 +899,11 @@ export class WalletsSchedulerService implements OnModuleInit {
 
   /**
    * Hàm chung để cập nhật balance của user với logic tối ưu
-   * Balance mới = totalDeposit + totalReward - totalStaking - totalWithdraw
-   * Chỉ cập nhật database nếu balance mới khác với balance cũ theo điều kiện:
-   * - Nếu totalStaking <= (totalDeposit + totalReward - totalWithdraw): chỉ update nếu balance mới != balance cũ
-   * - Nếu totalStaking > (totalDeposit + totalReward - totalWithdraw): chỉ update nếu balance mới + 10 >= balance cũ
+   * Balance mới = totalDeposit - totalWithdraw (không tính reward/staking — hệ thống hiện không gộp vào công thức này)
+   * Chỉ cập nhật database nếu balance mới khác balance cũ (theo tolerance).
    * @param userId - ID của user
    * @param coinId - ID của coin
    * @param totalDeposit - Tổng số tiền nạp thành công (optional, sẽ tính nếu không truyền)
-   * @param totalReward - Tổng số tiền reward/gift chuyển vào main (optional, sẽ tính nếu không truyền)
-   * @param totalStaking - Tổng số tiền staking đang running/pending-claim (optional, sẽ tính nếu không truyền)
    * @param totalWithdraw - Tổng số tiền đã rút (optional, sẽ tính nếu không truyền)
    * @returns true nếu đã cập nhật, false nếu không cần cập nhật
    */
@@ -922,8 +911,6 @@ export class WalletsSchedulerService implements OnModuleInit {
     userId: number,
     coinId: number,
     totalDeposit?: number,
-    totalReward?: number,
-    totalStaking?: number,
     totalWithdraw?: number,
   ): Promise<boolean> {
     try {
@@ -942,28 +929,6 @@ export class WalletsSchedulerService implements OnModuleInit {
           })
           .getRawOne();
         totalDeposit = parseFloat(totalDepositResult?.total || '0');
-      }
-
-      if (totalReward === undefined) {
-        const totalRewardResult = await this.walletTransferRepository
-          .createQueryBuilder('wt')
-          .select('COALESCE(SUM(wt.wt_amount), 0)', 'total')
-          .where('wt.wt_user_id = :userId', { userId })
-          .andWhere('wt.wt_from IN (:...fromTypes)', {
-            fromTypes: [WalletTransferFrom.REWARD, WalletTransferFrom.GIFT],
-          })
-          .andWhere('wt.wt_to = :toType', {
-            toType: 'main',
-          })
-          .andWhere('wt.wt_status = :status', {
-            status: WalletTransferStatus.SUCCESS,
-          })
-          .getRawOne();
-        totalReward = parseFloat(totalRewardResult?.total || '0');
-      }
-
-      if (totalStaking === undefined) {
-        totalStaking = 0;
       }
 
       if (totalWithdraw === undefined) {
@@ -987,8 +952,7 @@ export class WalletsSchedulerService implements OnModuleInit {
       }
 
       // Tính balance mới
-      let newBalance =
-        totalDeposit + totalReward - totalStaking - totalWithdraw;
+      let newBalance = totalDeposit - totalWithdraw;
 
       // Đảm bảo balance không âm: nếu <= 0 thì set = 0
       if (newBalance <= 0) {
@@ -1018,41 +982,23 @@ export class WalletsSchedulerService implements OnModuleInit {
         return true;
       }
 
-      // Balance cũ chỉ là uw_balance (không cộng staking)
       const oldBalance = parseFloat(userWallet.uw_balance.toString());
 
-      // Kiểm tra điều kiện để quyết định có cần update hay không
-      const availableAmount = totalDeposit + totalReward - totalWithdraw; // Số tiền có sẵn (chưa trừ staking)
-      let shouldUpdate = true;
-
-      // Trường hợp không có staking (totalStaking = 0) hoặc staking <= availableAmount
-      // Logic: Nếu balance mới = balance cũ thì không cần update
-      if (totalStaking <= availableAmount) {
-        // Bao gồm cả trường hợp totalStaking = 0 (không có staking nào)
-        const tolerance = 0.00000001; // Sai số cho phép
-        if (Math.abs(newBalance - oldBalance) <= tolerance) {
-          shouldUpdate = false;
-        }
-      } else {
-        // Trường hợp tổng staking > (totalDeposit - totalWithdraw) - có thể do lỗi dữ liệu hoặc edge case
-        // Nếu balance mới + 10 < balance cũ thì không cần update (cho phép chênh lệch tối đa 10)
-        if (newBalance + 10 < oldBalance) {
-          shouldUpdate = false;
-        }
-      }
+      const tolerance = 0.00000001;
+      const shouldUpdate = Math.abs(newBalance - oldBalance) > tolerance;
 
       // Chỉ cập nhật nếu cần thiết
       if (shouldUpdate) {
         userWallet.uw_balance = newBalance as any;
         await this.userWalletRepository.save(userWallet);
         this.logger.log(
-          `uw_balance u=${userId} coin=${coinId} ->${newBalance} dep=${totalDeposit} rew=${totalReward} stk=${totalStaking} wd=${totalWithdraw}`,
+          `uw_balance u=${userId} coin=${coinId} ->${newBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
         );
         return true;
       }
 
       this.logger.debug(
-        `uw_balance skip u=${userId} coin=${coinId} stored=${oldBalance} new=${newBalance} dep=${totalDeposit} rew=${totalReward} wd=${totalWithdraw}`,
+        `uw_balance skip u=${userId} coin=${coinId} stored=${oldBalance} new=${newBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
       );
       return false;
     } catch (error) {
@@ -1066,8 +1012,7 @@ export class WalletsSchedulerService implements OnModuleInit {
 
   /**
    * Cập nhật balance của user
-   * uw_balance = tổng nạp thành công - tổng staking (running/pending-claim) - tổng rút (pending/success/checked)
-   * Chỉ cập nhật database nếu balance mới khác với balance cũ (uw_balance + staking)
+   * uw_balance = tổng nạp thành công - tổng rút (pending/success/checked)
    */
   /** @returns true nếu đã ghi `user_wallets.uw_balance`, false nếu bỏ qua (đã khớp hoặc shouldUpdate=false). */
   async updateUserBalance(userId: number, coinId: number): Promise<boolean> {

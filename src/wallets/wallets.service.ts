@@ -1783,10 +1783,8 @@ export class WalletsService implements OnModuleInit {
 
   /**
    * Kiểm tra và đồng bộ balance trước khi rút tiền
-   * Kiểm tra xem uw_balance có bằng tổng deposit - tổng withdraw - tổng staking không
-   * Nếu không bằng thì gọi lại hàm kiểm tra lịch sử giao dịch và cập nhật balance
-   * Đồng bộ TẤT CẢ networks của user (SOL, ETH, BSC, …) để đảm bảo tính chính xác
-   * Chỉ cập nhật database nếu balance mới khác với balance cũ (uw_balance + staking)
+   * So khớp uw_balance với expected = tổng deposit SUCCESS − tổng withdraw (pending/success/checked)
+   * Nếu không khớp thì sync on-chain rồi `updateUserBalanceIfChanged`.
    */
   private async checkAndSyncBalance(
     userId: number,
@@ -1821,84 +1819,9 @@ export class WalletsService implements OnModuleInit {
         return;
       }
 
-      // 3. Kiểm tra điều kiện để quyết định có cần sync hay không
-      // Tính các giá trị cần thiết để kiểm tra
-      const totalDepositResult = await this.walletHistoryRepository
-        .createQueryBuilder('wh')
-        .select('COALESCE(SUM(wh.wh_amount), 0)', 'total')
-        .where('wh.wh_user = :userId', { userId })
-        .andWhere('wh.wh_coins = :coinId', { coinId })
-        .andWhere('wh.wh_option = :option', {
-          option: WalletHistoryOption.DEPOSIT,
-        })
-        .andWhere('wh.wh_status = :status', {
-          status: WalletHistoryStatus.SUCCESS,
-        })
-        .getRawOne();
-
-      const totalDeposit = parseFloat(totalDepositResult?.total || '0');
-
-      const totalWithdrawResult = await this.walletHistoryRepository
-        .createQueryBuilder('wh')
-        .select('COALESCE(SUM(wh.wh_amount), 0)', 'total')
-        .where('wh.wh_user = :userId', { userId })
-        .andWhere('wh.wh_coins = :coinId', { coinId })
-        .andWhere('wh.wh_option = :option', {
-          option: WalletHistoryOption.WITHDRAW,
-        })
-        .andWhere('wh.wh_status IN (:...statuses)', {
-          statuses: [
-            WalletHistoryStatus.PENDING,
-            WalletHistoryStatus.SUCCESS,
-            WalletHistoryStatus.CHECKED,
-          ],
-        })
-        .getRawOne();
-
-      const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
-
-      const totalStaking = 0;
-
-      // Tính totalReward từ wallet_transfers
-      const totalRewardResult = await this.walletTransferRepository
-        .createQueryBuilder('wt')
-        .select('COALESCE(SUM(wt.wt_amount), 0)', 'total')
-        .where('wt.wt_user_id = :userId', { userId })
-        .andWhere('wt.wt_from IN (:...fromTypes)', {
-          fromTypes: [WalletTransferFrom.REWARD, WalletTransferFrom.GIFT],
-        })
-        .andWhere('wt.wt_to = :toType', {
-          toType: 'main',
-        })
-        .andWhere('wt.wt_status = :status', {
-          status: WalletTransferStatus.SUCCESS,
-        })
-        .getRawOne();
-
-      const totalReward = parseFloat(totalRewardResult?.total || '0');
-
-      // Balance cũ chỉ là uw_balance (không cộng staking)
       const oldBalance = parseFloat(userWallet.uw_balance.toString());
-
-      // Kiểm tra điều kiện để quyết định có cần sync hay không
-      const availableAmount = totalDeposit + totalReward - totalWithdraw; // Số tiền có sẵn (chưa trừ staking)
-      let shouldSync = true;
-
-      // Trường hợp không có staking (totalStaking = 0) hoặc staking <= availableAmount
-      // Logic: Nếu balance mới = balance cũ thì không cần sync
-      if (totalStaking <= availableAmount) {
-        // Bao gồm cả trường hợp totalStaking = 0 (không có staking nào)
-        const tolerance = 0.00000001; // Sai số cho phép
-        if (Math.abs(expectedBalance - oldBalance) <= tolerance) {
-          shouldSync = false;
-        }
-      } else {
-        // Trường hợp tổng staking > (totalDeposit - totalWithdraw) - có thể do lỗi dữ liệu hoặc edge case
-        // Nếu balance mới + 10 < balance cũ thì không cần sync (cho phép chênh lệch tối đa 10)
-        if (expectedBalance + 10 < oldBalance) {
-          shouldSync = false;
-        }
-      }
+      const tolerance = 0.00000001;
+      const shouldSync = Math.abs(expectedBalance - oldBalance) > tolerance;
 
       if (shouldSync) {
         // Balance không khớp, cần đồng bộ lại từ onchain
@@ -1970,9 +1893,8 @@ export class WalletsService implements OnModuleInit {
   }
 
   /**
-   * Tính toán expected balance dựa trên công thức
-   * expectedBalance = totalDeposit + totalReward - totalStaking - totalWithdraw
-   * với totalReward = tổng wt_amount từ wallet_transfers (wt_from = reward/gift, wt_to = main, wt_status = success)
+   * Expected balance cho đối soát ví: deposit SUCCESS − withdraw (pending/success/checked).
+   * Reward/staking không gộp vào công thức này (theo policy hiện tại).
    */
   private async calculateExpectedBalance(
     userId: number,
@@ -1994,27 +1916,7 @@ export class WalletsService implements OnModuleInit {
 
     const totalDeposit = parseFloat(totalDepositResult?.total || '0');
 
-    // 2. Tổng số tiền reward/gift chuyển vào main (từ wallet_transfers)
-    const totalRewardResult = await this.walletTransferRepository
-      .createQueryBuilder('wt')
-      .select('COALESCE(SUM(wt.wt_amount), 0)', 'total')
-      .where('wt.wt_user_id = :userId', { userId })
-      .andWhere('wt.wt_from IN (:...fromTypes)', {
-        fromTypes: [WalletTransferFrom.REWARD, WalletTransferFrom.GIFT],
-      })
-      .andWhere('wt.wt_to = :toType', {
-        toType: 'main',
-      })
-      .andWhere('wt.wt_status = :status', {
-        status: WalletTransferStatus.SUCCESS,
-      })
-      .getRawOne();
-
-    const totalReward = parseFloat(totalRewardResult?.total || '0');
-
-    const totalStaking = 0;
-
-    // 4. Tổng số tiền đã rút (pending/success/checked)
+    // 2. Tổng số tiền đã rút (pending/success/checked)
     const totalWithdrawResult = await this.walletHistoryRepository
       .createQueryBuilder('wh')
       .select('COALESCE(SUM(wh.wh_amount), 0)', 'total')
@@ -2034,9 +1936,7 @@ export class WalletsService implements OnModuleInit {
 
     const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
 
-    // 5. Tính expected balance
-    const expectedBalance =
-      totalDeposit + totalReward - totalStaking - totalWithdraw;
+    const expectedBalance = totalDeposit - totalWithdraw;
     // Đảm bảo balance không âm: nếu <= 0 thì return 0
     return expectedBalance <= 0 ? 0 : expectedBalance;
   }
