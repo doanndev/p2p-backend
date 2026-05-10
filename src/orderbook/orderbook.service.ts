@@ -656,7 +656,7 @@ export class OrderbookService {
         const smartrefRewardAmount = this.toNumber(
           this.formatAmount((amount * smartrefFeePercent) / 100),
         );
-        await this.smartRefService
+        void this.smartRefService
           .disputeSmartref(userId, smartrefRewardAmount)
           .catch((error) => {
             console.error(
@@ -1037,7 +1037,7 @@ export class OrderbookService {
 
     const adminEmail = this.configService.get<string>('ADMIN_EMAIL')?.trim();
     if (adminEmail) {
-      await this.emailService
+      void this.emailService
         .sendOrderbookBankChangePendingToAdmin(adminEmail, {
           orderbookId: orderBookId,
           requestedByUserId: userId,
@@ -1046,21 +1046,33 @@ export class OrderbookService {
           targetBankUserId: bankUserId,
           requestedAt: payload.requestedAt,
         })
-        .catch(() => undefined);
+        .catch((err) => {
+          console.error(
+            `Failed admin email for bank change OB ${orderBookId}:`,
+            err,
+          );
+        });
     }
 
-    await this.notificationsService.createForUser({
-      userId,
-      type: NotificationType.ORDERBOOK,
-      title: 'Bank change request submitted',
-      message:
-        'Your orderbook bank change request has been submitted and is waiting for admin approval.',
-      data: {
-        orderbook_id: orderBookId,
-        bank_user_id: bankUserId,
-        requested_at: payload.requestedAt,
-      },
-    });
+    void this.notificationsService
+      .createForUser({
+        userId,
+        type: NotificationType.ORDERBOOK,
+        title: 'Bank change request submitted',
+        message:
+          'Your orderbook bank change request has been submitted and is waiting for admin approval.',
+        data: {
+          orderbook_id: orderBookId,
+          bank_user_id: bankUserId,
+          requested_at: payload.requestedAt,
+        },
+      })
+      .catch((err) => {
+        console.error(
+          `Failed user notification bank change OB ${orderBookId}:`,
+          err,
+        );
+      });
 
     return {
       message: 'Bank change request submitted and waiting for admin approval',
@@ -1218,20 +1230,27 @@ export class OrderbookService {
     );
     await this.removeOrderbookBankChangeRequestFromIndex(orderbookId);
 
-    await this.notificationsService.createForUser({
-      userId: request.requestedByUserId,
-      type: NotificationType.ORDERBOOK,
-      title: approve
-        ? 'Bank change request approved'
-        : 'Bank change request rejected',
-      message: approve
-        ? `Your bank change request for orderbook #${orderbookId} has been approved.`
-        : `Your bank change request for orderbook #${orderbookId} has been rejected.`,
-      data: {
-        orderbook_id: orderbookId,
-        approved: approve,
-      },
-    });
+    void this.notificationsService
+      .createForUser({
+        userId: request.requestedByUserId,
+        type: NotificationType.ORDERBOOK,
+        title: approve
+          ? 'Bank change request approved'
+          : 'Bank change request rejected',
+        message: approve
+          ? `Your bank change request for orderbook #${orderbookId} has been approved.`
+          : `Your bank change request for orderbook #${orderbookId} has been rejected.`,
+        data: {
+          orderbook_id: orderbookId,
+          approved: approve,
+        },
+      })
+      .catch((err) => {
+        console.error(
+          `Failed notify user after OB ${orderbookId} bank review:`,
+          err,
+        );
+      });
 
     return {
       message: approve
