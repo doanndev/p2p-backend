@@ -805,26 +805,25 @@ export class WalletsSchedulerService implements OnModuleInit {
           }
         }
 
-        // Gửi email thông báo nạp USDT thành công cho user
-        try {
-          const user = await this.userRepository.findOne({
-            where: { uid: tracker.awt_user_id },
-          });
+        const user = await this.userRepository.findOne({
+          where: { uid: tracker.awt_user_id },
+        });
 
-          if (user && user.uemail) {
-            await this.emailService.sendDepositNotification(user.uemail, {
+        if (user?.uemail) {
+          void this.emailService
+            .sendDepositNotification(user.uemail, {
               amount: tx.amount,
               asset: coin?.coin_symbol || 'USDT',
               network: network.net_symbol,
               txHash: tx.hash,
               walletAddress: tracker.awt_address,
               createdAt: tx.timestamp,
+            })
+            .catch((emailError: unknown) => {
+              this.logger.warn(
+                `deposit email u=${tracker.awt_user_id}: ${emailError instanceof Error ? emailError.message : String(emailError)}`,
+              );
             });
-          }
-        } catch (emailError: any) {
-          this.logger.error(
-            `deposit email u=${tracker.awt_user_id}: ${emailError.message}`,
-          );
         }
 
         this.logger.log(

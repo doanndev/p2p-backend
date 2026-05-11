@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -36,6 +37,7 @@ const CREATE_BANK_REQUEST_INDEX_KEY = 'bank-user:create-request:index';
 
 @Injectable()
 export class BankUsersService {
+  private readonly logger = new Logger(BankUsersService.name);
   private readonly MAX_BANKS_PER_USER = 5;
 
   constructor(
@@ -391,7 +393,13 @@ export class BankUsersService {
       uc_user_id: userId,
     });
     await this.userCodeRepository.save(userCode);
-    await this.emailService.sendEmailVerificationCode(user.uemail, code);
+    void this.emailService
+      .sendEmailVerificationCode(user.uemail, code)
+      .catch((err) => {
+        this.logger.warn(
+          `bank mutation verify email failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     return {
       message: 'Verification code has been sent to your email',

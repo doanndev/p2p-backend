@@ -862,8 +862,13 @@ export class UsersService {
     // Save user code to database
     const savedUserCode = await this.userCodeRepository.save(userCode);
 
-    // Send email with verification code
-    await this.emailService.sendEmailVerificationCode(user.uemail, code);
+    void this.emailService
+      .sendEmailVerificationCode(user.uemail, code)
+      .catch((err) => {
+        this.logger.warn(
+          `sendEmailVerificationCode failed userId=${user.uid}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     return savedUserCode;
   }
@@ -922,11 +927,13 @@ export class UsersService {
       }
 
       if (canResend) {
-        // Resend email with existing code
-        await this.emailService.sendEmailVerificationCode(
-          user.uemail,
-          existingCode.uc_value,
-        );
+        void this.emailService
+          .sendEmailVerificationCode(user.uemail, existingCode.uc_value)
+          .catch((err) => {
+            this.logger.warn(
+              `resend verification email failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
 
         // Update cache with current time (set to expire after 1 minute)
         await this.cacheService.set(cacheKey, now.toISOString(), 60);
@@ -1595,7 +1602,7 @@ export class UsersService {
           select: ['uid', 'uname', 'uemail', 'ufulllname'],
         });
 
-        await this.emailService
+        void this.emailService
           .sendNewKycNotificationToAdmin(adminEmail, {
             userId,
             userName: user?.uname || 'unknown',
@@ -1611,17 +1618,23 @@ export class UsersService {
           });
       }
 
-      await this.notificationsService.createForUser({
-        userId,
-        type: NotificationType.USER,
-        title: 'KYC submitted for review',
-        message:
-          'Your KYC paper proof has been received and is pending admin review.',
-        data: {
-          verification_id: savedVerify.uv_id,
-          status: savedVerify.uv_status,
-        },
-      });
+      void this.notificationsService
+        .createForUser({
+          userId,
+          type: NotificationType.USER,
+          title: 'KYC submitted for review',
+          message:
+            'Your KYC paper proof has been received and is pending admin review.',
+          data: {
+            verification_id: savedVerify.uv_id,
+            status: savedVerify.uv_status,
+          },
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `KYC paper createForUser failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
 
       const response = {
         statusCode: 200,
@@ -1753,8 +1766,13 @@ export class UsersService {
     // Save token to database
     await this.userCodeRepository.save(userCode);
 
-    // Send password reset email with link
-    await this.emailService.sendPasswordResetLink(user.uemail, token);
+    void this.emailService
+      .sendPasswordResetLink(user.uemail, token)
+      .catch((err) => {
+        this.logger.warn(
+          `sendPasswordResetLink failed userId=${user.uid}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     return {
       statusCode: 200,
