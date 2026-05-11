@@ -898,14 +898,10 @@ export class WalletsSchedulerService implements OnModuleInit {
   }
 
   /**
-   * Hàm chung để cập nhật balance của user với logic tối ưu
-   * Balance mới = totalDeposit - totalWithdraw (không tính reward/staking — hệ thống hiện không gộp vào công thức này)
-   * Chỉ cập nhật database nếu balance mới khác balance cũ (theo tolerance).
-   * @param userId - ID của user
-   * @param coinId - ID của coin
-   * @param totalDeposit - Tổng số tiền nạp thành công (optional, sẽ tính nếu không truyền)
-   * @param totalWithdraw - Tổng số tiền đã rút (optional, sẽ tính nếu không truyền)
-   * @returns true nếu đã cập nhật, false nếu không cần cập nhật
+   * Đồng bộ `uw_balance` từ sổ cái nạp/rút, **giữ nguyên** `uw_lock_balance` (P2P orderbook / khớp lệnh).
+   * Invariant: tổng coin trong ví ≈ `totalDeposit - totalWithdraw` = `uw_balance + uw_lock_balance`.
+   * Chỉ ghi `uw_balance` = max(0, ledgerTotal − lock); không đụng lock để tránh double-credit khi release P2P.
+   * Reward/staking không gộp vào công thức này.
    */
   async updateUserBalanceIfChanged(
     userId: number,
@@ -951,15 +947,11 @@ export class WalletsSchedulerService implements OnModuleInit {
         totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
       }
 
-      // Tính balance mới
-      let newBalance = totalDeposit - totalWithdraw;
-
-      // Đảm bảo balance không âm: nếu <= 0 thì set = 0
-      if (newBalance <= 0) {
-        newBalance = 0;
+      let ledgerTotal = totalDeposit - totalWithdraw;
+      if (ledgerTotal <= 0) {
+        ledgerTotal = 0;
       }
 
-      // Lấy balance hiện tại từ database
       const userWallet = await this.userWalletRepository.findOne({
         where: {
           uw_user_id: userId,
@@ -968,37 +960,45 @@ export class WalletsSchedulerService implements OnModuleInit {
       });
 
       if (!userWallet) {
-        // Tạo mới nếu chưa có
         const newUserWallet = this.userWalletRepository.create({
           uw_user_id: userId,
           uw_wallet_type: 'crypto' as any,
           uw_wallet_coins: coinId,
-          uw_balance: newBalance,
+          uw_balance: ledgerTotal,
+          uw_lock_balance: 0 as any,
         });
         await this.userWalletRepository.save(newUserWallet);
         this.logger.log(
-          `uw_balance new wallet u=${userId} coin=${coinId} =${newBalance}`,
+          `uw_balance new wallet u=${userId} coin=${coinId} ledger=${ledgerTotal} avail=${ledgerTotal} lock=0`,
         );
         return true;
       }
 
+      const lockBalance = parseFloat(
+        userWallet.uw_lock_balance?.toString() ?? '0',
+      );
+      if (ledgerTotal + 1e-12 < lockBalance) {
+        this.logger.warn(
+          `uw_balance ledger<lock u=${userId} coin=${coinId} ledger=${ledgerTotal} lock=${lockBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
+        );
+      }
+      const newAvailable = Math.max(0, ledgerTotal - lockBalance);
       const oldBalance = parseFloat(userWallet.uw_balance.toString());
 
       const tolerance = 0.00000001;
-      const shouldUpdate = Math.abs(newBalance - oldBalance) > tolerance;
+      const shouldUpdate = Math.abs(newAvailable - oldBalance) > tolerance;
 
-      // Chỉ cập nhật nếu cần thiết
       if (shouldUpdate) {
-        userWallet.uw_balance = newBalance as any;
+        userWallet.uw_balance = newAvailable as any;
         await this.userWalletRepository.save(userWallet);
         this.logger.log(
-          `uw_balance u=${userId} coin=${coinId} ->${newBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
+          `uw_balance u=${userId} coin=${coinId} ->avail=${newAvailable} ledger=${ledgerTotal} lock=${lockBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
         );
         return true;
       }
 
       this.logger.debug(
-        `uw_balance skip u=${userId} coin=${coinId} stored=${oldBalance} new=${newBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
+        `uw_balance skip u=${userId} coin=${coinId} stored=${oldBalance} newAvail=${newAvailable} ledger=${ledgerTotal} lock=${lockBalance} dep=${totalDeposit} wd=${totalWithdraw}`,
       );
       return false;
     } catch (error) {
@@ -1011,8 +1011,7 @@ export class WalletsSchedulerService implements OnModuleInit {
   }
 
   /**
-   * Cập nhật balance của user
-   * uw_balance = tổng nạp thành công - tổng rút (pending/success/checked)
+   * Cập nhật `uw_balance` từ lịch sử nạp/rút; `uw_balance + uw_lock_balance` khớp tổng ledger.
    */
   /** @returns true nếu đã ghi `user_wallets.uw_balance`, false nếu bỏ qua (đã khớp hoặc shouldUpdate=false). */
   async updateUserBalance(userId: number, coinId: number): Promise<boolean> {
