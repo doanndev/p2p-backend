@@ -717,7 +717,7 @@ export class OrderbookService {
       .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING })
       .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0')
       .andWhere(
-        "CAST(ob.ob_amount_remaining AS numeric) >= COALESCE(CAST(NULLIF(TRIM(ob.ob_national_min), '') AS numeric), :defaultPerTransactionMin)",
+        'CAST(ob.ob_amount_remaining AS numeric) >= COALESCE(CAST(ob.ob_national_min AS numeric), :defaultPerTransactionMin)',
         {
           defaultPerTransactionMin:
             DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
@@ -783,21 +783,36 @@ export class OrderbookService {
       // orderBy string as `alias.column`, so `CASE WHEN ob.ob_option` breaks.
       qb.addSelect(
         `CASE WHEN ob.ob_option = :obSortSellOpt THEN ob.ob_price END`,
-        'obSortSellPrice',
+        'ob_sort_sell_price',
       )
         .addSelect(
           `CASE WHEN ob.ob_option = :obSortBuyOpt THEN ob.ob_price END`,
-          'obSortBuyPrice',
+          'ob_sort_buy_price',
         )
         .setParameter('obSortSellOpt', OrderBookOption.SELL)
         .setParameter('obSortBuyOpt', OrderBookOption.BUY)
-        .orderBy('obSortSellPrice', 'ASC', 'NULLS LAST')
-        .addOrderBy('obSortBuyPrice', 'DESC', 'NULLS LAST')
+        .orderBy('ob_sort_sell_price', 'ASC', 'NULLS LAST')
+        .addOrderBy('ob_sort_buy_price', 'DESC', 'NULLS LAST')
         .addOrderBy('ob.ob_id', 'DESC');
     }
     qb.skip((page - 1) * limit).take(limit);
 
-    const [rows, total] = await qb.getManyAndCount();
+    let rows: OrderBook[] = [];
+    let total = 0;
+    try {
+      [rows, total] = await qb.getManyAndCount();
+    } catch (error) {
+      const [sql, params] = qb.getQueryAndParameters();
+      this.logger.error(
+        `getOrderBooks query failed: ${(error as Error)?.message ?? 'Unknown error'}`,
+        JSON.stringify({
+          query,
+          sql,
+          params,
+        }),
+      );
+      throw error;
+    }
 
     const creatorIds = [...new Set(rows.map((r) => r.ob_user_id))];
     const users =
