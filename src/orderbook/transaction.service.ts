@@ -29,7 +29,6 @@ import { QueryDisputesDto } from './dto/query-disputes.dto';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { Admin } from '../admins/entities/admin.entity';
 import { EmailService } from '../systems/email.service';
-import { UserLevelUpWorker } from '../users/user-level-up.worker';
 import {
   TransactionExpiryQueueService,
   TRANSACTION_EXPIRY_DELAY_MS,
@@ -70,7 +69,6 @@ export class TransactionService {
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
     private readonly emailService: EmailService,
     private readonly transactionExpiryQueue: TransactionExpiryQueueService,
-    private readonly userLevelUpWorker: UserLevelUpWorker,
     private readonly smartRefService: SmartRefService,
     private readonly currenciesService: CurrenciesService,
     private readonly notificationsService: NotificationsService,
@@ -1060,26 +1058,6 @@ export class TransactionService {
         .catch((error) => {
           console.error(
             `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
-            error,
-          );
-        });
-    }
-
-    // Fire-and-forget level-up checks after executed.
-    void this.userLevelUpWorker
-      .handleTransactionSuccess(result.buyerId)
-      .catch((error) => {
-        console.error(
-          `Failed level-up check for buyer ${result.buyerId} on tx ${result.transactionId}:`,
-          error,
-        );
-      });
-    if (result.sellerId && result.sellerId !== result.buyerId) {
-      void this.userLevelUpWorker
-        .handleTransactionSuccess(result.sellerId)
-        .catch((error) => {
-          console.error(
-            `Failed level-up check for seller ${result.sellerId} on tx ${result.transactionId}:`,
             error,
           );
         });
