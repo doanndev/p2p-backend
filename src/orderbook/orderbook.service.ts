@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   OrderBook,
   OrderBookOption,
@@ -44,7 +44,8 @@ type OrderbookBankChangeRequestPayload = {
 const ORDERBOOK_BANK_CHANGE_REQUEST_TTL_SECONDS = 12 * 60 * 60;
 const ORDERBOOK_BANK_CHANGE_REQUEST_INDEX_KEY =
   'orderbook:bank-change-request:index';
-const BUYER_DAILY_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
+/** Max coin (USDT) buy exposure per user level — “Max Limit” in buy-limit formula. */
+const BUYER_MAX_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
   1: 1000,
   2: 5000,
   3: 10000,
@@ -121,11 +122,65 @@ export class OrderbookService {
     }
   }
 
-  private getBuyerDailyCoinLimit(level: number): number {
+  private getBuyerMaxCoinLimitByLevel(level: number): number {
     return (
-      BUYER_DAILY_COIN_LIMIT_BY_LEVEL[level] ??
-      BUYER_DAILY_COIN_LIMIT_BY_LEVEL[1]
+      BUYER_MAX_COIN_LIMIT_BY_LEVEL[level] ?? BUYER_MAX_COIN_LIMIT_BY_LEVEL[1]
     );
+  }
+
+  /**
+   * Available buy coin (QC) budget for creating BUY orderbooks:
+   * MaxLimit − [Σ ob_amount_remaining on own BUY ads still pending
+   *            + Σ trans_amount where user is buyer, matching, last 24h, excluding txs tied to own BUY OB]
+   *
+   * (Algebraically, Σ ob_amount − executed − failed on BUY equals Σ ob_amount for pending rows only, but that
+   * uses original size; `ob_amount_remaining` matches “phần còn treo” after partial fills.)
+   */
+  private async computeBuyerAvailableCoinBudget(
+    manager: EntityManager,
+    userId: number,
+    maxLimitCoin: number,
+  ): Promise<{ available: number; used: number }> {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const orderbookAgg = await manager
+      .createQueryBuilder(OrderBook, 'ob')
+      .select(
+        'COALESCE(SUM(CAST(ob.ob_amount_remaining AS numeric)), 0)',
+        'open_buy_ob_coin',
+      )
+      .where('ob.ob_user_id = :userId', { userId })
+      .andWhere('ob.ob_option = :buyOpt', { buyOpt: OrderBookOption.BUY })
+      .andWhere('ob.ob_status = :pending', {
+        pending: OrderBookStatus.PENDING,
+      })
+      .getRawOne<{ open_buy_ob_coin: string | number | null }>();
+
+    const openBuyObCoin = Number(orderbookAgg?.open_buy_ob_coin ?? 0);
+
+    const takerBuyRaw = await manager
+      .createQueryBuilder(Transaction, 't')
+      .leftJoin(OrderBook, 'linkedOb', 'linkedOb.ob_id = t.trans_order_book')
+      .select('COALESCE(SUM(CAST(t.trans_amount AS numeric)), 0)', 'total')
+      .where('t.trans_user_buy = :userId', { userId })
+      .andWhere('t.trans_created_at >= :since24h', { since24h })
+      .andWhere('t.trans_status IN (:...matching)', {
+        matching: [
+          TransactionStatus.PENDING,
+          TransactionStatus.PAYMENT_CONFIRMED,
+        ],
+      })
+      .andWhere(
+        '(linkedOb.ob_id IS NULL OR linkedOb.ob_option <> :buyOpt OR linkedOb.ob_user_id <> :userId)',
+        { buyOpt: OrderBookOption.BUY, userId },
+      )
+      .getRawOne<{ total: string | number | null }>();
+
+    const takerBuyMatching24h = Number(takerBuyRaw?.total ?? 0);
+
+    const used = openBuyObCoin + takerBuyMatching24h;
+    const available = Math.max(0, maxLimitCoin - used);
+    return { available, used };
   }
 
   private generateAdvCode(): string {
@@ -478,34 +533,18 @@ export class OrderbookService {
       }
 
       if (dto.option === OrderBookOption.BUY) {
-        const dailyLimitCoin = this.getBuyerDailyCoinLimit(currentUser.ulevel);
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(startOfDay);
-        endOfDay.setDate(endOfDay.getDate() + 1);
-
-        const currentBuyOrderbookCoinRaw = await manager
-          .createQueryBuilder(OrderBook, 'ob')
-          .select(
-            'COALESCE(SUM(CAST(ob.ob_amount_remaining AS numeric)), 0)',
-            'total',
-          )
-          .where('ob.ob_user_id = :userId', { userId })
-          .andWhere('ob.ob_option = :buyOpt', { buyOpt: OrderBookOption.BUY })
-          .andWhere('ob.ob_created_at >= :startOfDay', { startOfDay })
-          .andWhere('ob.ob_created_at < :endOfDay', { endOfDay })
-          .getRawOne<{ total: string | number | null }>();
-
-        console.log('currentBuyOrderbookCoinRaw', currentBuyOrderbookCoinRaw);
-
-        const currentBuyOrderbookCoin = Number(
-          currentBuyOrderbookCoinRaw?.total ?? 0,
+        const maxLimitCoin = this.getBuyerMaxCoinLimitByLevel(
+          currentUser.ulevel,
         );
-        const nextTotalCoin = currentBuyOrderbookCoin + amount;
+        const { available } = await this.computeBuyerAvailableCoinBudget(
+          manager,
+          userId,
+          maxLimitCoin,
+        );
 
-        if (nextTotalCoin > dailyLimitCoin) {
+        if (amount > available) {
           throw new BadRequestException(
-            `Buy limit exceeded. Your current level (${currentUser.ulevel}) allows up to ${dailyLimitCoin} USDT`,
+            `Buy limit exceeded. Level ${currentUser.ulevel} max is ${maxLimitCoin} USDT; available now is ${this.formatAmount(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
           );
         }
       }
@@ -676,7 +715,14 @@ export class OrderbookService {
     const qb = this.orderBookRepository
       .createQueryBuilder('ob')
       .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING })
-      .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0');
+      .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0')
+      .andWhere(
+        'CAST(ob.ob_amount_remaining AS numeric) >= COALESCE(CAST(ob.ob_national_min AS numeric), :defaultPerTransactionMin)',
+        {
+          defaultPerTransactionMin:
+            DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
+        },
+      );
 
     // Không join user ở đây: skip/take + join kích hoạt DISTINCT pagination của TypeORM
     // và dễ lỗi khi ORDER BY theo alias từ addSelect (mixed buy/sell sort).
@@ -737,21 +783,36 @@ export class OrderbookService {
       // orderBy string as `alias.column`, so `CASE WHEN ob.ob_option` breaks.
       qb.addSelect(
         `CASE WHEN ob.ob_option = :obSortSellOpt THEN ob.ob_price END`,
-        'obSortSellPrice',
+        'ob_sort_sell_price',
       )
         .addSelect(
           `CASE WHEN ob.ob_option = :obSortBuyOpt THEN ob.ob_price END`,
-          'obSortBuyPrice',
+          'ob_sort_buy_price',
         )
         .setParameter('obSortSellOpt', OrderBookOption.SELL)
         .setParameter('obSortBuyOpt', OrderBookOption.BUY)
-        .orderBy('obSortSellPrice', 'ASC', 'NULLS LAST')
-        .addOrderBy('obSortBuyPrice', 'DESC', 'NULLS LAST')
+        .orderBy('ob_sort_sell_price', 'ASC', 'NULLS LAST')
+        .addOrderBy('ob_sort_buy_price', 'DESC', 'NULLS LAST')
         .addOrderBy('ob.ob_id', 'DESC');
     }
     qb.skip((page - 1) * limit).take(limit);
 
-    const [rows, total] = await qb.getManyAndCount();
+    let rows: OrderBook[] = [];
+    let total = 0;
+    try {
+      [rows, total] = await qb.getManyAndCount();
+    } catch (error) {
+      const [sql, params] = qb.getQueryAndParameters();
+      this.logger.error(
+        `getOrderBooks query failed: ${(error as Error)?.message ?? 'Unknown error'}`,
+        JSON.stringify({
+          query,
+          sql,
+          params,
+        }),
+      );
+      throw error;
+    }
 
     const creatorIds = [...new Set(rows.map((r) => r.ob_user_id))];
     const users =

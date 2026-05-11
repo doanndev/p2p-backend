@@ -69,7 +69,7 @@ export class P2pCoinUnlockSchedulerService {
   }
 
   /** SELL listing: sau `confirm_received`, coin buyer ở `uw_lock_balance` đến `trans_coin_unlock_at`; chạy thường xuyên để gần với delay 10 phút. */
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  @Cron(CronExpression.EVERY_MINUTE)
   async releaseDueBuyerLocks(): Promise<void> {
     const now = new Date();
     const due = await this.dataSource

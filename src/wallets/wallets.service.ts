@@ -77,6 +77,8 @@ import { AdminSettingsConfigService } from '../settings/admin-settings-config.se
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 import { CacheService } from '../systems/cache.service';
 import { EmailService } from '../systems/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../users/entities/notification.entity';
 
 /** Thông báo lỗi chung trả về frontend khi rút tiền thất bại (ví main thiếu dư, RPC lỗi, simulation fail, ...). */
 const WITHDRAW_ERROR_MESSAGE =
@@ -145,6 +147,7 @@ export class WalletsService implements OnModuleInit {
     private adminSettingsConfigService: AdminSettingsConfigService,
     private cacheService: CacheService,
     private emailService: EmailService,
+    private notificationsService: NotificationsService,
   ) {}
 
   onModuleInit(): void {
@@ -1786,7 +1789,7 @@ export class WalletsService implements OnModuleInit {
 
   /**
    * Kiểm tra và đồng bộ balance trước khi rút tiền
-   * So khớp uw_balance với expected = tổng deposit SUCCESS − tổng withdraw (pending/success/checked)
+   * So khớp `uw_balance` với (tổng deposit SUCCESS − withdraw) − `uw_lock_balance` (P2P lock).
    * Nếu không khớp thì sync on-chain rồi `updateUserBalanceIfChanged`.
    */
   private async checkAndSyncBalance(
@@ -1796,13 +1799,11 @@ export class WalletsService implements OnModuleInit {
     network: Network,
   ): Promise<void> {
     try {
-      // 1. Tính toán expected balance (từ TẤT CẢ networks)
-      const expectedBalance = await this.calculateExpectedBalance(
+      const ledgerTotal = await this.calculateCustodialTotalFromWalletHistory(
         userId,
         coinId,
       );
 
-      // 2. Lấy balance hiện tại từ database
       const userWallet = await this.userWalletRepository.findOne({
         where: {
           uw_user_id: userId,
@@ -1811,20 +1812,24 @@ export class WalletsService implements OnModuleInit {
       });
 
       if (!userWallet) {
-        // Nếu chưa có wallet, tạo mới với balance = expectedBalance
         const newWallet = this.userWalletRepository.create({
           uw_user_id: userId,
           uw_wallet_type: 'crypto' as any,
           uw_wallet_coins: coinId,
-          uw_balance: expectedBalance,
+          uw_balance: ledgerTotal,
+          uw_lock_balance: 0 as any,
         });
         await this.userWalletRepository.save(newWallet);
         return;
       }
 
+      const lockBalance = parseFloat(
+        userWallet.uw_lock_balance?.toString() ?? '0',
+      );
+      const expectedAvailable = Math.max(0, ledgerTotal - lockBalance);
       const oldBalance = parseFloat(userWallet.uw_balance.toString());
       const tolerance = 0.00000001;
-      const shouldSync = Math.abs(expectedBalance - oldBalance) > tolerance;
+      const shouldSync = Math.abs(expectedAvailable - oldBalance) > tolerance;
 
       if (shouldSync) {
         // Balance không khớp, cần đồng bộ lại từ onchain
@@ -1896,10 +1901,10 @@ export class WalletsService implements OnModuleInit {
   }
 
   /**
-   * Expected balance cho đối soát ví: deposit SUCCESS − withdraw (pending/success/checked).
-   * Reward/staking không gộp vào công thức này (theo policy hiện tại).
+   * Tổng coin theo sổ cái nạp/rút (custodial): `uw_balance + uw_lock_balance` sau khi đồng bộ.
+   * Reward/staking không gộp (theo policy hiện tại).
    */
-  private async calculateExpectedBalance(
+  private async calculateCustodialTotalFromWalletHistory(
     userId: number,
     coinId: number,
   ): Promise<number> {
@@ -1939,9 +1944,8 @@ export class WalletsService implements OnModuleInit {
 
     const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
 
-    const expectedBalance = totalDeposit - totalWithdraw;
-    // Đảm bảo balance không âm: nếu <= 0 thì return 0
-    return expectedBalance <= 0 ? 0 : expectedBalance;
+    const ledgerTotal = totalDeposit - totalWithdraw;
+    return ledgerTotal <= 0 ? 0 : ledgerTotal;
   }
 
   /**
@@ -2574,9 +2578,92 @@ export class WalletsService implements OnModuleInit {
     });
 
     const savedHistory = await this.walletHistoryRepository.save(walletHistory);
+    void this.processWithdrawInBackground({
+      historyId: savedHistory.wh_id,
+      userId,
+      userEmail: user.uemail ?? null,
+      network,
+      coin,
+      mnemonic,
+      address,
+      amount,
+      onchainAmount,
+      userWalletId: userWallet.uw_id,
+    });
 
+    return {
+      message: 'Withdraw request accepted and processing',
+      transaction_hash: null,
+      history_id: savedHistory.wh_id,
+      amount_withdrawn: amount,
+      onchain_amount: onchainAmount,
+      is_free_withdraw: isFreeWithdraw,
+    };
+  }
+
+  private async processWithdrawInBackground(params: {
+    historyId: number;
+    userId: number;
+    userEmail: string | null;
+    network: Network;
+    coin: Coin;
+    mnemonic: string;
+    address: string;
+    amount: number;
+    onchainAmount: number;
+    userWalletId: number;
+  }): Promise<void> {
+    const {
+      historyId,
+      userId,
+      userEmail,
+      network,
+      coin,
+      mnemonic,
+      address,
+      amount,
+      onchainAmount,
+      userWalletId,
+    } = params;
+
+    const savedHistory = await this.walletHistoryRepository.findOne({
+      where: { wh_id: historyId },
+    });
+    if (!savedHistory) return;
+
+    let reservedBalance = false;
     try {
-      // 9. Gửi từ ví main (382') tới đích; phí mạng do ví fee (369') (SOL ký 2 bên; EVM nạp gas; TRX ủy quyền energy từ fee).
+      await this.dataSource.transaction(async (manager) => {
+        const history = await manager.findOne(WalletHistory, {
+          where: { wh_id: historyId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!history || history.wh_status !== WalletHistoryStatus.PENDING) {
+          throw new BadRequestException('Withdraw history is not pending');
+        }
+
+        const wallet = await manager.findOne(UserWallet, {
+          where: { uw_id: userWalletId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!wallet) {
+          throw new BadRequestException('Wallet not found for this coin');
+        }
+
+        const currentBalance = parseFloat(wallet.uw_balance.toString());
+        if (currentBalance < amount) {
+          throw new BadRequestException('Insufficient balance');
+        }
+
+        let nextBalance = currentBalance - amount;
+        if (nextBalance <= 0) {
+          nextBalance = 0;
+        }
+        wallet.uw_balance = nextBalance as any;
+        await manager.save(UserWallet, wallet);
+      });
+      reservedBalance = true;
+
       const txHash = await this.sendWithdrawTransaction(
         network,
         coin,
@@ -2585,64 +2672,104 @@ export class WalletsService implements OnModuleInit {
         onchainAmount,
       );
 
-      // 10. Cập nhật wallet_history với hash, status SUCCESS và wh_node
       savedHistory.wh_hash = txHash;
       savedHistory.wh_status = WalletHistoryStatus.SUCCESS;
-      savedHistory.wh_node = network.net_symbol; // Cập nhật network symbol
+      savedHistory.wh_node = network.net_symbol;
       await this.walletHistoryRepository.save(savedHistory);
 
-      // 11. Trừ số dư từ user_wallet (trừ amount gốc, bao gồm cả phí)
-      let newBalance = balance - amount;
-      // Đảm bảo balance không âm: nếu <= 0 thì set = 0
-      if (newBalance <= 0) {
-        newBalance = 0;
-      }
-      userWallet.uw_balance = newBalance as any; // TypeORM decimal type
-      await this.userWalletRepository.save(userWallet);
-
-      if (user.uemail) {
-        try {
-          await this.emailService.sendWithdrawNotification(user.uemail, {
-            amount,
-            asset: coin.coin_symbol,
+      await Promise.allSettled([
+        this.notificationsService.createForUser({
+          userId,
+          type: NotificationType.WALLET,
+          title: 'Withdraw completed',
+          message: `${amount} ${coin.coin_symbol} withdrawal completed successfully.`,
+          data: {
+            history_id: historyId,
+            tx_hash: txHash,
             network: network.net_symbol,
-            txHash,
-            destinationAddress: address,
-            createdAt: savedHistory.updated_at || new Date(),
+            amount,
+            onchain_amount: onchainAmount,
             status: 'completed',
-          });
-        } catch (emailError: any) {
-          this.logger.error(
-            `[withdraw] send email failed userId=${userId}: ${emailError?.message || emailError}`,
-          );
-        }
-      }
-
-      return {
-        message: 'Withdraw successful',
-        transaction_hash: txHash,
-        history_id: savedHistory.wh_id,
-        amount_withdrawn: amount, // Amount gốc (bao gồm phí)
-        onchain_amount: onchainAmount, // Amount thực tế rút onchain
-        is_free_withdraw: isFreeWithdraw,
-      };
+          },
+        }),
+        ...(userEmail
+          ? [
+              this.emailService.sendWithdrawNotification(userEmail, {
+                amount,
+                asset: coin.coin_symbol,
+                network: network.net_symbol,
+                txHash,
+                destinationAddress: address,
+                createdAt: savedHistory.updated_at || new Date(),
+                status: 'completed',
+              }),
+            ]
+          : []),
+      ]);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       const errStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(
         `[withdraw] onchain transfer failed userId=${userId} network=${network.net_symbol} coin=${coin.coin_symbol} ` +
-          `to=${address} amount=${amount} onchainAmount=${onchainAmount} historyId=${savedHistory.wh_id} ` +
+          `to=${address} amount=${amount} onchainAmount=${onchainAmount} historyId=${historyId} ` +
           `err=${errMsg}`,
       );
       if (errStack) {
         this.logger.debug(`[withdraw] error stack: ${errStack}`);
       }
-      // 12. Nếu lỗi, cập nhật status thành FAILED (lưu chi tiết vào wh_node để admin xem)
-      savedHistory.wh_status = WalletHistoryStatus.FAILED;
-      savedHistory.wh_node = errMsg || 'Transaction failed';
-      await this.walletHistoryRepository.save(savedHistory);
 
-      throw new BadRequestException(WITHDRAW_ERROR_MESSAGE);
+      await this.dataSource.transaction(async (manager) => {
+        const history = await manager.findOne(WalletHistory, {
+          where: { wh_id: historyId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!history) return;
+
+        if (reservedBalance) {
+          const wallet = await manager.findOne(UserWallet, {
+            where: { uw_id: userWalletId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (wallet) {
+            const currentBalance = parseFloat(wallet.uw_balance.toString());
+            wallet.uw_balance = (currentBalance + amount) as any;
+            await manager.save(UserWallet, wallet);
+          }
+        }
+
+        history.wh_status = WalletHistoryStatus.FAILED;
+        history.wh_node = errMsg || 'Transaction failed';
+        await manager.save(WalletHistory, history);
+      });
+
+      await Promise.allSettled([
+        this.notificationsService.createForUser({
+          userId,
+          type: NotificationType.WALLET,
+          title: 'Withdraw failed',
+          message: `${amount} ${coin.coin_symbol} withdrawal failed.`,
+          data: {
+            history_id: historyId,
+            network: network.net_symbol,
+            amount,
+            onchain_amount: onchainAmount,
+            status: 'failed',
+            reason: errMsg || WITHDRAW_ERROR_MESSAGE,
+          },
+        }),
+        ...(userEmail
+          ? [
+              this.emailService.sendWithdrawNotification(userEmail, {
+                amount,
+                asset: coin.coin_symbol,
+                network: network.net_symbol,
+                destinationAddress: address,
+                createdAt: new Date(),
+                status: 'failed',
+              }),
+            ]
+          : []),
+      ]);
     }
   }
 
