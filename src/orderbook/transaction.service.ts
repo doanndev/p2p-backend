@@ -43,6 +43,14 @@ import {
   P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
 } from './orderbook.constants';
 
+/** Max coin (USDT) buy exposure per user level. */
+const BUYER_MAX_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
+  1: 1000,
+  2: 5000,
+  3: 10000,
+  4: 30000,
+};
+
 @Injectable()
 export class TransactionService {
   constructor(
@@ -156,6 +164,62 @@ export class TransactionService {
   ): Promise<number> {
     const totalFeePercent = await this.getP2pOrderbookFeePercentTotal();
     return this.computeSellerLockCoinAmount(amount, totalFeePercent);
+  }
+
+  private getBuyerMaxCoinLimitByLevel(level: number): number {
+    return (
+      BUYER_MAX_COIN_LIMIT_BY_LEVEL[level] ?? BUYER_MAX_COIN_LIMIT_BY_LEVEL[1]
+    );
+  }
+
+  /**
+   * Available buy coin budget:
+   * MaxLimit − [Σ own BUY orderbooks still pending + Σ taker buys matching in last 24h]
+   */
+  private async computeBuyerAvailableCoinBudget(
+    manager: EntityManager,
+    userId: number,
+    maxLimitCoin: number,
+  ): Promise<{ available: number; used: number }> {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const orderbookAgg = await manager
+      .createQueryBuilder(OrderBook, 'ob')
+      .select(
+        'COALESCE(SUM(CAST(ob.ob_amount_remaining AS numeric)), 0)',
+        'open_buy_ob_coin',
+      )
+      .where('ob.ob_user_id = :userId', { userId })
+      .andWhere('ob.ob_option = :buyOpt', { buyOpt: OrderBookOption.BUY })
+      .andWhere('ob.ob_status = :pending', {
+        pending: OrderBookStatus.PENDING,
+      })
+      .getRawOne<{ open_buy_ob_coin: string | number | null }>();
+
+    const openBuyObCoin = Number(orderbookAgg?.open_buy_ob_coin ?? 0);
+
+    const takerBuyRaw = await manager
+      .createQueryBuilder(Transaction, 't')
+      .leftJoin(OrderBook, 'linkedOb', 'linkedOb.ob_id = t.trans_order_book')
+      .select('COALESCE(SUM(CAST(t.trans_amount AS numeric)), 0)', 'total')
+      .where('t.trans_user_buy = :userId', { userId })
+      .andWhere('t.trans_created_at >= :since24h', { since24h })
+      .andWhere('t.trans_status IN (:...matching)', {
+        matching: [
+          TransactionStatus.PENDING,
+          TransactionStatus.PAYMENT_CONFIRMED,
+        ],
+      })
+      .andWhere(
+        '(linkedOb.ob_id IS NULL OR linkedOb.ob_option <> :buyOpt OR linkedOb.ob_user_id <> :userId)',
+        { buyOpt: OrderBookOption.BUY, userId },
+      )
+      .getRawOne<{ total: string | number | null }>();
+
+    const takerBuyMatching24h = Number(takerBuyRaw?.total ?? 0);
+    const used = openBuyObCoin + takerBuyMatching24h;
+    const available = Math.max(0, maxLimitCoin - used);
+    return { available, used };
   }
 
   private generateReferenceCode(): string {
@@ -528,6 +592,30 @@ export class TransactionService {
           orderBook.ob_option === OrderBookOption.SELL
             ? orderBook.ob_user_id
             : userId;
+
+        // For SELL listings, the taker is the buyer and must satisfy level-based buy limits.
+        if (orderBook.ob_option === OrderBookOption.SELL) {
+          const buyer = await manager.findOne(User, {
+            where: { uid: buyerId },
+            select: ['uid', 'ulevel'],
+          });
+          if (!buyer) {
+            throw new NotFoundException('Buyer not found');
+          }
+
+          const maxLimitCoin = this.getBuyerMaxCoinLimitByLevel(buyer.ulevel);
+          const { available } = await this.computeBuyerAvailableCoinBudget(
+            manager,
+            buyerId,
+            maxLimitCoin,
+          );
+
+          if (dto.amount > available) {
+            throw new BadRequestException(
+              `Buy limit exceeded. Level ${buyer.ulevel} max is ${maxLimitCoin} USDT; available now is ${this.formatAmount(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
+            );
+          }
+        }
 
         let transactionBuId: number | null = null;
         if (orderBook.ob_option === OrderBookOption.BUY) {
