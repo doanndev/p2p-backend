@@ -22,6 +22,7 @@ import { CoinNetwork } from '../settings/entities/coin-network.entity';
 import { UserCode } from '../users/entities/user-code.entity';
 import { SystemsModule } from '../systems/systems.module';
 import { SettingsModule } from '../settings/settings.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { SettingsModule } from '../settings/settings.module';
       UserCode,
     ]),
     SystemsModule,
+    NotificationsModule,
   ],
   controllers: [WalletsController],
   providers: [
