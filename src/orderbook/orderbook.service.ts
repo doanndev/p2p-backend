@@ -715,7 +715,14 @@ export class OrderbookService {
     const qb = this.orderBookRepository
       .createQueryBuilder('ob')
       .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING })
-      .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0');
+      .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0')
+      .andWhere(
+        'CAST(ob.ob_amount_remaining AS numeric) >= COALESCE(CAST(ob.ob_national_min AS numeric), :defaultPerTransactionMin)',
+        {
+          defaultPerTransactionMin:
+            DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
+        },
+      );
 
     // Không join user ở đây: skip/take + join kích hoạt DISTINCT pagination của TypeORM
     // và dễ lỗi khi ORDER BY theo alias từ addSelect (mixed buy/sell sort).
