@@ -6,8 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import { BankUser } from './entities/bank-user.entity';
+import { BankUserApprovalStatus } from './entities/bank-user-approval-status';
 import { CreateBankUserDto } from './dto/create-bank-user.dto';
 import { UpdateBankUserDto } from './dto/update-bank-user.dto';
 import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entity';
@@ -20,20 +21,6 @@ import {
 import { EmailService } from '../systems/email.service';
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 import { BankMutationSecurityDto } from './dto/bank-mutation-security.dto';
-import { CacheService } from '../systems/cache.service';
-
-type CreateBankRequestPayload = {
-  requestId: string;
-  requestedByUserId: number;
-  bankName: string;
-  bankBranch: string | null;
-  bankAccountName: string;
-  bankAccountNumber: string;
-  requestedAt: string;
-};
-
-const CREATE_BANK_REQUEST_TTL_SECONDS = 24 * 60 * 60;
-const CREATE_BANK_REQUEST_INDEX_KEY = 'bank-user:create-request:index';
 
 @Injectable()
 export class BankUsersService {
@@ -50,7 +37,6 @@ export class BankUsersService {
     @InjectRepository(UserCode)
     private readonly userCodeRepository: Repository<UserCode>,
     private readonly emailService: EmailService,
-    private readonly cacheService: CacheService,
   ) {}
 
   private generateEmailCode(): string {
@@ -62,83 +48,6 @@ export class BankUsersService {
       );
     }
     return result;
-  }
-
-  private generateCreateBankRequestId(): string {
-    return `bank-create-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  private getCreateBankRequestKey(requestId: string): string {
-    return `bank-user:create-request:${requestId}`;
-  }
-
-  private async getCreateBankRequestIndex(): Promise<string[]> {
-    const raw = await this.cacheService.get(CREATE_BANK_REQUEST_INDEX_KEY);
-    if (!raw) return [];
-
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map((item) => String(item))
-        .filter((item) => item.trim().length > 0);
-    } catch {
-      return [];
-    }
-  }
-
-  private async saveCreateBankRequestIndex(
-    requestIds: string[],
-  ): Promise<void> {
-    const uniqueIds = [...new Set(requestIds)].filter(
-      (requestId) => requestId.trim().length > 0,
-    );
-    await this.cacheService.set(
-      CREATE_BANK_REQUEST_INDEX_KEY,
-      JSON.stringify(uniqueIds),
-    );
-  }
-
-  private async addCreateBankRequestToIndex(requestId: string): Promise<void> {
-    const current = await this.getCreateBankRequestIndex();
-    if (current.includes(requestId)) return;
-    current.push(requestId);
-    await this.saveCreateBankRequestIndex(current);
-  }
-
-  private async removeCreateBankRequestFromIndex(
-    requestId: string,
-  ): Promise<void> {
-    const current = await this.getCreateBankRequestIndex();
-    const next = current.filter((id) => id !== requestId);
-    await this.saveCreateBankRequestIndex(next);
-  }
-
-  private async getCreateBankRequest(
-    requestId: string,
-  ): Promise<CreateBankRequestPayload | null> {
-    const raw = await this.cacheService.get(
-      this.getCreateBankRequestKey(requestId),
-    );
-    if (!raw) return null;
-
-    try {
-      const parsed = JSON.parse(raw) as CreateBankRequestPayload;
-      if (
-        !parsed ||
-        typeof parsed.requestId !== 'string' ||
-        !Number.isInteger(parsed.requestedByUserId) ||
-        typeof parsed.bankName !== 'string' ||
-        typeof parsed.bankAccountName !== 'string' ||
-        typeof parsed.bankAccountNumber !== 'string' ||
-        typeof parsed.requestedAt !== 'string'
-      ) {
-        return null;
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
   }
 
   private async verifyBankMutationSecurity(
@@ -176,9 +85,19 @@ export class BankUsersService {
     await this.userCodeRepository.save(userCode);
   }
 
-  async getMyBanks(userId: number) {
+  /**
+   * Default: only **active** banks (safe for orderbook / buId pickers).
+   * Pass `includePending=true` to also list pending rows (still excludes rejected).
+   */
+  async getMyBanks(userId: number, includePending = false) {
+    const where: FindOptionsWhere<BankUser> = {
+      bu_user_id: userId,
+      ...(includePending
+        ? { bu_approval_status: Not(BankUserApprovalStatus.REJECTED) }
+        : { bu_approval_status: BankUserApprovalStatus.ACTIVE }),
+    };
     const rows = await this.bankUserRepository.find({
-      where: { bu_user_id: userId },
+      where,
       order: { bu_id: 'DESC' },
     });
 
@@ -189,6 +108,8 @@ export class BankUsersService {
       bankBranch: b.bu_bank_branch,
       bankAccountName: b.bu_bank_account_name,
       bankAccountNumber: b.bu_bank_account_number,
+      approvalStatus: b.bu_approval_status,
+      requestedAt: b.bu_requested_at,
     }));
   }
 
@@ -204,107 +125,68 @@ export class BankUsersService {
       );
     }
 
-    const count = await this.bankUserRepository.count({
-      where: { bu_user_id: userId },
+    const usageCount = await this.bankUserRepository.count({
+      where: {
+        bu_user_id: userId,
+        bu_approval_status: In([
+          BankUserApprovalStatus.ACTIVE,
+          BankUserApprovalStatus.PENDING,
+        ]),
+      },
     });
-    const requestIds = await this.getCreateBankRequestIndex();
-    const requestPairs = await Promise.all(
-      requestIds.map(async (requestId) => ({
-        requestId,
-        request: await this.getCreateBankRequest(requestId),
-      })),
-    );
-    const validRequests = requestPairs
-      .filter((pair) => pair.request !== null)
-      .map((pair) => pair.request as CreateBankRequestPayload);
-    const missingIds = requestPairs
-      .filter((pair) => pair.request === null)
-      .map((pair) => pair.requestId);
-    if (missingIds.length > 0) {
-      await this.saveCreateBankRequestIndex(
-        validRequests.map((r) => r.requestId),
-      );
-    }
-    const myPendingCount = validRequests.filter(
-      (request) => request.requestedByUserId === userId,
-    ).length;
 
-    if (count + myPendingCount >= this.MAX_BANKS_PER_USER) {
+    if (usageCount >= this.MAX_BANKS_PER_USER) {
       throw new BadRequestException('Each user can only create up to 5 banks');
     }
 
-    const requestId = this.generateCreateBankRequestId();
-    const payload: CreateBankRequestPayload = {
-      requestId,
-      requestedByUserId: userId,
-      bankName: dto.bankName.trim(),
-      bankBranch:
+    const requestedAt = new Date();
+    const created = this.bankUserRepository.create({
+      bu_user_id: userId,
+      bu_bank_name: dto.bankName.trim(),
+      bu_bank_branch:
         dto.bankBranch === undefined ? null : (dto.bankBranch ?? null),
-      bankAccountName: requestUser.ufulllname.trim(),
-      bankAccountNumber: dto.bankAccountNumber.trim(),
-      requestedAt: new Date().toISOString(),
-    };
-    await this.cacheService.set(
-      this.getCreateBankRequestKey(requestId),
-      JSON.stringify(payload),
-      CREATE_BANK_REQUEST_TTL_SECONDS,
-    );
-    await this.addCreateBankRequestToIndex(requestId);
+      bu_bank_account_name: requestUser.ufulllname.trim(),
+      bu_bank_account_number: dto.bankAccountNumber.trim(),
+      bu_approval_status: BankUserApprovalStatus.PENDING,
+      bu_requested_at: requestedAt,
+    });
+    const saved = await this.bankUserRepository.save(created);
 
     return {
       message: 'Bank create request submitted and waiting for admin approval',
-      requestId,
-      requestedAt: payload.requestedAt,
-      expiresInSeconds: CREATE_BANK_REQUEST_TTL_SECONDS,
+      requestId: String(saved.bu_id),
+      requestedAt: requestedAt.toISOString(),
       bank: {
-        bankName: payload.bankName,
-        bankBranch: payload.bankBranch,
-        bankAccountName: payload.bankAccountName,
-        bankAccountNumber: payload.bankAccountNumber,
+        bankName: saved.bu_bank_name,
+        bankBranch: saved.bu_bank_branch,
+        bankAccountName: saved.bu_bank_account_name,
+        bankAccountNumber: saved.bu_bank_account_number,
       },
     };
   }
 
   async getPendingCreateBankRequests() {
-    const requestIds = await this.getCreateBankRequestIndex();
-    if (requestIds.length === 0) {
-      return { statusCode: 200, data: [] };
-    }
-
-    const requestPairs = await Promise.all(
-      requestIds.map(async (requestId) => ({
-        requestId,
-        request: await this.getCreateBankRequest(requestId),
-      })),
-    );
-    const validRequests = requestPairs
-      .filter((pair) => pair.request !== null)
-      .map((pair) => pair.request as CreateBankRequestPayload);
-    const missingIds = requestPairs
-      .filter((pair) => pair.request === null)
-      .map((pair) => pair.requestId);
-    if (missingIds.length > 0) {
-      await this.saveCreateBankRequestIndex(
-        validRequests.map((r) => r.requestId),
-      );
-    }
-    if (validRequests.length === 0) {
+    const pending = await this.bankUserRepository.find({
+      where: { bu_approval_status: BankUserApprovalStatus.PENDING },
+      order: { bu_id: 'DESC' },
+    });
+    if (pending.length === 0) {
       return { statusCode: 200, data: [] };
     }
 
     const requestUsers = await this.userRepository.find({
-      where: { uid: In(validRequests.map((r) => r.requestedByUserId)) },
+      where: { uid: In(pending.map((r) => r.bu_user_id)) },
       select: ['uid', 'uname', 'uemail', 'ufulllname'],
     });
     const userById = new Map(requestUsers.map((u) => [u.uid, u]));
 
     return {
       statusCode: 200,
-      data: validRequests.map((request) => {
-        const requester = userById.get(request.requestedByUserId);
+      data: pending.map((row) => {
+        const requester = userById.get(row.bu_user_id);
         return {
-          requestId: request.requestId,
-          requestedAt: request.requestedAt,
+          requestId: String(row.bu_id),
+          requestedAt: row.bu_requested_at?.toISOString() ?? null,
           requestedBy: requester
             ? {
                 id: requester.uid,
@@ -312,12 +194,12 @@ export class BankUsersService {
                 email: requester.uemail,
                 fullName: requester.ufulllname,
               }
-            : { id: request.requestedByUserId },
+            : { id: row.bu_user_id },
           bank: {
-            bankName: request.bankName,
-            bankBranch: request.bankBranch,
-            bankAccountName: request.bankAccountName,
-            bankAccountNumber: request.bankAccountNumber,
+            bankName: row.bu_bank_name,
+            bankBranch: row.bu_bank_branch,
+            bankAccountName: row.bu_bank_account_name,
+            bankAccountNumber: row.bu_bank_account_number,
           },
         };
       }),
@@ -325,43 +207,49 @@ export class BankUsersService {
   }
 
   async reviewCreateBankRequest(requestId: string, approve: boolean) {
-    const request = await this.getCreateBankRequest(requestId);
-    if (!request) {
+    const bankPendingId = Number(requestId);
+    if (!Number.isInteger(bankPendingId) || bankPendingId <= 0) {
+      throw new BadRequestException('Invalid request id');
+    }
+
+    const row = await this.bankUserRepository.findOne({
+      where: { bu_id: bankPendingId },
+    });
+    if (!row || row.bu_approval_status !== BankUserApprovalStatus.PENDING) {
       throw new NotFoundException('No pending create-bank request found');
     }
 
-    let createdBankId: number | null = null;
     if (approve) {
-      const count = await this.bankUserRepository.count({
-        where: { bu_user_id: request.requestedByUserId },
+      const activeCount = await this.bankUserRepository.count({
+        where: {
+          bu_user_id: row.bu_user_id,
+          bu_approval_status: BankUserApprovalStatus.ACTIVE,
+        },
       });
-      if (count >= this.MAX_BANKS_PER_USER) {
+      if (activeCount >= this.MAX_BANKS_PER_USER) {
         throw new BadRequestException(
           'Cannot approve: user already reached max bank limit',
         );
       }
-
-      const created = this.bankUserRepository.create({
-        bu_user_id: request.requestedByUserId,
-        bu_bank_name: request.bankName,
-        bu_bank_branch: request.bankBranch,
-        bu_bank_account_name: request.bankAccountName,
-        bu_bank_account_number: request.bankAccountNumber,
-      });
-      const saved = await this.bankUserRepository.save(created);
-      createdBankId = saved.bu_id;
+      row.bu_approval_status = BankUserApprovalStatus.ACTIVE;
+      row.bu_requested_at = null;
+      await this.bankUserRepository.save(row);
+      return {
+        message: 'Create bank request approved',
+        requestId: String(row.bu_id),
+        approved: true,
+        bankId: row.bu_id,
+      };
     }
 
-    await this.cacheService.del(this.getCreateBankRequestKey(requestId));
-    await this.removeCreateBankRequestFromIndex(requestId);
-
+    row.bu_approval_status = BankUserApprovalStatus.REJECTED;
+    row.bu_requested_at = null;
+    await this.bankUserRepository.save(row);
     return {
-      message: approve
-        ? 'Create bank request approved'
-        : 'Create bank request rejected',
-      requestId,
-      approved: approve,
-      bankId: createdBankId,
+      message: 'Create bank request rejected',
+      requestId: String(row.bu_id),
+      approved: false,
+      bankId: null,
     };
   }
 
@@ -409,11 +297,16 @@ export class BankUsersService {
 
   async updateMyBank(userId: number, bankId: number, dto: UpdateBankUserDto) {
     const bank = await this.bankUserRepository.findOne({
-      where: { bu_id: bankId },
+      where: { bu_id: bankId, bu_user_id: userId },
     });
     if (!bank) throw new NotFoundException('Bank not found');
     if (bank.bu_user_id !== userId) {
       throw new ForbiddenException('You can only update your own bank');
+    }
+    if (bank.bu_approval_status !== BankUserApprovalStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Only active banks can be updated. Pending or rejected rows cannot be edited.',
+      );
     }
 
     if (dto.bankName !== undefined) {
@@ -448,19 +341,22 @@ export class BankUsersService {
 
   async deleteMyBank(userId: number, bankId: number) {
     const bank = await this.bankUserRepository.findOne({
-      where: { bu_id: bankId },
+      where: { bu_id: bankId, bu_user_id: userId },
     });
     if (!bank) throw new NotFoundException('Bank not found');
     if (bank.bu_user_id !== userId) {
       throw new ForbiddenException('You can only delete your own bank');
     }
 
-    const linkedCount = await this.settingBankOrderRepository.count({
+    const linkedAsPrimary = await this.settingBankOrderRepository.count({
       where: { sbo_bank_id: bankId },
     });
-    if (linkedCount > 0) {
+    const linkedAsPending = await this.settingBankOrderRepository.count({
+      where: { sbo_pending_bank_id: bankId },
+    });
+    if (linkedAsPrimary > 0 || linkedAsPending > 0) {
       throw new BadRequestException(
-        'This bank is attached to an orderbook. Detach it first.',
+        'This bank is attached to an orderbook (or pending change). Detach or wait for admin review first.',
       );
     }
 

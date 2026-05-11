@@ -6,6 +6,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from './user.entity';
+import { BankUserApprovalStatus } from './bank-user-approval-status';
 
 @Entity('bank_users')
 export class BankUser {
@@ -26,6 +27,22 @@ export class BankUser {
 
   @Column({ name: 'bu_bank_account_number', type: 'varchar' })
   bu_bank_account_number: string;
+
+  @Column({
+    name: 'bu_approval_status',
+    type: 'varchar',
+    length: 16,
+    default: BankUserApprovalStatus.ACTIVE,
+  })
+  bu_approval_status: BankUserApprovalStatus;
+
+  @Column({
+    name: 'bu_requested_at',
+    type: 'timestamptz',
+    nullable: true,
+    default: null,
+  })
+  bu_requested_at: Date | null;
 
   @ManyToOne(() => User, (user) => user.bank_users)
   @JoinColumn({ name: 'bu_user_id' })
