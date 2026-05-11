@@ -1786,7 +1786,7 @@ export class WalletsService implements OnModuleInit {
 
   /**
    * Kiểm tra và đồng bộ balance trước khi rút tiền
-   * So khớp uw_balance với expected = tổng deposit SUCCESS − tổng withdraw (pending/success/checked)
+   * So khớp `uw_balance` với (tổng deposit SUCCESS − withdraw) − `uw_lock_balance` (P2P lock).
    * Nếu không khớp thì sync on-chain rồi `updateUserBalanceIfChanged`.
    */
   private async checkAndSyncBalance(
@@ -1796,13 +1796,11 @@ export class WalletsService implements OnModuleInit {
     network: Network,
   ): Promise<void> {
     try {
-      // 1. Tính toán expected balance (từ TẤT CẢ networks)
-      const expectedBalance = await this.calculateExpectedBalance(
+      const ledgerTotal = await this.calculateCustodialTotalFromWalletHistory(
         userId,
         coinId,
       );
 
-      // 2. Lấy balance hiện tại từ database
       const userWallet = await this.userWalletRepository.findOne({
         where: {
           uw_user_id: userId,
@@ -1811,20 +1809,24 @@ export class WalletsService implements OnModuleInit {
       });
 
       if (!userWallet) {
-        // Nếu chưa có wallet, tạo mới với balance = expectedBalance
         const newWallet = this.userWalletRepository.create({
           uw_user_id: userId,
           uw_wallet_type: 'crypto' as any,
           uw_wallet_coins: coinId,
-          uw_balance: expectedBalance,
+          uw_balance: ledgerTotal,
+          uw_lock_balance: 0 as any,
         });
         await this.userWalletRepository.save(newWallet);
         return;
       }
 
+      const lockBalance = parseFloat(
+        userWallet.uw_lock_balance?.toString() ?? '0',
+      );
+      const expectedAvailable = Math.max(0, ledgerTotal - lockBalance);
       const oldBalance = parseFloat(userWallet.uw_balance.toString());
       const tolerance = 0.00000001;
-      const shouldSync = Math.abs(expectedBalance - oldBalance) > tolerance;
+      const shouldSync = Math.abs(expectedAvailable - oldBalance) > tolerance;
 
       if (shouldSync) {
         // Balance không khớp, cần đồng bộ lại từ onchain
@@ -1896,10 +1898,10 @@ export class WalletsService implements OnModuleInit {
   }
 
   /**
-   * Expected balance cho đối soát ví: deposit SUCCESS − withdraw (pending/success/checked).
-   * Reward/staking không gộp vào công thức này (theo policy hiện tại).
+   * Tổng coin theo sổ cái nạp/rút (custodial): `uw_balance + uw_lock_balance` sau khi đồng bộ.
+   * Reward/staking không gộp (theo policy hiện tại).
    */
-  private async calculateExpectedBalance(
+  private async calculateCustodialTotalFromWalletHistory(
     userId: number,
     coinId: number,
   ): Promise<number> {
@@ -1939,9 +1941,8 @@ export class WalletsService implements OnModuleInit {
 
     const totalWithdraw = parseFloat(totalWithdrawResult?.total || '0');
 
-    const expectedBalance = totalDeposit - totalWithdraw;
-    // Đảm bảo balance không âm: nếu <= 0 thì return 0
-    return expectedBalance <= 0 ? 0 : expectedBalance;
+    const ledgerTotal = totalDeposit - totalWithdraw;
+    return ledgerTotal <= 0 ? 0 : ledgerTotal;
   }
 
   /**
