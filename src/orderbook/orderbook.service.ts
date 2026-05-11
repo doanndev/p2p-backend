@@ -717,7 +717,7 @@ export class OrderbookService {
       .where('ob.ob_status = :pending', { pending: OrderBookStatus.PENDING })
       .andWhere('CAST(ob.ob_amount_remaining AS numeric) > 0')
       .andWhere(
-        'CAST(ob.ob_amount_remaining AS numeric) >= COALESCE(CAST(ob.ob_national_min AS numeric), :defaultPerTransactionMin)',
+        "CAST(ob.ob_amount_remaining AS numeric) >= COALESCE(CAST(NULLIF(TRIM(ob.ob_national_min), '') AS numeric), :defaultPerTransactionMin)",
         {
           defaultPerTransactionMin:
             DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
