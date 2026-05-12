@@ -42,6 +42,10 @@ import {
   DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
   P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
 } from './orderbook.constants';
+import {
+  apiDecimal,
+  apiDecimalOrNull,
+} from '../common/helpers/decimal-api.util';
 
 /** Max coin (USDT) buy exposure per user level. */
 const BUYER_MAX_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
@@ -296,11 +300,11 @@ export class TransactionService {
       type: t.trans_type,
       coin_symbol: t.trans_coin_symbol,
       national_symbol: t.trans_national_symbol,
-      amount: t.trans_amount,
-      price: t.trans_price,
-      price_usd: t.trans_price_usd,
-      total_price: t.trans_total_price,
-      total_usd: t.trans_total_usd,
+      amount: apiDecimal(t.trans_amount),
+      price: apiDecimal(t.trans_price),
+      price_usd: apiDecimal(t.trans_price_usd),
+      total_price: apiDecimal(t.trans_total_price),
+      total_usd: apiDecimal(t.trans_total_usd),
       dispute_status: t.trans_dispute_status,
       time_bank: t.trans_time_bank,
       status: t.trans_status,
@@ -331,11 +335,11 @@ export class TransactionService {
       option: orderBook.ob_option,
       coin_symbol: orderBook.ob_coin_symbol,
       national_symbol: orderBook.ob_national_symbol,
-      amount: orderBook.ob_amount,
-      amount_remaining: orderBook.ob_amount_remaining,
-      price: orderBook.ob_price,
-      national_min: orderBook.ob_national_min,
-      national_max: orderBook.ob_national_max,
+      amount: apiDecimal(orderBook.ob_amount),
+      amount_remaining: apiDecimal(orderBook.ob_amount_remaining),
+      price: apiDecimal(orderBook.ob_price),
+      national_min: apiDecimalOrNull(orderBook.ob_national_min),
+      national_max: apiDecimalOrNull(orderBook.ob_national_max),
       status: orderBook.ob_status,
       description: orderBook.ob_description,
       created_at: orderBook.ob_created_at,
@@ -478,9 +482,9 @@ export class TransactionService {
       seller.uemail,
       {
         referenceCode: transaction.transs_reference_code,
-        amount: transaction.trans_amount,
+        amount: apiDecimal(transaction.trans_amount),
         coinSymbol: transaction.trans_coin_symbol,
-        totalPrice: transaction.trans_total_price,
+        totalPrice: apiDecimal(transaction.trans_total_price),
         nationalSymbol: transaction.trans_national_symbol,
       },
     );
@@ -500,9 +504,9 @@ export class TransactionService {
 
     await this.emailService.sendTransactionExecutedNotification(buyer.uemail, {
       referenceCode: transaction.transs_reference_code,
-      amount: transaction.trans_amount,
+      amount: apiDecimal(transaction.trans_amount),
       coinSymbol: transaction.trans_coin_symbol,
-      totalPrice: transaction.trans_total_price,
+      totalPrice: apiDecimal(transaction.trans_total_price),
       nationalSymbol: transaction.trans_national_symbol,
     });
   }

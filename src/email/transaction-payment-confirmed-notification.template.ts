@@ -1,4 +1,5 @@
 import { getBrandLogoBarHtml } from './brand-logo.partial';
+import { formatDecimalDisplay } from './format-decimal-display';
 
 type TransactionPaymentConfirmedNotificationPayload = {
   referenceCode: string;
@@ -11,17 +12,6 @@ type TransactionPaymentConfirmedNotificationPayload = {
   heroImageUrl?: string;
   backgroundImageUrl?: string;
 };
-
-function formatNumber(value: number | string): string {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  if (Number.isNaN(parsed)) {
-    return String(value);
-  }
-  return parsed.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  });
-}
 
 function formatTime(createdAt?: Date | string): string {
   if (!createdAt) return 'Just now';
@@ -49,9 +39,9 @@ export function getTransactionPaymentConfirmedNotificationEmailHtml(
     ['Type', 'P2P Transaction'],
     ['Status', 'Payment confirmed'],
     ['Reference code', referenceCode],
-    ['Amount', `${formatNumber(amount)} ${coinSymbol}`],
+    ['Amount', `${formatDecimalDisplay(amount)} ${coinSymbol}`],
     totalPrice !== undefined
-      ? ['Total', `${formatNumber(totalPrice)} ${nationalSymbol}`]
+      ? ['Total', `${formatDecimalDisplay(totalPrice)} ${nationalSymbol}`]
       : null,
     ['Updated at', formatTime(createdAt)],
   ]
@@ -82,7 +72,7 @@ export function getTransactionPaymentConfirmedNotificationEmailHtml(
               <tr>
                 <td style="background: #050019 url('${heroImageUrl}') no-repeat center top / cover; border-radius: 8px; text-align: center; padding: 64px 16px;">
                   <div style="color: #ffffff; font-size: 34px; font-weight: 700; letter-spacing: -0.5px;">
-                    Buyer paid ${formatNumber(amount)} ${coinSymbol}
+                    Buyer paid ${formatDecimalDisplay(amount)} ${coinSymbol}
                   </div>
                 </td>
               </tr>

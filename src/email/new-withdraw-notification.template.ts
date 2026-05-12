@@ -1,4 +1,5 @@
 import { getBrandLogoBarHtml } from './brand-logo.partial';
+import { formatDecimalDisplay } from './format-decimal-display';
 
 type NewWithdrawNotificationPayload = {
   amount: number;
@@ -12,13 +13,6 @@ type NewWithdrawNotificationPayload = {
   heroImageUrl?: string;
   backgroundImageUrl?: string;
 };
-
-function formatAmount(amount: number): string {
-  return amount.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  });
-}
 
 function formatTime(createdAt?: Date | string): string {
   if (!createdAt) return 'Just now';
@@ -49,7 +43,7 @@ export function getNewWithdrawNotificationEmailHtml(
 
   const detailsRows = [
     ['Type', 'Withdraw'],
-    ['Amount', `${formatAmount(amount)} ${asset}`],
+    ['Amount', `${formatDecimalDisplay(amount)} ${asset}`],
     ['Network', network],
     ['Status', formatStatus(status)],
     ['Created at', formatTime(createdAt)],
@@ -83,7 +77,7 @@ export function getNewWithdrawNotificationEmailHtml(
               <tr>
                 <td style="background: #050019 url('${heroImageUrl}') no-repeat center top / cover; border-radius: 8px; text-align: center; padding: 64px 16px;">
                   <div style="color: #ffffff; font-size: 34px; font-weight: 700; letter-spacing: -0.5px;">
-                    -${formatAmount(amount)} ${asset}
+                    -${formatDecimalDisplay(amount)} ${asset}
                   </div>
                 </td>
               </tr>

@@ -12,6 +12,10 @@ import { Transaction } from '../orderbook/entities/transaction.entity';
 import { OrderBook } from '../orderbook/entities/order-book.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
 import { Admin, AdminStatus } from '../admins/entities/admin.entity';
+import {
+  apiDecimal,
+  apiDecimalOrNull,
+} from '../common/helpers/decimal-api.util';
 
 export type ChatActor = { type: 'user' | 'admin'; id: number };
 
@@ -54,11 +58,11 @@ export class ChatService {
       option: orderbook.ob_option,
       coin_symbol: orderbook.ob_coin_symbol,
       national_symbol: orderbook.ob_national_symbol,
-      amount: orderbook.ob_amount,
-      amount_remaining: orderbook.ob_amount_remaining,
-      price: orderbook.ob_price,
-      national_min: orderbook.ob_national_min,
-      national_max: orderbook.ob_national_max,
+      amount: apiDecimal(orderbook.ob_amount),
+      amount_remaining: apiDecimal(orderbook.ob_amount_remaining),
+      price: apiDecimal(orderbook.ob_price),
+      national_min: apiDecimalOrNull(orderbook.ob_national_min),
+      national_max: apiDecimalOrNull(orderbook.ob_national_max),
       status: orderbook.ob_status,
       description: orderbook.ob_description,
       created_at: orderbook.ob_created_at,
@@ -80,11 +84,11 @@ export class ChatService {
       type: transaction.trans_type,
       coin_symbol: transaction.trans_coin_symbol,
       national_symbol: transaction.trans_national_symbol,
-      amount: transaction.trans_amount,
-      price: transaction.trans_price,
-      price_usd: transaction.trans_price_usd,
-      total_price: transaction.trans_total_price,
-      total_usd: transaction.trans_total_usd,
+      amount: apiDecimal(transaction.trans_amount),
+      price: apiDecimal(transaction.trans_price),
+      price_usd: apiDecimal(transaction.trans_price_usd),
+      total_price: apiDecimal(transaction.trans_total_price),
+      total_usd: apiDecimal(transaction.trans_total_usd),
       dispute_status: transaction.trans_dispute_status,
       time_bank: transaction.trans_time_bank,
       status: transaction.trans_status,

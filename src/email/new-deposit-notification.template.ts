@@ -1,4 +1,5 @@
 import { getBrandLogoBarHtml } from './brand-logo.partial';
+import { formatDecimalDisplay } from './format-decimal-display';
 
 type NewDepositNotificationPayload = {
   amount: number;
@@ -11,13 +12,6 @@ type NewDepositNotificationPayload = {
   heroImageUrl?: string;
   backgroundImageUrl?: string;
 };
-
-function formatAmount(amount: number): string {
-  return amount.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  });
-}
 
 function formatTime(createdAt?: Date | string): string {
   if (!createdAt) return 'Just now';
@@ -43,7 +37,7 @@ export function getNewDepositNotificationEmailHtml(
 
   const detailsRows = [
     ['Type', 'Deposit'],
-    ['Amount', `${formatAmount(amount)} ${asset}`],
+    ['Amount', `${formatDecimalDisplay(amount)} ${asset}`],
     ['Network', network],
     ['Created at', formatTime(createdAt)],
     txHash ? ['Transaction hash', txHash] : null,
@@ -76,7 +70,7 @@ export function getNewDepositNotificationEmailHtml(
               <tr>
                 <td style="background: #050019 url('${heroImageUrl}') no-repeat center top / cover; border-radius: 8px; text-align: center; padding: 64px 16px;">
                   <div style="color: #ffffff; font-size: 34px; font-weight: 700; letter-spacing: -0.5px;">
-                    +${formatAmount(amount)} ${asset}
+                    +${formatDecimalDisplay(amount)} ${asset}
                   </div>
                 </td>
               </tr>
