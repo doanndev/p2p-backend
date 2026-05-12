@@ -17,8 +17,11 @@ import {
 import { SupportChatActor } from './support-chat.types';
 import { QueryConversationsDto } from './dto/query-conversations.dto';
 import { QueryConversationMessagesDto } from './dto/query-conversation-messages.dto';
-import { User } from '../users/entities/user.entity';
+import { CreateConversationDto } from './dto/create-conversation.dto';
+import { User, UserStatus } from '../users/entities/user.entity';
+import { Admin } from '../admins/entities/admin.entity';
 import { AdminNotificationsService } from '../notifications/admin-notifications.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
 
 @Injectable()
@@ -33,7 +36,88 @@ export class SupportChatService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly adminNotificationsService: AdminNotificationsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
+
+  /** Super admins: persists {@link AdminNotification} rows in the background (non-blocking). */
+  private notifySuperAdminsNewSupportConversation(
+    conversation: SupportChat,
+    chatUser: Pick<User, 'uid' | 'uname' | 'uemail'> | null,
+  ): void {
+    const label = chatUser?.uname?.trim() || `user #${conversation.user_id}`;
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.SUPPORT_CHAT,
+      title: 'New support chat',
+      message: `User ${label} opened a new support conversation (#${conversation.id}).`,
+      data: {
+        conversation_id: conversation.id,
+        conversation_code: conversation.conversation_code,
+        user_id: conversation.user_id,
+      },
+    });
+  }
+
+  /** Super admins: audit notification in the background when an admin starts a support thread. */
+  private notifySuperAdminsAdminCreatedSupportConversation(
+    conversation: SupportChat,
+    admin: Admin,
+    targetUser: Pick<User, 'uid' | 'uname' | 'uemail'>,
+  ): void {
+    const userLabel = targetUser.uname?.trim() || `user #${targetUser.uid}`;
+    const adminLabel = this.adminDisplayLabel(admin);
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.SUPPORT_CHAT,
+      title: 'Support chat opened by admin',
+      message: `${adminLabel} opened a support conversation (#${conversation.id}) for ${userLabel}.`,
+      data: {
+        conversation_id: conversation.id,
+        conversation_code: conversation.conversation_code,
+        user_id: conversation.user_id,
+        created_by_admin_id: admin.admin_id,
+      },
+    });
+  }
+
+  private adminDisplayLabel(admin: Admin): string {
+    return (
+      admin.admin_fullname?.trim() ||
+      admin.admin_username?.trim() ||
+      `Admin #${admin.admin_id}`
+    );
+  }
+
+  /** Persists {@link Notification} in the background (non-blocking). */
+  private notifyUserAdminCreatedSupportConversation(
+    conversation: SupportChat,
+    admin: Admin,
+  ): void {
+    void this.dispatchNotifyUserAdminCreatedSupport(conversation, admin).catch(
+      (err) => {
+        this.logger.warn(
+          `notifyUserAdminCreatedSupportConversation failed (conversationId=${conversation.id}): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      },
+    );
+  }
+
+  private async dispatchNotifyUserAdminCreatedSupport(
+    conversation: SupportChat,
+    admin: Admin,
+  ): Promise<void> {
+    await this.notificationsService.createForUser({
+      userId: conversation.user_id,
+      type: NotificationType.SUPPORT_CHAT,
+      title: 'Support',
+      message: `${this.adminDisplayLabel(admin)} opened a support conversation for you.`,
+      data: {
+        conversation_id: conversation.id,
+        conversation_code: conversation.conversation_code,
+        admin_id: admin.admin_id,
+      },
+    });
+  }
 
   private toConversationResponse(conversation: SupportChat) {
     return {
@@ -211,13 +295,40 @@ export class SupportChatService {
     };
   }
 
-  async createConversation(actor: SupportChatActor) {
-    if (actor.type !== 'user') {
-      throw new ForbiddenException('Only user can create conversation');
+  async createConversation(
+    actor: SupportChatActor,
+    dto: CreateConversationDto,
+  ) {
+    let ownerUserId: number;
+    if (actor.type === 'user') {
+      if (dto.userId != null && dto.userId !== actor.id) {
+        throw new ForbiddenException(
+          'You cannot create a conversation for another user',
+        );
+      }
+      ownerUserId = actor.id;
+    } else {
+      if (!dto.userId) {
+        throw new BadRequestException(
+          'userId is required when creating a conversation as admin',
+        );
+      }
+      ownerUserId = dto.userId;
+    }
+
+    const targetUser = await this.userRepository.findOne({
+      where: { uid: ownerUserId },
+      select: ['uid', 'uname', 'uemail', 'ustatus'],
+    });
+    if (!targetUser) {
+      throw new NotFoundException('User not found');
+    }
+    if (targetUser.ustatus === UserStatus.BLOCK) {
+      throw new BadRequestException('User account is blocked');
     }
 
     const existing = await this.supportChatRepository.findOne({
-      where: { user_id: actor.id, status: SupportChatStatus.OPEN },
+      where: { user_id: ownerUserId, status: SupportChatStatus.OPEN },
       order: { id: 'DESC' },
     });
     if (existing) {
@@ -229,8 +340,8 @@ export class SupportChatService {
     }
 
     const conversation = this.supportChatRepository.create({
-      conversation_code: `user-${actor.id}`,
-      user_id: actor.id,
+      conversation_code: `user-${ownerUserId}`,
+      user_id: ownerUserId,
       status: SupportChatStatus.OPEN,
       last_message_at: null,
       closed_at: null,
@@ -238,21 +349,20 @@ export class SupportChatService {
     });
     const saved = await this.supportChatRepository.save(conversation);
 
-    const chatUser = await this.userRepository.findOne({
-      where: { uid: actor.id },
-      select: ['uid', 'uname', 'uemail'],
-    });
-
-    this.adminNotificationsService.notifySuperAdmins({
-      type: NotificationType.SUPPORT_CHAT,
-      title: 'New support chat',
-      message: `User #${actor.id} (${chatUser?.uname ?? 'unknown'}) opened a support conversation.`,
-      data: {
-        nversation_id: saved.id,
-        conversation_code: saved.conversation_code,
-        user_id: actor.id,
-      },
-    });
+    if (actor.type === 'user') {
+      this.notifySuperAdminsNewSupportConversation(saved, {
+        uid: targetUser.uid,
+        uname: targetUser.uname,
+        uemail: targetUser.uemail,
+      });
+    } else if (actor.type === 'admin' && actor.admin) {
+      this.notifyUserAdminCreatedSupportConversation(saved, actor.admin);
+      this.notifySuperAdminsAdminCreatedSupportConversation(
+        saved,
+        actor.admin,
+        targetUser,
+      );
+    }
 
     return {
       statusCode: 201,

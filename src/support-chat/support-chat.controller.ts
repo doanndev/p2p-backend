@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -27,6 +28,7 @@ import { SupportChatHttpAuthGuard } from './guards/support-chat-http-auth.guard'
 import { QueryConversationsDto } from './dto/query-conversations.dto';
 import { QueryConversationMessagesDto } from './dto/query-conversation-messages.dto';
 import { SupportChatGateway } from './support-chat.gateway';
+import { CreateConversationDto } from './dto/create-conversation.dto';
 
 @ApiTags('Support Chat')
 @ApiCookieAuth('access_token')
@@ -285,7 +287,11 @@ export class SupportChatController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create conversation (user only)' })
+  @ApiOperation({
+    summary: 'Create conversation',
+    description:
+      'User: tạo (hoặc trả về) conversation `OPEN` của chính mình, không cần body. Admin: gửi `{ "userId": <uid> }` để tạo conversation cho user đó (hoặc trả về conversation `OPEN` hiện có của user).',
+  })
   @ApiCreatedResponse({
     description: 'Conversation created',
     schema: {
@@ -305,8 +311,11 @@ export class SupportChatController {
       },
     },
   })
-  createConversation(@Request() req: any) {
-    return this.supportChatService.createConversation(req.supportChatActor);
+  createConversation(@Request() req: any, @Body() body: CreateConversationDto) {
+    return this.supportChatService.createConversation(
+      req.supportChatActor,
+      body,
+    );
   }
 
   @Patch(':id/close')
