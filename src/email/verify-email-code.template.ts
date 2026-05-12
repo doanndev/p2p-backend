@@ -1,3 +1,5 @@
+import { getBrandLogoBarHtml } from './brand-logo.partial';
+
 export function getVerifyEmailCodeHtml(
   code: string,
   expireMinutes = 3,
@@ -11,6 +13,7 @@ export function getVerifyEmailCodeHtml(
         <tr>
           <td align="center">
             <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width: 100%; max-width: 600px; margin: 0 auto; padding: 0 12px;">
+              ${getBrandLogoBarHtml({ background: '#f7f9fb' })}
               <tr>
                 <td align="center" style="padding: 16px 0 20px;">
                   <div style="font-size: 34px; line-height: 34px;">🔐</div>
