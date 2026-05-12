@@ -48,6 +48,7 @@ import { UserWallet, WalletType } from '../wallets/entities/user-wallet.entity';
 import { Coin } from '../settings/entities/coin.entity';
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
 import { NotificationType } from './entities/notification.entity';
 
 @Injectable()
@@ -83,6 +84,7 @@ export class UsersService {
     private googleAuthService: GoogleAuthService,
     private smartRefService: SmartRefService,
     private notificationsService: NotificationsService,
+    private adminNotificationsService: AdminNotificationsService,
   ) {}
 
   /**
@@ -1595,19 +1597,19 @@ export class UsersService {
       existingVerify.uv_status = UserVerifyStatus.PENDING;
       const savedVerify = await this.userVerifyRepository.save(existingVerify);
 
+      const userForAdmin = await this.userRepository.findOne({
+        where: { uid: userId },
+        select: ['uid', 'uname', 'uemail', 'ufulllname'],
+      });
+
       const adminEmail = this.configService.get<string>('ADMIN_EMAIL')?.trim();
       if (adminEmail) {
-        const user = await this.userRepository.findOne({
-          where: { uid: userId },
-          select: ['uid', 'uname', 'uemail', 'ufulllname'],
-        });
-
         void this.emailService
           .sendNewKycNotificationToAdmin(adminEmail, {
             userId,
-            userName: user?.uname || 'unknown',
-            userEmail: user?.uemail || 'unknown',
-            fullName: user?.ufulllname || 'unknown',
+            userName: userForAdmin?.uname || 'unknown',
+            userEmail: userForAdmin?.uemail || 'unknown',
+            fullName: userForAdmin?.ufulllname || 'unknown',
             verificationId: savedVerify.uv_id,
             submittedAt: new Date(),
           })
@@ -1633,6 +1635,22 @@ export class UsersService {
         .catch((err) => {
           this.logger.warn(
             `KYC paper createForUser failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+
+      void this.adminNotificationsService
+        .notifySuperAdmins({
+          type: NotificationType.KYC,
+          title: 'KYC paper submitted',
+          message: `User #${userId} (${userForAdmin?.uname ?? 'unknown'}) submitted KYC paper for review.`,
+          data: {
+            user_id: userId,
+            verification_id: savedVerify.uv_id,
+          },
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `KYC paper notifySuperAdmins failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
           );
         });
 

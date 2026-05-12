@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -17,9 +18,13 @@ import { SupportChatActor } from './support-chat.types';
 import { QueryConversationsDto } from './dto/query-conversations.dto';
 import { QueryConversationMessagesDto } from './dto/query-conversation-messages.dto';
 import { User } from '../users/entities/user.entity';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
+import { NotificationType } from '../users/entities/notification.entity';
 
 @Injectable()
 export class SupportChatService {
+  private readonly logger = new Logger(SupportChatService.name);
+
   constructor(
     @InjectRepository(SupportChat)
     private readonly supportChatRepository: Repository<SupportChat>,
@@ -27,6 +32,7 @@ export class SupportChatService {
     private readonly supportChatMessageRepository: Repository<SupportChatMessage>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private toConversationResponse(conversation: SupportChat) {
@@ -231,6 +237,28 @@ export class SupportChatService {
       closed_by_admin_id: null,
     });
     const saved = await this.supportChatRepository.save(conversation);
+
+    const chatUser = await this.userRepository.findOne({
+      where: { uid: actor.id },
+      select: ['uid', 'uname', 'uemail'],
+    });
+
+    void this.adminNotificationsService
+      .notifySuperAdmins({
+        type: NotificationType.SUPPORT_CHAT,
+        title: 'New support chat',
+        message: `User #${actor.id} (${chatUser?.uname ?? 'unknown'}) opened a support conversation.`,
+        data: {
+          conversation_id: saved.id,
+          conversation_code: saved.conversation_code,
+          user_id: actor.id,
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `createConversation notifySuperAdmins failed userId=${actor.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     return {
       statusCode: 201,

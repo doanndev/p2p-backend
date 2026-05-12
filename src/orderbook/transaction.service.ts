@@ -37,6 +37,7 @@ import {
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
 import {
   DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
@@ -77,6 +78,7 @@ export class TransactionService {
     private readonly smartRefService: SmartRefService,
     private readonly currenciesService: CurrenciesService,
     private readonly notificationsService: NotificationsService,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -1303,6 +1305,25 @@ export class TransactionService {
           err,
         );
       });
+
+    void this.adminNotificationsService
+      .notifySuperAdmins({
+        type: NotificationType.TRANSACTION,
+        title: 'Dispute opened',
+        message: `Dispute #${response.id} opened on transaction ${tx.transs_reference_code}.`,
+        data: {
+          dispute_id: response.id,
+          transaction_id: tx.trans_id,
+          reference_code: tx.transs_reference_code,
+        },
+      })
+      .catch((err) => {
+        console.error(
+          `Failed notifySuperAdmins for dispute ${response.id}:`,
+          err,
+        );
+      });
+
     return response;
   }
 

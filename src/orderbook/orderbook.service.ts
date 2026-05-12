@@ -39,6 +39,7 @@ import {
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { EmailService } from '../systems/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
 import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
 import {
@@ -82,6 +83,7 @@ export class OrderbookService {
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -1055,6 +1057,24 @@ export class OrderbookService {
         console.error(
           `Failed user notification bank change OB ${orderBookId}:`,
           err,
+        );
+      });
+
+    void this.adminNotificationsService
+      .notifySuperAdmins({
+        type: NotificationType.ORDERBOOK,
+        title: 'Orderbook bank change pending',
+        message: `User #${userId} requested bank change for orderbook #${orderBookId}.`,
+        data: {
+          orderbook_id: orderBookId,
+          user_id: userId,
+          bank_user_id: bankUserId,
+          requested_at: requestedAt.toISOString(),
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `attachBankToOrderBook notifySuperAdmins failed ob=${orderBookId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
 

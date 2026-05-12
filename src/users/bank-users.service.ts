@@ -19,6 +19,8 @@ import {
   UserCodeType,
 } from './entities/user-code.entity';
 import { EmailService } from '../systems/email.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
+import { NotificationType } from './entities/notification.entity';
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 import { BankMutationSecurityDto } from './dto/bank-mutation-security.dto';
 
@@ -37,6 +39,7 @@ export class BankUsersService {
     @InjectRepository(UserCode)
     private readonly userCodeRepository: Repository<UserCode>,
     private readonly emailService: EmailService,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private generateEmailCode(): string {
@@ -116,7 +119,7 @@ export class BankUsersService {
   async createMyBank(userId: number, dto: CreateBankUserDto) {
     const requestUser = await this.userRepository.findOne({
       where: { uid: userId },
-      select: ['uid', 'uverify', 'ufulllname'],
+      select: ['uid', 'uverify', 'ufulllname', 'uname', 'uemail'],
     });
     if (!requestUser) throw new NotFoundException('User not found');
     if (requestUser.uverify !== true) {
@@ -151,6 +154,23 @@ export class BankUsersService {
       bu_requested_at: requestedAt,
     });
     const saved = await this.bankUserRepository.save(created);
+
+    void this.adminNotificationsService
+      .notifySuperAdmins({
+        type: NotificationType.USER,
+        title: 'New bank account pending approval',
+        message: `User #${userId} (${requestUser.uname ?? 'unknown'}) submitted a bank account for approval.`,
+        data: {
+          bank_user_id: saved.bu_id,
+          user_id: userId,
+          bank_name: saved.bu_bank_name,
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `createMyBank notifySuperAdmins failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     return {
       message: 'Bank create request submitted and waiting for admin approval',

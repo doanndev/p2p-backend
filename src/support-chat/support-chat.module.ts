@@ -11,9 +11,11 @@ import { User } from '../users/entities/user.entity';
 import { Admin } from '../admins/entities/admin.entity';
 import { SupportChatHttpAuthGuard } from './guards/support-chat-http-auth.guard';
 import { SupportChatAdminGuard } from './guards/support-chat-admin.guard';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
+    NotificationsModule,
     ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

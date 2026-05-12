@@ -33,6 +33,7 @@ import { ActiveWalletTracker } from '../wallets/entities/active-wallet-tracker.e
 import { WalletDepositTracker } from '../wallets/entities/wallet-deposit-tracker.entity';
 import { CoinNetwork } from '../settings/entities/coin-network.entity';
 import { Transaction } from '../orderbook/entities/transaction.entity';
+import { AdminNotification } from './entities/admin-notification.entity';
 import { VerifyLog } from '../users/entities/verify-log.entity';
 import { UserVerify } from '../users/entities/user-verify.entity';
 import { KolRegister } from '../users/entities/kol-register.entity';
@@ -76,6 +77,7 @@ import { OrderbookModule } from '../orderbook/orderbook.module';
       KolRegister,
       KolArticle,
       Transaction,
+      AdminNotification,
     ]),
     PassportModule,
     ConfigModule,
