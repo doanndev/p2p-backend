@@ -286,7 +286,8 @@ export class SupportChatService {
   async saveUserOrAdminMessage(
     actor: SupportChatActor,
     conversationId: number,
-    content: string,
+    content?: string,
+    imageUrl?: string,
   ) {
     const conversation = await this.assertCanAccessConversation(
       actor,
@@ -296,11 +297,17 @@ export class SupportChatService {
       throw new BadRequestException('Conversation is closed');
     }
 
-    const trimmed = (content || '').trim();
-    if (!trimmed) {
-      throw new BadRequestException('Message content is required');
+    const text = (content ?? '').trim();
+    const url = (imageUrl ?? '').trim();
+    if (text && url) {
+      throw new BadRequestException('Send text and image in separate messages');
+    }
+    if (!text && !url) {
+      throw new BadRequestException('Message content or imageUrl is required');
     }
 
+    const isImage = Boolean(url);
+    const storedContent = isImage ? url : text;
     const message = this.supportChatMessageRepository.create({
       conversation_id: conversation.id,
       sender_type:
@@ -309,8 +316,10 @@ export class SupportChatService {
           : SupportChatSenderType.USER,
       sender_admin_id: actor.type === 'admin' ? actor.id : null,
       sender_user_id: actor.type === 'user' ? actor.id : null,
-      message_type: SupportChatMessageType.TEXT,
-      content: trimmed,
+      message_type: isImage
+        ? SupportChatMessageType.IMAGE
+        : SupportChatMessageType.TEXT,
+      content: storedContent,
       system_event_type: null,
       seen_by_user_at: actor.type === 'user' ? new Date() : null,
       seen_by_admin_at: actor.type === 'admin' ? new Date() : null,

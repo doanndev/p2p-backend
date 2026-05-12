@@ -236,12 +236,14 @@ export class SupportChatGateway
         ...this.socketMeta(client),
         conversationId: body?.conversationId,
         contentLength: body?.content?.length ?? 0,
+        hasImageUrl: Boolean(body?.imageUrl?.trim?.()),
       })}`,
     );
     const message = await this.supportChatService.saveUserOrAdminMessage(
       client.actor,
       body.conversationId,
       body.content,
+      body.imageUrl,
     );
     await client.join(supportRoomName(body.conversationId));
     this.server
