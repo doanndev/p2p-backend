@@ -9,6 +9,7 @@ import {
   NotificationType,
 } from '../users/entities/notification.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { apiDecimal } from '../common/helpers/decimal-api.util';
 
 const UNLOCK_BATCH_SIZE = 100;
 
@@ -115,7 +116,7 @@ export class P2pCoinUnlockSchedulerService {
           const lockBal = this.toNumber(buyerWallet.uw_lock_balance);
           if (lockBal < amount) {
             throw new Error(
-              `Insufficient buyer lock_balance: need ${amount}, have ${lockBal}`,
+              `Insufficient buyer lock_balance: need ${apiDecimal(amount)}, have ${apiDecimal(lockBal)}`,
             );
           }
 

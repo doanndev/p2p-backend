@@ -400,8 +400,9 @@ export class AdminsAuthService {
 
   /**
    * Get or create the "moderator" role with permissions:
-   * - users:read (xem KYC, danh sách users)
-   * - users:advanced (duyệt/từ chối KYC, đặt/hủy KOL, duyệt/từ chối KOL và bài viết)
+   * - users:read (KYC, user lists)
+   * - users:advanced (KYC approve/reject, KOL, articles)
+   * - forum:read / forum:create / forum:update
    */
   private async getOrCreateModeratorRole(): Promise<AdminRole> {
     let role = await this.adminRoleRepository.findOne({
@@ -411,7 +412,7 @@ export class AdminsAuthService {
       role = this.adminRoleRepository.create({
         role_name: 'moderator',
         role_description:
-          'Quản lý KYC, xem users, đặt/hủy KOL, duyệt/từ chối KOL và bài viết',
+          'KYC and users, KOL and articles, forum posts (read/create/update)',
         role_status: RoleStatus.ACTIVE,
       });
       role = await this.adminRoleRepository.save(role);
@@ -431,6 +432,21 @@ export class AdminsAuthService {
         resource: PermissionResource.USERS,
         action: PermissionAction.ADVANCED,
         name: 'users:advanced',
+      },
+      {
+        resource: PermissionResource.FORUM,
+        action: PermissionAction.READ,
+        name: 'forum:read',
+      },
+      {
+        resource: PermissionResource.FORUM,
+        action: PermissionAction.CREATE,
+        name: 'forum:create',
+      },
+      {
+        resource: PermissionResource.FORUM,
+        action: PermissionAction.UPDATE,
+        name: 'forum:update',
       },
     ];
 

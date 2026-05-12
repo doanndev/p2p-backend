@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -27,6 +28,7 @@ import { SupportChatHttpAuthGuard } from './guards/support-chat-http-auth.guard'
 import { QueryConversationsDto } from './dto/query-conversations.dto';
 import { QueryConversationMessagesDto } from './dto/query-conversation-messages.dto';
 import { SupportChatGateway } from './support-chat.gateway';
+import { CreateConversationDto } from './dto/create-conversation.dto';
 
 @ApiTags('Support Chat')
 @ApiCookieAuth('access_token')
@@ -76,7 +78,12 @@ export class SupportChatController {
       '```json',
       '{ "conversationId": 12, "content": "Xin chao admin" }',
       '```',
+      '- Hoặc gửi ảnh bằng URL (https), một trong hai: `content` hoặc `imageUrl`:',
+      '```json',
+      '{ "conversationId": 12, "imageUrl": "https://cdn.example.com/screenshot.png" }',
+      '```',
       '- Validate: actor thuộc conversation (user owner hoặc admin), conversation phải `OPEN`.',
+      '- Text: `message_type`: `text`, `content` là nội dung. Ảnh: `message_type`: `image`, `content` lưu URL.',
       '- Lưu DB vào `support_chat_message` rồi emit `receive_message` cho toàn bộ room.',
       '',
       '### 4) typing',
@@ -112,6 +119,8 @@ export class SupportChatController {
       '## Message emit mẫu (`receive_message`)',
       '```json',
       '{ "id": 88, "conversation_id": 12, "sender_type": "user", "sender_user_id": 1001, "sender_admin_id": null, "message_type": "text", "content": "Xin chao admin", "system_event_type": null, "seen_by_user_at": "2026-04-01T10:02:00.000Z", "seen_by_admin_at": null, "created_at": "2026-04-01T10:02:00.000Z" }',
+      '',
+      '`message_type`: `image` khi gửi `imageUrl` — `content` trong payload DB là URL ảnh.',
       '```',
       '',
       '## Flow',
@@ -125,7 +134,7 @@ export class SupportChatController {
       '',
       '  UserClient->>WS: join_conversation(conversationId)',
       '  AdminClient->>WS: join_conversation(conversationId)',
-      '  UserClient->>WS: send_message(conversationId,content)',
+      '  UserClient->>WS: send_message(conversationId,content hoặc imageUrl)',
       '  WS->>Service: validatePermission',
       '  Service->>DB: insert support_chat_message',
       '  WS-->>UserClient: receive_message',
@@ -278,7 +287,11 @@ export class SupportChatController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create conversation (user only)' })
+  @ApiOperation({
+    summary: 'Create conversation',
+    description:
+      'User: tạo (hoặc trả về) conversation `OPEN` của chính mình, không cần body. Admin: gửi `{ "userId": <uid> }` để tạo conversation cho user đó (hoặc trả về conversation `OPEN` hiện có của user).',
+  })
   @ApiCreatedResponse({
     description: 'Conversation created',
     schema: {
@@ -298,8 +311,11 @@ export class SupportChatController {
       },
     },
   })
-  createConversation(@Request() req: any) {
-    return this.supportChatService.createConversation(req.supportChatActor);
+  createConversation(@Request() req: any, @Body() body: CreateConversationDto) {
+    return this.supportChatService.createConversation(
+      req.supportChatActor,
+      body,
+    );
   }
 
   @Patch(':id/close')

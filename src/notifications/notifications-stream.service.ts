@@ -1,9 +1,13 @@
 import { Injectable, MessageEvent } from '@nestjs/common';
 import { Observable, Subject, interval } from 'rxjs';
+import { RedisPubSubService } from '../systems/redis-pubsub.service';
 
 @Injectable()
 export class NotificationsStreamService {
   private readonly streams = new Map<number, Set<Subject<MessageEvent>>>();
+  private readonly adminStreams = new Map<number, Set<Subject<MessageEvent>>>();
+
+  constructor(private readonly redisPubSubService: RedisPubSubService) {}
 
   connect(userId: number): {
     stream: Observable<MessageEvent>;
@@ -12,8 +16,12 @@ export class NotificationsStreamService {
     const subject = new Subject<MessageEvent>();
     const userStreams =
       this.streams.get(userId) ?? new Set<Subject<MessageEvent>>();
+    const firstTabForUser = userStreams.size === 0;
     userStreams.add(subject);
     this.streams.set(userId, userStreams);
+    if (firstTabForUser) {
+      void this.redisPubSubService.notificationUserSseConnect(userId);
+    }
 
     const heartbeat = interval(25000).subscribe(() => {
       if (!subject.closed) {
@@ -36,6 +44,7 @@ export class NotificationsStreamService {
         current.delete(subject);
         if (current.size === 0) {
           this.streams.delete(userId);
+          void this.redisPubSubService.notificationUserSseDisconnect(userId);
         }
       },
     };
@@ -46,6 +55,53 @@ export class NotificationsStreamService {
     if (!userStreams?.size) return;
 
     for (const stream of userStreams) {
+      if (!stream.closed) {
+        stream.next(event);
+      }
+    }
+  }
+
+  connectAdmin(adminId: number): {
+    stream: Observable<MessageEvent>;
+    disconnect: () => void;
+  } {
+    const subject = new Subject<MessageEvent>();
+    const set =
+      this.adminStreams.get(adminId) ?? new Set<Subject<MessageEvent>>();
+    set.add(subject);
+    this.adminStreams.set(adminId, set);
+
+    const heartbeat = interval(25000).subscribe(() => {
+      if (!subject.closed) {
+        subject.next({
+          type: 'ping',
+          data: { timestamp: new Date().toISOString() },
+        });
+      }
+    });
+
+    subject.next({ type: 'connected', data: { admin_id: adminId } });
+
+    return {
+      stream: subject.asObservable(),
+      disconnect: () => {
+        heartbeat.unsubscribe();
+        subject.complete();
+        const current = this.adminStreams.get(adminId);
+        if (!current) return;
+        current.delete(subject);
+        if (current.size === 0) {
+          this.adminStreams.delete(adminId);
+        }
+      },
+    };
+  }
+
+  emitToAdmin(adminId: number, event: MessageEvent): void {
+    const set = this.adminStreams.get(adminId);
+    if (!set?.size) return;
+
+    for (const stream of set) {
       if (!stream.closed) {
         stream.next(event);
       }

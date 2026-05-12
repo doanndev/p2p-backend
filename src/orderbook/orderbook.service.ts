@@ -39,8 +39,13 @@ import {
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { EmailService } from '../systems/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
 import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
+import {
+  apiDecimal,
+  apiDecimalOrNull,
+} from '../common/helpers/decimal-api.util';
 /** Max coin (USDT) buy exposure per user level — “Max Limit” in buy-limit formula. */
 const BUYER_MAX_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
   1: 1000,
@@ -78,6 +83,7 @@ export class OrderbookService {
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -86,6 +92,17 @@ export class OrderbookService {
 
   private formatAmount(value: number): string {
     return value.toFixed(8);
+  }
+
+  /** JSON API: numeric fields instead of decimal strings from PostgreSQL. */
+  private apiOrderBookAmountFields(ob: OrderBook) {
+    return {
+      amount: apiDecimal(ob.ob_amount),
+      amount_remaining: apiDecimal(ob.ob_amount_remaining),
+      price: apiDecimal(ob.ob_price),
+      national_min: apiDecimalOrNull(ob.ob_national_min),
+      national_max: apiDecimalOrNull(ob.ob_national_max),
+    };
   }
 
   /**
@@ -467,7 +484,7 @@ export class OrderbookService {
 
         if (amount > available) {
           throw new BadRequestException(
-            `Buy limit exceeded. Level ${currentUser.ulevel} max is ${maxLimitCoin} USDT; available now is ${this.formatAmount(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
+            `Buy limit exceeded. Level ${currentUser.ulevel} max is ${maxLimitCoin} USDT; available now is ${apiDecimal(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
           );
         }
       }
@@ -606,11 +623,7 @@ export class OrderbookService {
         option: saved.ob_option,
         coin_symbol: saved.ob_coin_symbol,
         national_symbol: saved.ob_national_symbol,
-        amount: saved.ob_amount,
-        amount_remaining: saved.ob_amount_remaining,
-        price: saved.ob_price,
-        national_min: saved.ob_national_min,
-        national_max: saved.ob_national_max,
+        ...this.apiOrderBookAmountFields(saved),
         status: saved.ob_status,
         description: saved.ob_description,
       };
@@ -782,11 +795,7 @@ export class OrderbookService {
           option: book.ob_option,
           coin_symbol: book.ob_coin_symbol,
           national_symbol: book.ob_national_symbol,
-          amount: book.ob_amount,
-          amount_remaining: book.ob_amount_remaining,
-          price: book.ob_price,
-          national_min: book.ob_national_min,
-          national_max: book.ob_national_max,
+          ...this.apiOrderBookAmountFields(book),
           status: book.ob_status,
           description: book.ob_description,
           created_at: book.ob_created_at,
@@ -873,11 +882,7 @@ export class OrderbookService {
       option: book.ob_option,
       coin_symbol: book.ob_coin_symbol,
       national_symbol: book.ob_national_symbol,
-      amount: book.ob_amount,
-      amount_remaining: book.ob_amount_remaining,
-      price: book.ob_price,
-      national_min: book.ob_national_min,
-      national_max: book.ob_national_max,
+      ...this.apiOrderBookAmountFields(book),
       status: book.ob_status,
       description: book.ob_description,
       created_at: book.ob_created_at,
@@ -941,11 +946,7 @@ export class OrderbookService {
       option: orderBook.ob_option,
       coin_symbol: orderBook.ob_coin_symbol,
       national_symbol: orderBook.ob_national_symbol,
-      amount: orderBook.ob_amount,
-      amount_remaining: orderBook.ob_amount_remaining,
-      price: orderBook.ob_price,
-      national_min: orderBook.ob_national_min,
-      national_max: orderBook.ob_national_max,
+      ...this.apiOrderBookAmountFields(orderBook),
       status: orderBook.ob_status,
       description: orderBook.ob_description,
       bank_infor: bankInfor,
@@ -1058,6 +1059,18 @@ export class OrderbookService {
           err,
         );
       });
+
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.ORDERBOOK,
+      title: 'Orderbook bank change pending',
+      message: `User #${userId} requested bank change for orderbook #${orderBookId}.`,
+      data: {
+        orderbook_id: orderBookId,
+        user_id: userId,
+        bank_user_id: bankUserId,
+        requested_at: requestedAt.toISOString(),
+      },
+    });
 
     return {
       message: 'Bank change request submitted and waiting for admin approval',
@@ -1266,11 +1279,7 @@ export class OrderbookService {
       option: saved.ob_option,
       coin_symbol: saved.ob_coin_symbol,
       national_symbol: saved.ob_national_symbol,
-      amount: saved.ob_amount,
-      amount_remaining: saved.ob_amount_remaining,
-      price: saved.ob_price,
-      national_min: saved.ob_national_min,
-      national_max: saved.ob_national_max,
+      ...this.apiOrderBookAmountFields(saved),
       status: saved.ob_status,
       description: saved.ob_description,
     };

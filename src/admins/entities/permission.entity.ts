@@ -17,6 +17,7 @@ export enum PermissionResource {
   COINS = 'coins',
   REFERRAL = 'referral',
   SYSTEM = 'system',
+  FORUM = 'forum',
 }
 
 export enum PermissionAction {
