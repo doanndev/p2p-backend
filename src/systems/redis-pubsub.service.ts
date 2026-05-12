@@ -8,6 +8,9 @@ import { createClient, RedisClientType } from 'redis';
 
 type RedisClient = RedisClientType<any, any, any>;
 
+/** Hash field = user id, value = open user notification SSE connection count (all app instances). */
+const NOTIFICATION_USER_SSE_REF_KEY = 'notifications:user:sse_ref';
+
 @Injectable()
 export class RedisPubSubService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisPubSubService.name);
@@ -124,5 +127,61 @@ export class RedisPubSubService implements OnModuleInit, OnModuleDestroy {
         // ignore malformed messages/handler errors (best-effort)
       }
     });
+  }
+
+  /** Increment when a user opens `GET /notifications/stream` (first tab on this instance). */
+  async notificationUserSseConnect(userId: number): Promise<void> {
+    if (!this.ready || !this.pub) return;
+    try {
+      await this.pub.hIncrBy(NOTIFICATION_USER_SSE_REF_KEY, String(userId), 1);
+    } catch {
+      // best-effort
+    }
+  }
+
+  /** Decrement when a user closes their last SSE connection for notifications on this instance. */
+  async notificationUserSseDisconnect(userId: number): Promise<void> {
+    if (!this.ready || !this.pub) return;
+    try {
+      const n = await this.pub.hIncrBy(
+        NOTIFICATION_USER_SSE_REF_KEY,
+        String(userId),
+        -1,
+      );
+      if (n <= 0) {
+        await this.pub.hDel(NOTIFICATION_USER_SSE_REF_KEY, String(userId));
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  /**
+   * True if Redis shows at least one active notification SSE session for the user (any instance).
+   * If Redis is down or unreadable, returns true (fail-open) so clients still receive realtime.
+   */
+  async getNotificationUserSseOnlineBatch(
+    userIds: number[],
+  ): Promise<boolean[]> {
+    if (!userIds.length) {
+      return [];
+    }
+    if (!this.ready || !this.pub) {
+      return userIds.map(() => true);
+    }
+    try {
+      return await Promise.all(
+        userIds.map(async (uid) => {
+          const v = await this.pub!.hGet(
+            NOTIFICATION_USER_SSE_REF_KEY,
+            String(uid),
+          );
+          const n = parseInt(v ?? '0', 10);
+          return n > 0;
+        }),
+      );
+    } catch {
+      return userIds.map(() => true);
+    }
   }
 }

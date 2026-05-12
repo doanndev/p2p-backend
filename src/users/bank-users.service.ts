@@ -155,22 +155,16 @@ export class BankUsersService {
     });
     const saved = await this.bankUserRepository.save(created);
 
-    void this.adminNotificationsService
-      .notifySuperAdmins({
-        type: NotificationType.USER,
-        title: 'New bank account pending approval',
-        message: `User #${userId} (${requestUser.uname ?? 'unknown'}) submitted a bank account for approval.`,
-        data: {
-          bank_user_id: saved.bu_id,
-          user_id: userId,
-          bank_name: saved.bu_bank_name,
-        },
-      })
-      .catch((err) => {
-        this.logger.warn(
-          `createMyBank notifySuperAdmins failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.USER,
+      title: 'New bank account pending approval',
+      message: `User #${userId} (${requestUser.uname ?? 'unknown'}) submitted a bank account for approval.`,
+      data: {
+        bank_user_id: saved.bu_id,
+        user_id: userId,
+        bank_name: saved.bu_bank_name,
+      },
+    });
 
     return {
       message: 'Bank create request submitted and waiting for admin approval',

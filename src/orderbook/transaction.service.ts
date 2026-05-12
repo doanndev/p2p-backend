@@ -1306,23 +1306,16 @@ export class TransactionService {
         );
       });
 
-    void this.adminNotificationsService
-      .notifySuperAdmins({
-        type: NotificationType.TRANSACTION,
-        title: 'Dispute opened',
-        message: `Dispute #${response.id} opened on transaction ${tx.transs_reference_code}.`,
-        data: {
-          dispute_id: response.id,
-          transaction_id: tx.trans_id,
-          reference_code: tx.transs_reference_code,
-        },
-      })
-      .catch((err) => {
-        console.error(
-          `Failed notifySuperAdmins for dispute ${response.id}:`,
-          err,
-        );
-      });
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.TRANSACTION,
+      title: 'Dispute opened',
+      message: `Dispute #${response.id} opened on transaction ${tx.transs_reference_code}.`,
+      data: {
+        dispute_id: response.id,
+        transaction_id: tx.trans_id,
+        reference_code: tx.transs_reference_code,
+      },
+    });
 
     return response;
   }

@@ -1060,23 +1060,17 @@ export class OrderbookService {
         );
       });
 
-    void this.adminNotificationsService
-      .notifySuperAdmins({
-        type: NotificationType.ORDERBOOK,
-        title: 'Orderbook bank change pending',
-        message: `User #${userId} requested bank change for orderbook #${orderBookId}.`,
-        data: {
-          orderbook_id: orderBookId,
-          user_id: userId,
-          bank_user_id: bankUserId,
-          requested_at: requestedAt.toISOString(),
-        },
-      })
-      .catch((err) => {
-        this.logger.warn(
-          `attachBankToOrderBook notifySuperAdmins failed ob=${orderBookId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.ORDERBOOK,
+      title: 'Orderbook bank change pending',
+      message: `User #${userId} requested bank change for orderbook #${orderBookId}.`,
+      data: {
+        orderbook_id: orderBookId,
+        user_id: userId,
+        bank_user_id: bankUserId,
+        requested_at: requestedAt.toISOString(),
+      },
+    });
 
     return {
       message: 'Bank change request submitted and waiting for admin approval',

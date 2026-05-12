@@ -20,6 +20,7 @@ export enum NotificationType {
   KYC = 'kyc',
   CHAT = 'chat',
   SUPPORT_CHAT = 'support_chat',
+  FORUM = 'forum',
 }
 
 @Entity('notifications')

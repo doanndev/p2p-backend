@@ -243,22 +243,16 @@ export class SupportChatService {
       select: ['uid', 'uname', 'uemail'],
     });
 
-    void this.adminNotificationsService
-      .notifySuperAdmins({
-        type: NotificationType.SUPPORT_CHAT,
-        title: 'New support chat',
-        message: `User #${actor.id} (${chatUser?.uname ?? 'unknown'}) opened a support conversation.`,
-        data: {
-          conversation_id: saved.id,
-          conversation_code: saved.conversation_code,
-          user_id: actor.id,
-        },
-      })
-      .catch((err) => {
-        this.logger.warn(
-          `createConversation notifySuperAdmins failed userId=${actor.id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.SUPPORT_CHAT,
+      title: 'New support chat',
+      message: `User #${actor.id} (${chatUser?.uname ?? 'unknown'}) opened a support conversation.`,
+      data: {
+        nversation_id: saved.id,
+        conversation_code: saved.conversation_code,
+        user_id: actor.id,
+      },
+    });
 
     return {
       statusCode: 201,

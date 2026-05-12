@@ -24,7 +24,7 @@ export type CreateNotificationInput = {
   data?: Record<string, any> | null;
 };
 
-type NotificationResponse = {
+export type NotificationResponse = {
   id: number;
   type: NotificationType;
   title: string;
@@ -101,6 +101,7 @@ export class NotificationsService implements OnModuleInit {
 
   async createForUser(
     input: CreateNotificationInput,
+    options?: { publishRealtime?: boolean },
   ): Promise<NotificationResponse> {
     const notification = this.notificationRepository.create({
       notif_user_id: input.userId,
@@ -113,14 +114,35 @@ export class NotificationsService implements OnModuleInit {
     });
 
     const saved = await this.notificationRepository.save(notification);
-    const payload: NotificationCreatedEvent = {
-      userId: input.userId,
-      event: 'notification.created',
-      notification: this.toNotificationResponse(saved),
-    };
+    const response = this.toNotificationResponse(saved);
+    const publishRealtime = options?.publishRealtime !== false;
+    if (publishRealtime) {
+      await this.publishUserNotificationCreated(input.userId, response);
+    }
+    return response;
+  }
 
+  /** Emit an already-persisted notification to the user notification SSE channel (Redis). */
+  async publishUserNotificationCreated(
+    userId: number,
+    notification: NotificationResponse,
+  ): Promise<void> {
+    const payload: NotificationCreatedEvent = {
+      userId,
+      event: 'notification.created',
+      notification,
+    };
     await this.redisPubSubService.publish(NOTIFICATIONS_USER_CHANNEL, payload);
-    return payload.notification;
+  }
+
+  /**
+   * Per-user flags: true if Redis shows an open user notification SSE session (any instance).
+   * Fail-open (all true) when Redis is unavailable.
+   */
+  async getUserNotificationSseOnlineFlags(
+    userIds: number[],
+  ): Promise<boolean[]> {
+    return this.redisPubSubService.getNotificationUserSseOnlineBatch(userIds);
   }
 
   async listForUser(userId: number, query: QueryNotificationsDto) {

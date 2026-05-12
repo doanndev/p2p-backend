@@ -1,10 +1,13 @@
 import { Injectable, MessageEvent } from '@nestjs/common';
 import { Observable, Subject, interval } from 'rxjs';
+import { RedisPubSubService } from '../systems/redis-pubsub.service';
 
 @Injectable()
 export class NotificationsStreamService {
   private readonly streams = new Map<number, Set<Subject<MessageEvent>>>();
   private readonly adminStreams = new Map<number, Set<Subject<MessageEvent>>>();
+
+  constructor(private readonly redisPubSubService: RedisPubSubService) {}
 
   connect(userId: number): {
     stream: Observable<MessageEvent>;
@@ -13,8 +16,12 @@ export class NotificationsStreamService {
     const subject = new Subject<MessageEvent>();
     const userStreams =
       this.streams.get(userId) ?? new Set<Subject<MessageEvent>>();
+    const firstTabForUser = userStreams.size === 0;
     userStreams.add(subject);
     this.streams.set(userId, userStreams);
+    if (firstTabForUser) {
+      void this.redisPubSubService.notificationUserSseConnect(userId);
+    }
 
     const heartbeat = interval(25000).subscribe(() => {
       if (!subject.closed) {
@@ -37,6 +44,7 @@ export class NotificationsStreamService {
         current.delete(subject);
         if (current.size === 0) {
           this.streams.delete(userId);
+          void this.redisPubSubService.notificationUserSseDisconnect(userId);
         }
       },
     };

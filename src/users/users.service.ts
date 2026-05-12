@@ -1638,21 +1638,15 @@ export class UsersService {
           );
         });
 
-      void this.adminNotificationsService
-        .notifySuperAdmins({
-          type: NotificationType.KYC,
-          title: 'KYC paper submitted',
-          message: `User #${userId} (${userForAdmin?.uname ?? 'unknown'}) submitted KYC paper for review.`,
-          data: {
-            user_id: userId,
-            verification_id: savedVerify.uv_id,
-          },
-        })
-        .catch((err) => {
-          this.logger.warn(
-            `KYC paper notifySuperAdmins failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
+      this.adminNotificationsService.notifySuperAdmins({
+        type: NotificationType.KYC,
+        title: 'KYC paper submitted',
+        message: `User #${userId} (${userForAdmin?.uname ?? 'unknown'}) submitted KYC paper for review.`,
+        data: {
+          user_id: userId,
+          verification_id: savedVerify.uv_id,
+        },
+      });
 
       const response = {
         statusCode: 200,

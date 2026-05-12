@@ -128,8 +128,23 @@ export class AdminNotificationsService implements OnModuleInit {
     return payload.notification;
   }
 
-  /** In-app + SSE for every active super admin (product: ops alerts). */
-  async notifySuperAdmins(params: {
+  /** Schedules in-app + SSE notifications for every active super admin; returns immediately. */
+  notifySuperAdmins(params: {
+    type: NotificationType;
+    title: string;
+    message: string;
+    data?: Record<string, unknown> | null;
+  }): void {
+    void this.dispatchNotifySuperAdmins(params).catch((err) => {
+      this.logger.warn(
+        `notifySuperAdmins dispatch failed (title=${params.title}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+  }
+
+  private async dispatchNotifySuperAdmins(params: {
     type: NotificationType;
     title: string;
     message: string;
