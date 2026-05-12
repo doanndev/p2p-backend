@@ -2101,7 +2101,13 @@ export class WalletsService implements OnModuleInit {
       uc_user_id: userId,
     });
     await this.userCodeRepository.save(userCode);
-    await this.emailService.sendEmailVerificationCode(user.uemail, code);
+    void this.emailService
+      .sendEmailVerificationCode(user.uemail, code)
+      .catch((err) => {
+        this.logger.warn(
+          `internal exchange verify email failed userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     return {
       message: 'Verification code has been sent to your email',
@@ -2674,8 +2680,8 @@ export class WalletsService implements OnModuleInit {
       savedHistory.wh_node = network.net_symbol;
       await this.walletHistoryRepository.save(savedHistory);
 
-      await Promise.allSettled([
-        this.notificationsService.createForUser({
+      void this.notificationsService
+        .createForUser({
           userId,
           type: NotificationType.WALLET,
           title: 'Withdraw completed',
@@ -2688,21 +2694,29 @@ export class WalletsService implements OnModuleInit {
             onchain_amount: onchainAmount,
             status: 'completed',
           },
-        }),
-        ...(userEmail
-          ? [
-              this.emailService.sendWithdrawNotification(userEmail, {
-                amount,
-                asset: coin.coin_symbol,
-                network: network.net_symbol,
-                txHash,
-                destinationAddress: address,
-                createdAt: savedHistory.updated_at || new Date(),
-                status: 'completed',
-              }),
-            ]
-          : []),
-      ]);
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `withdraw completed notify failed userId=${userId} historyId=${historyId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      if (userEmail) {
+        void this.emailService
+          .sendWithdrawNotification(userEmail, {
+            amount,
+            asset: coin.coin_symbol,
+            network: network.net_symbol,
+            txHash,
+            destinationAddress: address,
+            createdAt: savedHistory.updated_at || new Date(),
+            status: 'completed',
+          })
+          .catch((err) => {
+            this.logger.warn(
+              `withdraw completed email failed userId=${userId} historyId=${historyId}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       const errStack = error instanceof Error ? error.stack : undefined;
@@ -2739,8 +2753,8 @@ export class WalletsService implements OnModuleInit {
         await manager.save(WalletHistory, history);
       });
 
-      await Promise.allSettled([
-        this.notificationsService.createForUser({
+      void this.notificationsService
+        .createForUser({
           userId,
           type: NotificationType.WALLET,
           title: 'Withdraw failed',
@@ -2753,20 +2767,28 @@ export class WalletsService implements OnModuleInit {
             status: 'failed',
             reason: errMsg || WITHDRAW_ERROR_MESSAGE,
           },
-        }),
-        ...(userEmail
-          ? [
-              this.emailService.sendWithdrawNotification(userEmail, {
-                amount,
-                asset: coin.coin_symbol,
-                network: network.net_symbol,
-                destinationAddress: address,
-                createdAt: new Date(),
-                status: 'failed',
-              }),
-            ]
-          : []),
-      ]);
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `withdraw failed notify failed userId=${userId} historyId=${historyId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      if (userEmail) {
+        void this.emailService
+          .sendWithdrawNotification(userEmail, {
+            amount,
+            asset: coin.coin_symbol,
+            network: network.net_symbol,
+            destinationAddress: address,
+            createdAt: new Date(),
+            status: 'failed',
+          })
+          .catch((err) => {
+            this.logger.warn(
+              `withdraw failed email failed userId=${userId} historyId=${historyId}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+      }
     }
   }
 

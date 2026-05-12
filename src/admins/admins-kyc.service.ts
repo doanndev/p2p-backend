@@ -253,7 +253,12 @@ export class AdminsKycService {
 
     if (hasVerify) {
       // Update uverify to true if at least one verification is verified
+      const approvedAt = new Date();
       user.uverify = true;
+      if (!user.verify_at) {
+        user.verify_at = approvedAt;
+        user.levelup_window_started_at = approvedAt;
+      }
       await this.userRepository.save(user);
       return {
         statusCode: 200,
@@ -475,8 +480,13 @@ export class AdminsKycService {
           await this.userVerifyRepository.save(verification);
         }
 
-        // Update uverify to true
+        // Update uverify to true (first admin approval anchors P2P level-up windows)
+        const approvedAt = new Date();
         user.uverify = true;
+        if (!user.verify_at) {
+          user.verify_at = approvedAt;
+          user.levelup_window_started_at = approvedAt;
+        }
         await this.userRepository.save(user);
 
         return {

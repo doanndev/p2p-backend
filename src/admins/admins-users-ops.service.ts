@@ -402,7 +402,8 @@ export class AdminsUsersOpsService {
       level: number;
       need_levelup: boolean;
       current_cycle_active_days: number;
-      last_actived_day: Date | null;
+      verify_at: Date | null;
+      levelup_window_started_at: Date | null;
       created_at: Date;
     }>;
   }> {
@@ -415,7 +416,8 @@ export class AdminsUsersOpsService {
         'ulevel',
         'need_levelup',
         'current_cycle_active_days',
-        'last_actived_day',
+        'verify_at',
+        'levelup_window_started_at',
         'created_at',
       ],
       where: { need_levelup: true },
@@ -432,7 +434,8 @@ export class AdminsUsersOpsService {
         level: u.ulevel,
         need_levelup: u.need_levelup,
         current_cycle_active_days: u.current_cycle_active_days,
-        last_actived_day: u.last_actived_day,
+        verify_at: u.verify_at,
+        levelup_window_started_at: u.levelup_window_started_at,
         created_at: u.created_at,
       })),
     };
@@ -457,7 +460,13 @@ export class AdminsUsersOpsService {
     }
 
     const user = await this.userRepository.findOne({
-      select: ['uid', 'ulevel', 'need_levelup'],
+      select: [
+        'uid',
+        'ulevel',
+        'need_levelup',
+        'verify_at',
+        'levelup_window_started_at',
+      ],
       where: { uid },
     });
     if (!user) {
@@ -475,6 +484,7 @@ export class AdminsUsersOpsService {
     }
     user.need_levelup = false;
     user.current_cycle_active_days = 0;
+    user.levelup_window_started_at = new Date();
     await this.userRepository.save(user);
 
     await this.adminLogRepository.save({

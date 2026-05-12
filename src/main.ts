@@ -6,6 +6,10 @@ import { DatabaseExceptionFilter } from './exceptions/database-exception.filter'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import './instrument';
 import { SensitiveApiSentryInterceptor } from './common/interceptors/sensitive-api-sentry.interceptor';
+import {
+  applySentryExpressErrorHandler,
+  applySentryExpressInboundMiddleware,
+} from './sentry-express-setup';
 
 async function bootstrap() {
   const nestLoggerLevels =
@@ -16,6 +20,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: [...nestLoggerLevels],
   });
+
+  /** Tương đương legacy `Sentry.Handlers.requestHandler()` + error handler (SDK v10 dùng OTel; xem `sentry-express-setup.ts`). */
+  applySentryExpressInboundMiddleware(app);
+
   // Set global prefix cho tất cả routes
   app.setGlobalPrefix('api/v1');
   app.useGlobalFilters(new DatabaseExceptionFilter());
@@ -97,6 +105,8 @@ async function bootstrap() {
       persistAuthorization: true,
     },
   });
+
+  applySentryExpressErrorHandler(app);
 
   await app.listen(port, '0.0.0.0');
   console.log(`\uD83D\uDE80 Ứng dụng đang chạy tại: http://0.0.0.0:${port}`);

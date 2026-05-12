@@ -7,7 +7,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  Not,
+  Repository,
+} from 'typeorm';
 import {
   OrderBook,
   OrderBookOption,
@@ -21,6 +28,7 @@ import { UpdateOrderbookDto } from './dto/update-orderbook.dto';
 import { QueryMyOrderbooksDto, QueryOrderbooksDto } from './dto/query.dto';
 import { SettingBankOrder } from './entities/setting-bank-order.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
+import { BankUserApprovalStatus } from '../users/entities/bank-user-approval-status';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { NationalCurrency } from './entities/national-currency.entity';
 import {
@@ -29,21 +37,10 @@ import {
   TransactionStatus,
 } from './entities/transaction.entity';
 import { SmartRefService } from '../smart-ref/smart-ref.service';
-import { CacheService } from '../systems/cache.service';
 import { EmailService } from '../systems/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
 import { DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN } from './orderbook.constants';
-type OrderbookBankChangeRequestPayload = {
-  orderbookId: number;
-  bankUserId: number;
-  requestedByUserId: number;
-  requestedAt: string;
-};
-
-const ORDERBOOK_BANK_CHANGE_REQUEST_TTL_SECONDS = 12 * 60 * 60;
-const ORDERBOOK_BANK_CHANGE_REQUEST_INDEX_KEY =
-  'orderbook:bank-change-request:index';
 /** Max coin (USDT) buy exposure per user level — “Max Limit” in buy-limit formula. */
 const BUYER_MAX_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
   1: 1000,
@@ -78,7 +75,6 @@ export class OrderbookService {
     private readonly dataSource: DataSource,
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
     private readonly smartRefService: SmartRefService,
-    private readonly cacheService: CacheService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
@@ -215,79 +211,6 @@ export class OrderbookService {
       successful_transactions: 0,
       failed_transactions: 0,
     };
-  }
-
-  private getOrderbookBankChangeRequestKey(orderbookId: number): string {
-    return `orderbook:bank-change-request:${orderbookId}`;
-  }
-
-  private async getOrderbookBankChangeRequestIndex(): Promise<number[]> {
-    const raw = await this.cacheService.get(
-      ORDERBOOK_BANK_CHANGE_REQUEST_INDEX_KEY,
-    );
-    if (!raw) return [];
-
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map((item) => Number(item))
-        .filter((id) => Number.isInteger(id) && id > 0);
-    } catch {
-      return [];
-    }
-  }
-
-  private async saveOrderbookBankChangeRequestIndex(
-    ids: number[],
-  ): Promise<void> {
-    const uniqueIds = [...new Set(ids)].filter((id) => id > 0);
-    await this.cacheService.set(
-      ORDERBOOK_BANK_CHANGE_REQUEST_INDEX_KEY,
-      JSON.stringify(uniqueIds),
-    );
-  }
-
-  private async addOrderbookBankChangeRequestToIndex(
-    orderbookId: number,
-  ): Promise<void> {
-    const current = await this.getOrderbookBankChangeRequestIndex();
-    if (current.includes(orderbookId)) return;
-    current.push(orderbookId);
-    await this.saveOrderbookBankChangeRequestIndex(current);
-  }
-
-  private async removeOrderbookBankChangeRequestFromIndex(
-    orderbookId: number,
-  ): Promise<void> {
-    const current = await this.getOrderbookBankChangeRequestIndex();
-    const next = current.filter((id) => id !== orderbookId);
-    await this.saveOrderbookBankChangeRequestIndex(next);
-  }
-
-  private async getOrderbookBankChangeRequest(
-    orderbookId: number,
-  ): Promise<OrderbookBankChangeRequestPayload | null> {
-    const raw = await this.cacheService.get(
-      this.getOrderbookBankChangeRequestKey(orderbookId),
-    );
-    if (!raw) return null;
-
-    try {
-      const parsed = JSON.parse(raw) as OrderbookBankChangeRequestPayload;
-      if (
-        !parsed ||
-        !Number.isInteger(parsed.orderbookId) ||
-        !Number.isInteger(parsed.bankUserId) ||
-        !Number.isInteger(parsed.requestedByUserId) ||
-        typeof parsed.requestedAt !== 'string'
-      ) {
-        return null;
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
   }
 
   private parseReputationRow(row: {
@@ -551,11 +474,15 @@ export class OrderbookService {
 
       if (dto.option === OrderBookOption.SELL) {
         const bankUser = await manager.findOne(BankUser, {
-          where: { bu_id: dto.buId, bu_user_id: userId },
+          where: {
+            bu_id: dto.buId,
+            bu_user_id: userId,
+            bu_approval_status: BankUserApprovalStatus.ACTIVE,
+          },
         });
         if (!bankUser) {
           throw new BadRequestException(
-            'Invalid buId: bank user does not belong to user',
+            'Invalid buId: bank user does not belong to user or is not active',
           );
         }
       }
@@ -1060,6 +987,11 @@ export class OrderbookService {
     if (bankUser.bu_user_id !== userId) {
       throw new ForbiddenException('You can only use your own bank');
     }
+    if (bankUser.bu_approval_status !== BankUserApprovalStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Only active bank accounts can be used for an orderbook',
+      );
+    }
 
     // First-time attach: apply immediately, no approval flow.
     if (!existingSetting) {
@@ -1083,18 +1015,10 @@ export class OrderbookService {
       };
     }
 
-    const payload: OrderbookBankChangeRequestPayload = {
-      orderbookId: orderBookId,
-      bankUserId,
-      requestedByUserId: userId,
-      requestedAt: new Date().toISOString(),
-    };
-    await this.cacheService.set(
-      this.getOrderbookBankChangeRequestKey(orderBookId),
-      JSON.stringify(payload),
-      ORDERBOOK_BANK_CHANGE_REQUEST_TTL_SECONDS,
-    );
-    await this.addOrderbookBankChangeRequestToIndex(orderBookId);
+    const requestedAt = new Date();
+    existingSetting.sbo_pending_bank_id = bankUserId;
+    existingSetting.sbo_bank_change_requested_at = requestedAt;
+    await this.settingBankOrderRepository.save(existingSetting);
 
     const adminEmail = this.configService.get<string>('ADMIN_EMAIL')?.trim();
     if (adminEmail) {
@@ -1105,7 +1029,7 @@ export class OrderbookService {
           requestedByUsername: user?.uname || 'unknown',
           requestedByEmail: user?.uemail || 'unknown',
           targetBankUserId: bankUserId,
-          requestedAt: payload.requestedAt,
+          requestedAt: requestedAt.toISOString(),
         })
         .catch((err) => {
           console.error(
@@ -1125,7 +1049,7 @@ export class OrderbookService {
         data: {
           orderbook_id: orderBookId,
           bank_user_id: bankUserId,
-          requested_at: payload.requestedAt,
+          requested_at: requestedAt.toISOString(),
         },
       })
       .catch((err) => {
@@ -1139,80 +1063,34 @@ export class OrderbookService {
       message: 'Bank change request submitted and waiting for admin approval',
       orderbookId: orderBookId,
       requestedBankUserId: bankUserId,
-      requestedAt: payload.requestedAt,
-      expiresInSeconds: ORDERBOOK_BANK_CHANGE_REQUEST_TTL_SECONDS,
+      requestedAt: requestedAt.toISOString(),
     };
   }
 
   async getPendingOrderbookBankChangeRequests() {
-    const orderbookIds = await this.getOrderbookBankChangeRequestIndex();
-    if (orderbookIds.length === 0) {
+    const settings = await this.settingBankOrderRepository.find({
+      where: { sbo_pending_bank_id: Not(IsNull()) },
+      relations: [
+        'bank_user',
+        'pending_bank_user',
+        'order_book',
+        'order_book.user',
+      ],
+    });
+    if (settings.length === 0) {
       return { statusCode: 200, data: [] };
     }
-
-    const requestPairs = await Promise.all(
-      orderbookIds.map(async (orderbookId) => ({
-        orderbookId,
-        request: await this.getOrderbookBankChangeRequest(orderbookId),
-      })),
-    );
-
-    const validRequests = requestPairs
-      .filter((pair) => pair.request !== null)
-      .map((pair) => pair.request as OrderbookBankChangeRequestPayload);
-    const missingIds = requestPairs
-      .filter((pair) => pair.request === null)
-      .map((pair) => pair.orderbookId);
-
-    if (missingIds.length > 0) {
-      const validOrderbookIds = validRequests.map((r) => r.orderbookId);
-      await this.saveOrderbookBankChangeRequestIndex(validOrderbookIds);
-    }
-
-    if (validRequests.length === 0) {
-      return { statusCode: 200, data: [] };
-    }
-
-    const [orderbooks, requestedBanks, users, settings] = await Promise.all([
-      this.orderBookRepository.find({
-        where: { ob_id: In(validRequests.map((r) => r.orderbookId)) },
-        relations: ['user'],
-      }),
-      this.bankUserRepository.find({
-        where: { bu_id: In(validRequests.map((r) => r.bankUserId)) },
-      }),
-      this.userRepository.find({
-        where: { uid: In(validRequests.map((r) => r.requestedByUserId)) },
-        select: ['uid', 'uname', 'uemail', 'ufulllname'],
-      }),
-      this.settingBankOrderRepository.find({
-        where: { sbo_order_book: In(validRequests.map((r) => r.orderbookId)) },
-        relations: ['bank_user'],
-      }),
-    ]);
-
-    const orderbookById = new Map(orderbooks.map((item) => [item.ob_id, item]));
-    const requestedBankById = new Map(
-      requestedBanks.map((item) => [item.bu_id, item]),
-    );
-    const userById = new Map(users.map((item) => [item.uid, item]));
-    const currentSettingByOrderbookId = new Map(
-      settings.map((item) => [item.sbo_order_book, item]),
-    );
 
     return {
       statusCode: 200,
-      data: validRequests.map((request) => {
-        const orderbook = orderbookById.get(request.orderbookId) || null;
-        const requestedBank = requestedBankById.get(request.bankUserId) || null;
-        const requester = userById.get(request.requestedByUserId) || null;
-        const currentBank = currentSettingByOrderbookId.get(
-          request.orderbookId,
-        );
-
+      data: settings.map((s) => {
+        const orderbook = s.order_book;
+        const obUserId = orderbook?.ob_user_id ?? 0;
+        const requester = orderbook?.user;
+        const requestedBank = s.pending_bank_user;
         return {
-          orderbookId: request.orderbookId,
-          requestedAt: request.requestedAt,
+          orderbookId: s.sbo_order_book,
+          requestedAt: s.sbo_bank_change_requested_at?.toISOString() ?? null,
           requestedBy: requester
             ? {
                 id: requester.uid,
@@ -1220,7 +1098,7 @@ export class OrderbookService {
                 email: requester.uemail,
                 fullName: requester.ufulllname,
               }
-            : { id: request.requestedByUserId },
+            : { id: obUserId },
           orderbook: orderbook
             ? {
                 id: orderbook.ob_id,
@@ -1232,7 +1110,7 @@ export class OrderbookService {
                 nationalSymbol: orderbook.ob_national_symbol,
               }
             : null,
-          currentBankUser: this.toBankUserResponse(currentBank?.bank_user),
+          currentBankUser: this.toBankUserResponse(s.bank_user),
           requestedBankUser: this.toBankUserResponse(requestedBank),
         };
       }),
@@ -1243,57 +1121,67 @@ export class OrderbookService {
     orderbookId: number,
     approve: boolean,
   ) {
-    const request = await this.getOrderbookBankChangeRequest(orderbookId);
-    if (!request) {
+    const setting = await this.settingBankOrderRepository.findOne({
+      where: { sbo_order_book: orderbookId },
+      relations: ['order_book'],
+    });
+    if (!setting?.sbo_pending_bank_id) {
       throw new NotFoundException(
         'No pending bank change request found for this orderbook',
       );
     }
+    const orderBook = setting.order_book;
+    if (!orderBook) throw new NotFoundException('Order book not found');
+
+    const pendingBankId = setting.sbo_pending_bank_id;
+    const requesterUserId = orderBook.ob_user_id;
 
     if (approve) {
       await this.dataSource.transaction(async (manager) => {
-        const [orderBook, bankUser] = await Promise.all([
+        const [lockedBook, bankUser, lockedSetting] = await Promise.all([
           manager.findOne(OrderBook, {
             where: { ob_id: orderbookId },
             lock: { mode: 'pessimistic_write' },
           }),
           manager.findOne(BankUser, {
-            where: { bu_id: request.bankUserId },
+            where: {
+              bu_id: pendingBankId,
+              bu_approval_status: BankUserApprovalStatus.ACTIVE,
+            },
+          }),
+          manager.findOne(SettingBankOrder, {
+            where: { sbo_order_book: orderbookId },
+            lock: { mode: 'pessimistic_write' },
           }),
         ]);
 
-        if (!orderBook) throw new NotFoundException('Order book not found');
+        if (!lockedBook) throw new NotFoundException('Order book not found');
         if (!bankUser) throw new NotFoundException('Bank not found');
-        if (orderBook.ob_user_id !== bankUser.bu_user_id) {
+        if (lockedBook.ob_user_id !== bankUser.bu_user_id) {
           throw new BadRequestException(
             'Requested bank does not belong to orderbook owner',
           );
         }
-
-        const existing = await manager.findOne(SettingBankOrder, {
-          where: { sbo_order_book: orderbookId },
-        });
-        if (existing) {
-          existing.sbo_bank_id = request.bankUserId;
-          await manager.save(SettingBankOrder, existing);
-        } else {
-          const created = manager.create(SettingBankOrder, {
-            sbo_order_book: orderbookId,
-            sbo_bank_id: request.bankUserId,
-          });
-          await manager.save(SettingBankOrder, created);
+        if (!lockedSetting?.sbo_pending_bank_id) {
+          throw new NotFoundException(
+            'No pending bank change request found for this orderbook',
+          );
         }
-      });
-    }
 
-    await this.cacheService.del(
-      this.getOrderbookBankChangeRequestKey(orderbookId),
-    );
-    await this.removeOrderbookBankChangeRequestFromIndex(orderbookId);
+        lockedSetting.sbo_bank_id = pendingBankId;
+        lockedSetting.sbo_pending_bank_id = null;
+        lockedSetting.sbo_bank_change_requested_at = null;
+        await manager.save(SettingBankOrder, lockedSetting);
+      });
+    } else {
+      setting.sbo_pending_bank_id = null;
+      setting.sbo_bank_change_requested_at = null;
+      await this.settingBankOrderRepository.save(setting);
+    }
 
     void this.notificationsService
       .createForUser({
-        userId: request.requestedByUserId,
+        userId: requesterUserId,
         type: NotificationType.ORDERBOOK,
         title: approve
           ? 'Bank change request approved'
