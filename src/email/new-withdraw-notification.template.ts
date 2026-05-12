@@ -1,3 +1,5 @@
+import { getBrandLogoBarHtml } from './brand-logo.partial';
+
 type NewWithdrawNotificationPayload = {
   amount: number;
   asset?: string;
@@ -71,6 +73,7 @@ export function getNewWithdrawNotificationEmailHtml(
         <tr>
           <td align="center">
             <table role="presentation" width="700" cellspacing="0" cellpadding="0" style="width: 100%; max-width: 700px; margin: 0 auto; padding: 0 10px;">
+              ${getBrandLogoBarHtml()}
               <tr>
                 <td style="background-color: #f9f9fb; border-radius: 8px; text-align: center; color: #040b22; font-size: 14px; padding: 12px;">
                   New withdrawal notification
