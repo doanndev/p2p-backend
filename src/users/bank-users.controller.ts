@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -37,25 +39,40 @@ export class BankUsersController {
   @Get()
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Lấy các bank của user hiện tại' })
-  getMyBanks(@Request() req: any) {
-    return this.bankUsersService.getMyBanks(req.user.uid);
+  @ApiOperation({
+    summary:
+      'Lấy các bank của user (mặc định chỉ active; dùng cho chọn bank khi tạo lệnh)',
+  })
+  @ApiQuery({
+    name: 'includePending',
+    required: false,
+    description:
+      'Nếu `true`, trả về cả bank đang chờ duyệt (vẫn loại rejected). Mặc định chỉ active.',
+    enum: ['true', 'false'],
+  })
+  getMyBanks(
+    @Request() req: any,
+    @Query('includePending') includePending?: string,
+  ) {
+    return this.bankUsersService.getMyBanks(
+      req.user.uid,
+      includePending === 'true',
+    );
   }
 
   @Post()
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Tạo request tạo bank cho user (chờ admin duyệt trong 24h)',
+    summary: 'Tạo request tạo bank cho user (chờ admin duyệt; lưu DB)',
   })
   @ApiBody({ type: CreateBankUserDto })
   @ApiCreatedResponse({
     schema: {
       example: {
         message: 'Bank create request submitted and waiting for admin approval',
-        requestId: 'bank-create-1714444444444-ab12cd',
+        requestId: '21',
         requestedAt: '2026-04-29T13:00:00.000Z',
-        expiresInSeconds: 86400,
         bank: {
           bankName: 'Vietcombank',
           bankBranch: 'Hà Nội',
@@ -83,13 +100,17 @@ export class BankUsersController {
   @UseGuards(AdminJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Admin duyệt hoặc từ chối request tạo bank' })
-  @ApiParam({ name: 'requestId', example: 'bank-create-1714444444444-ab12cd' })
+  @ApiParam({
+    name: 'requestId',
+    description: 'ID bản ghi bank_users (bu_id) đang pending',
+    example: '21',
+  })
   @ApiBody({ type: ReviewCreateBankRequestDto })
   @ApiOkResponse({
     schema: {
       example: {
         message: 'Create bank request approved',
-        requestId: 'bank-create-1714444444444-ab12cd',
+        requestId: '21',
         approved: true,
         bankId: 21,
       },

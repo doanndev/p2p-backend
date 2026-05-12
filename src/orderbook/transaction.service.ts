@@ -20,6 +20,7 @@ import {
 import { Dispute, DisputeStatus, DisputeType } from './entities/dispute.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
 import { BankUser } from '../users/entities/bank-user.entity';
+import { BankUserApprovalStatus } from '../users/entities/bank-user-approval-status';
 import { UserWallet } from '../wallets/entities/user-wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
@@ -29,7 +30,6 @@ import { QueryDisputesDto } from './dto/query-disputes.dto';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { Admin } from '../admins/entities/admin.entity';
 import { EmailService } from '../systems/email.service';
-import { UserLevelUpWorker } from '../users/user-level-up.worker';
 import {
   TransactionExpiryQueueService,
   TRANSACTION_EXPIRY_DELAY_MS,
@@ -70,7 +70,6 @@ export class TransactionService {
     private readonly adminSettingsConfigService: AdminSettingsConfigService,
     private readonly emailService: EmailService,
     private readonly transactionExpiryQueue: TransactionExpiryQueueService,
-    private readonly userLevelUpWorker: UserLevelUpWorker,
     private readonly smartRefService: SmartRefService,
     private readonly currenciesService: CurrenciesService,
     private readonly notificationsService: NotificationsService,
@@ -625,11 +624,15 @@ export class TransactionService {
             );
           }
           const bankUser = await manager.findOne(BankUser, {
-            where: { bu_id: dto.buId, bu_user_id: sellerId },
+            where: {
+              bu_id: dto.buId,
+              bu_user_id: sellerId,
+              bu_approval_status: BankUserApprovalStatus.ACTIVE,
+            },
           });
           if (!bankUser) {
             throw new BadRequestException(
-              'Invalid buId: bank user does not belong to seller',
+              'Invalid buId: bank user does not belong to seller or is not active',
             );
           }
           transactionBuId = dto.buId;
@@ -1060,26 +1063,6 @@ export class TransactionService {
         .catch((error) => {
           console.error(
             `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
-            error,
-          );
-        });
-    }
-
-    // Fire-and-forget level-up checks after executed.
-    void this.userLevelUpWorker
-      .handleTransactionSuccess(result.buyerId)
-      .catch((error) => {
-        console.error(
-          `Failed level-up check for buyer ${result.buyerId} on tx ${result.transactionId}:`,
-          error,
-        );
-      });
-    if (result.sellerId && result.sellerId !== result.buyerId) {
-      void this.userLevelUpWorker
-        .handleTransactionSuccess(result.sellerId)
-        .catch((error) => {
-          console.error(
-            `Failed level-up check for seller ${result.sellerId} on tx ${result.transactionId}:`,
             error,
           );
         });

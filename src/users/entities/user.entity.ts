@@ -99,13 +99,27 @@ export class User {
   })
   current_cycle_active_days: number;
 
+  /** When KYC was approved by admin (or first time identity became verified). */
   @Column({
-    name: 'last_actived_day',
-    type: 'date',
+    name: 'verify_at',
+    type: 'timestamptz',
     nullable: true,
     default: null,
   })
-  last_actived_day: Date | null;
+  verify_at: Date | null;
+
+  /**
+   * Start of the current 10-day P2P level-up evaluation window.
+   * Set to the same instant as verify_at on first KYC approval; advanced by the daily job
+   * when a window closes without a qualifying trade; reset on auto level-up and admin review.
+   */
+  @Column({
+    name: 'levelup_window_started_at',
+    type: 'timestamptz',
+    nullable: true,
+    default: null,
+  })
+  levelup_window_started_at: Date | null;
 
   @Column({ name: 'ukol', type: 'boolean', default: false })
   ukol: boolean;

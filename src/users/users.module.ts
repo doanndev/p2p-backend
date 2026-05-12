@@ -26,6 +26,7 @@ import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entit
 import { UserSecurityController } from './user-security.controller';
 import { UserSecurityService } from './user-security.service';
 import { UserLevelUpWorker } from './user-level-up.worker';
+import { UserLevelUpCronService } from './user-level-up.cron';
 import { SmartRefModule } from '../smart-ref/smart-ref.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -70,6 +71,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     BankUsersService,
     UserSecurityService,
     UserLevelUpWorker,
+    UserLevelUpCronService,
   ],
   exports: [UsersService, UserLevelUpWorker],
 })
