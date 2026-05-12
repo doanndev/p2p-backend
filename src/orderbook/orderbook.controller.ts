@@ -413,7 +413,7 @@ export class OrderbookController {
     schema: {
       example: {
         ...ORDERBOOK_CREATE_RESPONSE_EXAMPLE,
-        price: '25500.00000000',
+        price: '25500',
       },
     },
   })

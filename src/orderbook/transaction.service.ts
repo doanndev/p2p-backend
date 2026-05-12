@@ -109,12 +109,12 @@ export class TransactionService {
 
     if (amount < effectiveMin) {
       throw new BadRequestException(
-        `Transaction amount must be at least ${effectiveMin}`,
+        `Transaction amount must be at least ${apiDecimal(effectiveMin)}`,
       );
     }
     if (configuredMax != null && amount > configuredMax) {
       throw new BadRequestException(
-        `Transaction amount must not exceed ${configuredMax}`,
+        `Transaction amount must not exceed ${apiDecimal(configuredMax)}`,
       );
     }
   }
@@ -615,7 +615,7 @@ export class TransactionService {
 
           if (dto.amount > available) {
             throw new BadRequestException(
-              `Buy limit exceeded. Level ${buyer.ulevel} max is ${maxLimitCoin} USDT; available now is ${this.formatAmount(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
+              `Buy limit exceeded. Level ${buyer.ulevel} max is ${maxLimitCoin} USDT; available now is ${apiDecimal(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
             );
           }
         }

@@ -482,7 +482,7 @@ export class OrderbookService {
 
         if (amount > available) {
           throw new BadRequestException(
-            `Buy limit exceeded. Level ${currentUser.ulevel} max is ${maxLimitCoin} USDT; available now is ${this.formatAmount(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
+            `Buy limit exceeded. Level ${currentUser.ulevel} max is ${maxLimitCoin} USDT; available now is ${apiDecimal(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
           );
         }
       }
