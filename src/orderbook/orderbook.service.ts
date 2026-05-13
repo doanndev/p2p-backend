@@ -216,7 +216,7 @@ export class OrderbookService {
       id: bankUser.bu_id,
       userId: bankUser.bu_user_id,
       bankName: bankUser.bu_bank_name,
-      bankBranch: bankUser.bu_bank_branch,
+      passbookImageUrl: bankUser.bu_passbook_image_url,
       bankAccountName: bankUser.bu_bank_account_name,
       bankAccountNumber: bankUser.bu_bank_account_number,
     };
@@ -500,6 +500,11 @@ export class OrderbookService {
         if (!bankUser) {
           throw new BadRequestException(
             'Invalid buId: bank user does not belong to user or is not active',
+          );
+        }
+        if (!bankUser.bu_passbook_image_url?.trim()) {
+          throw new BadRequestException(
+            'This bank account has no passbook image on file. Please update the bank with a passbook image URL before creating a sell orderbook.',
           );
         }
       }
@@ -867,7 +872,8 @@ export class OrderbookService {
             id: book.setting_bank_orders[0].bank_user.bu_id,
             userId: book.setting_bank_orders[0].bank_user.bu_user_id,
             bankName: book.setting_bank_orders[0].bank_user.bu_bank_name,
-            bankBranch: book.setting_bank_orders[0].bank_user.bu_bank_branch,
+            passbookImageUrl:
+              book.setting_bank_orders[0].bank_user.bu_passbook_image_url,
             bankAccountName:
               book.setting_bank_orders[0].bank_user.bu_bank_account_name,
             bankAccountNumber:
@@ -993,6 +999,11 @@ export class OrderbookService {
         'Only active bank accounts can be used for an orderbook',
       );
     }
+    if (!bankUser.bu_passbook_image_url?.trim()) {
+      throw new BadRequestException(
+        'This bank account has no passbook image on file. Please update the bank with a passbook image URL before attaching it to an orderbook.',
+      );
+    }
 
     // First-time attach: apply immediately, no approval flow.
     if (!existingSetting) {
@@ -1009,7 +1020,7 @@ export class OrderbookService {
           id: bankUser.bu_id,
           userId: bankUser.bu_user_id,
           bankName: bankUser.bu_bank_name,
-          bankBranch: bankUser.bu_bank_branch,
+          passbookImageUrl: bankUser.bu_passbook_image_url,
           bankAccountName: bankUser.bu_bank_account_name,
           bankAccountNumber: bankUser.bu_bank_account_number,
         },

@@ -276,7 +276,7 @@ export class TransactionService {
       id: bankUser.bu_id,
       userId: bankUser.bu_user_id,
       bankName: bankUser.bu_bank_name,
-      bankBranch: bankUser.bu_bank_branch,
+      passbookImageUrl: bankUser.bu_passbook_image_url,
       bankAccountName: bankUser.bu_bank_account_name,
       bankAccountNumber: bankUser.bu_bank_account_number,
     };
@@ -553,7 +553,7 @@ export class TransactionService {
         'bu.bu_id',
         'bu.bu_user_id',
         'bu.bu_bank_name',
-        'bu.bu_bank_branch',
+        'bu.bu_passbook_image_url',
         'bu.bu_bank_account_name',
         'bu.bu_bank_account_number',
       ])
@@ -639,6 +639,11 @@ export class TransactionService {
           if (!bankUser) {
             throw new BadRequestException(
               'Invalid buId: bank user does not belong to seller or is not active',
+            );
+          }
+          if (!bankUser.bu_passbook_image_url?.trim()) {
+            throw new BadRequestException(
+              'This bank account has no passbook image on file. Please update the bank with a passbook image URL before matching this buy orderbook.',
             );
           }
           transactionBuId = dto.buId;
@@ -783,7 +788,7 @@ export class TransactionService {
       'bu.bu_id',
       'bu.bu_user_id',
       'bu.bu_bank_name',
-      'bu.bu_bank_branch',
+      'bu.bu_passbook_image_url',
       'bu.bu_bank_account_name',
       'bu.bu_bank_account_number',
     ]);
@@ -857,7 +862,7 @@ export class TransactionService {
         'bu.bu_id',
         'bu.bu_user_id',
         'bu.bu_bank_name',
-        'bu.bu_bank_branch',
+        'bu.bu_passbook_image_url',
         'bu.bu_bank_account_name',
         'bu.bu_bank_account_number',
       ])

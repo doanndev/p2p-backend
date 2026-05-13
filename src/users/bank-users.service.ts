@@ -108,7 +108,7 @@ export class BankUsersService {
       id: b.bu_id,
       userId: b.bu_user_id,
       bankName: b.bu_bank_name,
-      bankBranch: b.bu_bank_branch,
+      passbookImageUrl: b.bu_passbook_image_url,
       bankAccountName: b.bu_bank_account_name,
       bankAccountNumber: b.bu_bank_account_number,
       approvalStatus: b.bu_approval_status,
@@ -146,8 +146,7 @@ export class BankUsersService {
     const created = this.bankUserRepository.create({
       bu_user_id: userId,
       bu_bank_name: dto.bankName.trim(),
-      bu_bank_branch:
-        dto.bankBranch === undefined ? null : (dto.bankBranch ?? null),
+      bu_passbook_image_url: dto.passbookImageUrl.trim(),
       bu_bank_account_name: requestUser.ufulllname.trim(),
       bu_bank_account_number: dto.bankAccountNumber.trim(),
       bu_approval_status: BankUserApprovalStatus.PENDING,
@@ -172,7 +171,7 @@ export class BankUsersService {
       requestedAt: requestedAt.toISOString(),
       bank: {
         bankName: saved.bu_bank_name,
-        bankBranch: saved.bu_bank_branch,
+        passbookImageUrl: saved.bu_passbook_image_url,
         bankAccountName: saved.bu_bank_account_name,
         bankAccountNumber: saved.bu_bank_account_number,
       },
@@ -211,7 +210,7 @@ export class BankUsersService {
             : { id: row.bu_user_id },
           bank: {
             bankName: row.bu_bank_name,
-            bankBranch: row.bu_bank_branch,
+            passbookImageUrl: row.bu_passbook_image_url,
             bankAccountName: row.bu_bank_account_name,
             bankAccountNumber: row.bu_bank_account_number,
           },
@@ -326,8 +325,8 @@ export class BankUsersService {
     if (dto.bankName !== undefined) {
       bank.bu_bank_name = dto.bankName.trim();
     }
-    if (dto.bankBranch !== undefined) {
-      bank.bu_bank_branch = dto.bankBranch ?? null;
+    if (dto.passbookImageUrl !== undefined) {
+      bank.bu_passbook_image_url = dto.passbookImageUrl.trim();
     }
     if (dto.bankAccountNumber !== undefined) {
       bank.bu_bank_account_number = dto.bankAccountNumber.trim();
@@ -338,7 +337,7 @@ export class BankUsersService {
       id: saved.bu_id,
       userId: saved.bu_user_id,
       bankName: saved.bu_bank_name,
-      bankBranch: saved.bu_bank_branch,
+      passbookImageUrl: saved.bu_passbook_image_url,
       bankAccountName: saved.bu_bank_account_name,
       bankAccountNumber: saved.bu_bank_account_number,
     };

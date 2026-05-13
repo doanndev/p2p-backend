@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 
 export class UpdateBankUserDto {
   @ApiPropertyOptional({ example: 'Vietcombank' })
@@ -8,11 +8,15 @@ export class UpdateBankUserDto {
   @MaxLength(255)
   bankName?: string;
 
-  @ApiPropertyOptional({ example: 'Hà Nội', nullable: true })
+  @ApiPropertyOptional({
+    example: 'https://res.cloudinary.com/demo/image/upload/v1/passbook.jpg',
+    description: 'URL ảnh sổ tài khoản (passbook)',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(255)
-  bankBranch?: string | null;
+  @IsUrl({ require_protocol: true })
+  @MaxLength(2048)
+  passbookImageUrl?: string;
 
   @ApiPropertyOptional({ example: '0123456789' })
   @IsOptional()

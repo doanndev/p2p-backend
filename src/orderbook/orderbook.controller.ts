@@ -104,7 +104,8 @@ const ORDERBOOK_DETAIL_RESPONSE_EXAMPLE = {
     id: 1,
     userId: 12,
     bankName: 'Vietcombank',
-    bankBranch: 'Ha Noi',
+    passbookImageUrl:
+      'https://res.cloudinary.com/demo/image/upload/v1/passbook.jpg',
     bankAccountName: 'NGUYEN VAN A',
     bankAccountNumber: '0123456789',
   },
@@ -117,7 +118,8 @@ const ORDERBOOK_MY_RESPONSE_EXAMPLE = {
     id: 1,
     userId: 12,
     bankName: 'Vietcombank',
-    bankBranch: 'Ha Noi',
+    passbookImageUrl:
+      'https://res.cloudinary.com/demo/image/upload/v1/passbook.jpg',
     bankAccountName: 'NGUYEN VAN A',
     bankAccountNumber: '0123456789',
   },

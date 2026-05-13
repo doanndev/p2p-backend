@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsString, IsUrl, MaxLength } from 'class-validator';
 
 export class CreateBankUserDto {
   @ApiProperty({ example: 'Vietcombank' })
@@ -8,11 +8,15 @@ export class CreateBankUserDto {
   @MaxLength(255)
   bankName: string;
 
-  @ApiPropertyOptional({ example: 'Hà Nội' })
-  @IsOptional()
+  @ApiProperty({
+    example: 'https://res.cloudinary.com/demo/image/upload/v1/passbook.jpg',
+    description: 'URL ảnh sổ tài khoản (passbook), bắt buộc khi tạo bank',
+  })
   @IsString()
-  @MaxLength(255)
-  bankBranch?: string | null;
+  @IsNotEmpty()
+  @IsUrl({ require_protocol: true })
+  @MaxLength(2048)
+  passbookImageUrl: string;
 
   @ApiProperty({ example: '0123456789' })
   @IsString()
