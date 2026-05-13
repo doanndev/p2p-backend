@@ -197,7 +197,8 @@ export class AdminUsersController {
             display_name: 'Nguyễn Văn John',
             bu_id: 5,
             bu_bank_name: 'Agribank',
-            bu_bank_branch: 'Chi nhánh Hà Nội',
+            bu_passbook_image_url:
+              'https://res.cloudinary.com/demo/image/upload/v1/passbook.jpg',
             bu_bank_account_name: 'Nguyễn Văn John',
             bu_bank_account_number: '1234567890',
             created_at: '2024-01-15T10:30:00Z',

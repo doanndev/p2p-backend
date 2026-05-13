@@ -75,7 +75,8 @@ export class BankUsersController {
         requestedAt: '2026-04-29T13:00:00.000Z',
         bank: {
           bankName: 'Vietcombank',
-          bankBranch: 'Hà Nội',
+          passbookImageUrl:
+            'https://res.cloudinary.com/demo/image/upload/v1/passbook.jpg',
           bankAccountName: 'NGUYEN VAN A',
           bankAccountNumber: '0123456789',
         },
