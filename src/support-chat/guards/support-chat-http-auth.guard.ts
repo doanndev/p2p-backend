@@ -11,16 +11,12 @@ import { Repository } from 'typeorm';
 import { User, UserStatus } from '../../users/entities/user.entity';
 import { Admin, AdminStatus } from '../../admins/entities/admin.entity';
 import { SupportChatActor } from '../support-chat.types';
-
-function parseCookie(header: string | undefined): Record<string, string> {
-  if (!header) return {};
-  return header.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [k, ...rest] = part.trim().split('=');
-    if (!k || rest.length === 0) return acc;
-    acc[k] = decodeURIComponent(rest.join('='));
-    return acc;
-  }, {});
-}
+import {
+  getClientOriginLike,
+  parseSupportChatCookie,
+  selectSupportChatToken,
+  splitCommaUrls,
+} from '../support-chat-auth-context.util';
 
 @Injectable()
 export class SupportChatHttpAuthGuard implements CanActivate {
@@ -35,11 +31,24 @@ export class SupportChatHttpAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const cookies = parseCookie(request.headers?.cookie as string | undefined);
+    const cookies = parseSupportChatCookie(request.headers?.cookie);
 
     const userToken = cookies['access_token'];
     const adminToken = cookies['admin_access_token'];
-    const token = adminToken || userToken;
+
+    const adminFrontendUrls = splitCommaUrls(
+      this.configService.get<string>('ADMIN_FRONTEND_URLS'),
+    );
+    const originLike = getClientOriginLike(request.headers);
+
+    const { selectedTokenType, token } = selectSupportChatToken({
+      originLike,
+      adminFrontendUrls,
+      userToken,
+      adminToken,
+      emptyOriginPolicy: 'http-legacy',
+    });
+
     if (!token) {
       throw new UnauthorizedException('Unauthorized');
     }
@@ -53,7 +62,7 @@ export class SupportChatHttpAuthGuard implements CanActivate {
     }
 
     let actor: SupportChatActor | null = null;
-    if (adminToken) {
+    if (selectedTokenType === 'admin') {
       const admin = await this.adminRepository.findOne({
         where: { admin_id: actorId },
       });

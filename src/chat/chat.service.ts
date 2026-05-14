@@ -398,14 +398,24 @@ export class ChatService {
     return { message: 'Message deleted successfully', id: messageId };
   }
 
+  /**
+   * Gửi tin text hoặc ảnh (URL https) — đúng một trong hai, giống support chat.
+   */
   async saveTextMessage(
     actor: ChatActor,
     transactionId: number,
-    content: string,
+    content?: string,
+    imageUrl?: string,
   ) {
-    const trimmed = (content ?? '').trim();
-    if (!trimmed) throw new BadRequestException('Message content is required');
-    if (trimmed.length > 5000) {
+    const text = (content ?? '').trim();
+    const url = (imageUrl ?? '').trim();
+    if (text && url) {
+      throw new BadRequestException('Send text and image in separate messages');
+    }
+    if (!text && !url) {
+      throw new BadRequestException('Message content or imageUrl is required');
+    }
+    if (text.length > 5000) {
       throw new BadRequestException('Message content is too long');
     }
 
@@ -417,11 +427,14 @@ export class ChatService {
       throw new BadRequestException('Chat room is closed');
     }
 
+    const isImage = Boolean(url);
+    const storedContent = isImage ? url : text;
+
     const message = this.chatMessageRepository.create({
       message_room_id: room.room_id,
       message_sender_id: actor.id,
-      message_type: ChatMessageType.TEXT,
-      message_content: trimmed,
+      message_type: isImage ? ChatMessageType.IMAGE : ChatMessageType.TEXT,
+      message_content: storedContent,
       message_file_url: null,
       message_file_name: null,
       message_file_size: null,
