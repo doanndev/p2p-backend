@@ -121,18 +121,11 @@ export class TransactionService {
     }
   }
 
-  /** Same as orderbook sell create: tx fee % + smartref % from admin settings. */
-  private async getP2pOrderbookFeePercentTotal(): Promise<number> {
-    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
-      this.adminSettingsConfigService.getTransactionFeePercent(),
-      this.adminSettingsConfigService.getSmartrefFeePercent(),
-    ]);
-    return transactionFeePercent + smartrefFeePercent;
-  }
-
   /**
-   * Locked coin for a trade amount — must match seller lock debit on execute
-   * and buy-orderbook seller lock on create/cancel/expiry.
+   * Locked coin for a trade amount — SELL listing: poster locked amount+fees at
+   * orderbook create; execute debits the same. BUY listing: taker locks only
+   * `amount` at match; execute debits `amount` from lock and credits buyer net
+   * after fees.
    */
   private computeSellerLockCoinAmount(
     amount: number,
@@ -158,17 +151,13 @@ export class TransactionService {
       orderBook != null &&
       orderBook.ob_option === OrderBookOption.BUY &&
       orderBook.ob_user_id === transUserBuy;
-    if (posterIsSeller || posterIsBuyer) {
+    if (posterIsSeller) {
       return this.computeSellerLockCoinAmount(amount, totalFeePercent);
     }
+    if (posterIsBuyer) {
+      return this.toNumber(this.formatAmount(amount));
+    }
     return amount;
-  }
-
-  private async computeBuyOrderbookSellerLockCoinAmount(
-    amount: number,
-  ): Promise<number> {
-    const totalFeePercent = await this.getP2pOrderbookFeePercentTotal();
-    return this.computeSellerLockCoinAmount(amount, totalFeePercent);
   }
 
   private getBuyerMaxCoinLimitByLevel(level: number): number {
@@ -396,10 +385,6 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
-      const buyLockTotal =
-        orderBook.ob_option === OrderBookOption.BUY
-          ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
-          : amount;
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
       orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
       if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
@@ -424,7 +409,7 @@ export class TransactionService {
         }
 
         const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-        if (lockBalance < buyLockTotal) {
+        if (lockBalance < amount) {
           transaction.trans_status = TransactionStatus.FAILED;
           transaction.trans_message =
             transaction.trans_message ?? 'Expired (insufficient lock balance)';
@@ -432,9 +417,9 @@ export class TransactionService {
           return;
         }
 
-        sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
+        sellerWallet.uw_lock_balance = lockBalance - amount;
         sellerWallet.uw_balance =
-          this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
+          this.toNumber(sellerWallet.uw_balance) + amount;
         await manager.save(UserWallet, sellerWallet);
       }
 
@@ -657,8 +642,7 @@ export class TransactionService {
           if (!sellerWallet)
             throw new NotFoundException('Seller wallet not found');
 
-          const sellerLockTotal =
-            await this.computeBuyOrderbookSellerLockCoinAmount(dto.amount);
+          const sellerLockTotal = this.toNumber(this.formatAmount(dto.amount));
           const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
           if (sellerAvailableBalance < sellerLockTotal) {
             throw new BadRequestException(
@@ -943,10 +927,11 @@ export class TransactionService {
   }
 
   async confirmReceived(userId: number, id: number) {
-    const [totalFeePercent, smartrefFeePercent] = await Promise.all([
-      this.getP2pOrderbookFeePercentTotal(),
+    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+      this.adminSettingsConfigService.getTransactionFeePercent(),
       this.adminSettingsConfigService.getSmartrefFeePercent(),
     ]);
+    const totalFeePercent = transactionFeePercent + smartrefFeePercent;
 
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
@@ -1000,7 +985,25 @@ export class TransactionService {
         transaction.trans_user_buy,
       );
 
-      const toBuyer = amount;
+      const isSellListing =
+        orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
+
+      const platformFeeAmt = this.toNumber(
+        this.formatAmount((amount * transactionFeePercent) / 100),
+      );
+      const refFeeAmt = this.toNumber(
+        this.formatAmount((amount * smartrefFeePercent) / 100),
+      );
+      const netToBuyer = this.toNumber(
+        this.formatAmount(amount - platformFeeAmt - refFeeAmt),
+      );
+      if (!isSellListing && netToBuyer <= 0) {
+        throw new BadRequestException(
+          'Net coin to buyer must be positive; reduce P2P fee percentages in admin settings.',
+        );
+      }
+
+      const toBuyer = isSellListing ? amount : netToBuyer;
 
       const sellerWallet = await manager.findOne(UserWallet, {
         where: {
@@ -1026,9 +1029,6 @@ export class TransactionService {
       }
 
       sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
-
-      const isSellListing =
-        orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
 
       if (isSellListing) {
         const buyerLock = this.toNumber(buyerWallet.uw_lock_balance);
@@ -1144,10 +1144,6 @@ export class TransactionService {
         }
 
         const amount = this.toNumber(transaction.trans_amount);
-        const buyLockTotal =
-          orderBook.ob_option === OrderBookOption.BUY
-            ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
-            : amount;
         const remaining = this.toNumber(orderBook.ob_amount_remaining);
         orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
         if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
@@ -1167,15 +1163,15 @@ export class TransactionService {
             throw new NotFoundException('Seller wallet not found');
 
           const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-          if (lockBalance < buyLockTotal) {
+          if (lockBalance < amount) {
             throw new BadRequestException(
               'Seller lock balance is not enough to unlock',
             );
           }
 
-          sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
+          sellerWallet.uw_lock_balance = lockBalance - amount;
           sellerWallet.uw_balance =
-            this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
+            this.toNumber(sellerWallet.uw_balance) + amount;
           await manager.save(UserWallet, sellerWallet);
         }
 
