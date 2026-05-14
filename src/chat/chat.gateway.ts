@@ -8,6 +8,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -17,6 +18,7 @@ import { ChatService } from './chat.service';
 import { Admin } from '../admins/entities/admin.entity';
 import { User } from '../users/entities/user.entity';
 import { createSocketAuthMiddleware } from '../common/middlewares/socket-auth.middleware';
+import { SendTransactionChatMessageDto } from './dto/send-transaction-chat-message.dto';
 
 type ChatSocket = Socket & {
   user_id: number;
@@ -37,6 +39,8 @@ function roomName(transactionId: number) {
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
+  private readonly logger = new Logger(ChatGateway.name);
+
   @WebSocketServer()
   server: Server;
 
@@ -147,17 +151,20 @@ export class ChatGateway
   }
 
   @SubscribeMessage('send_message')
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  )
   async sendMessage(
     @ConnectedSocket() client: ChatSocket,
-    @MessageBody()
-    body: {
-      transaction_id: number;
-      content: string;
-    },
+    @MessageBody() body: SendTransactionChatMessageDto,
   ) {
     const actor = client.actor;
 
-    const transactionId = Number(body?.transaction_id);
+    const transactionId = Number(body.transaction_id);
     if (!transactionId) return { ok: false, error: 'invalid_transaction_id' };
 
     // đảm bảo đã join (cho phép rejoin idempotent)
@@ -167,13 +174,17 @@ export class ChatGateway
       const msg = await this.chatService.saveTextMessage(
         actor,
         transactionId,
-        body?.content,
+        body.content,
+        body.imageUrl,
       );
 
       // emit cho tất cả participants (kể cả sender) để UI sync
       this.server.to(roomName(transactionId)).emit('message', msg);
       return { ok: true, message: msg };
     } catch (e: any) {
+      this.logger.warn(
+        `[send_message:fail] tx=${transactionId} ${e?.message ?? e}`,
+      );
       return { ok: false, error: e?.message ?? 'send_failed' };
     }
   }
