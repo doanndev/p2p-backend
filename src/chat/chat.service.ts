@@ -127,6 +127,28 @@ export class ChatService {
     };
   }
 
+  private toChatMessagePublic(m: ChatMessage) {
+    const isAdmin = m.message_sender_admin_id != null;
+    const senderType = isAdmin ? 'admin' : 'user';
+    const senderId = isAdmin
+      ? (m.message_sender_admin_id as number)
+      : (m.message_sender_id as number);
+    return {
+      id: m.message_id,
+      room_id: m.message_room_id,
+      sender_id: senderId,
+      sender_type: senderType,
+      type: m.message_type,
+      content: m.message_content,
+      file_url: m.message_file_url,
+      file_name: m.message_file_name,
+      file_size: m.message_file_size,
+      is_read: m.message_is_read,
+      created_at: m.message_created_at,
+      read_at: m.message_read_at,
+    };
+  }
+
   private roomQueryBuilder() {
     return this.chatRoomRepository
       .createQueryBuilder('r')
@@ -262,19 +284,7 @@ export class ChatService {
       order: { message_id: 'ASC' },
     });
 
-    return messages.map((m) => ({
-      id: m.message_id,
-      room_id: m.message_room_id,
-      sender_id: m.message_sender_id,
-      type: m.message_type,
-      content: m.message_content,
-      file_url: m.message_file_url,
-      file_name: m.message_file_name,
-      file_size: m.message_file_size,
-      is_read: m.message_is_read,
-      created_at: m.message_created_at,
-      read_at: m.message_read_at,
-    }));
+    return messages.map((m) => this.toChatMessagePublic(m));
   }
 
   async getActiveRoomsByUser(userId: number) {
@@ -345,19 +355,7 @@ export class ChatService {
       order: { message_id: 'ASC' },
     });
 
-    return messages.map((m) => ({
-      id: m.message_id,
-      room_id: m.message_room_id,
-      sender_id: m.message_sender_id,
-      type: m.message_type,
-      content: m.message_content,
-      file_url: m.message_file_url,
-      file_name: m.message_file_name,
-      file_size: m.message_file_size,
-      is_read: m.message_is_read,
-      created_at: m.message_created_at,
-      read_at: m.message_read_at,
-    }));
+    return messages.map((m) => this.toChatMessagePublic(m));
   }
 
   async adminCreateOrReopenRoom(adminId: number, transactionId: number) {
@@ -432,7 +430,8 @@ export class ChatService {
 
     const message = this.chatMessageRepository.create({
       message_room_id: room.room_id,
-      message_sender_id: actor.id,
+      message_sender_id: actor.type === 'user' ? actor.id : null,
+      message_sender_admin_id: actor.type === 'admin' ? actor.id : null,
       message_type: isImage ? ChatMessageType.IMAGE : ChatMessageType.TEXT,
       message_content: storedContent,
       message_file_url: null,
@@ -448,7 +447,7 @@ export class ChatService {
       id: saved.message_id,
       transaction_id: transactionId,
       room_id: saved.message_room_id,
-      sender_id: saved.message_sender_id,
+      sender_id: actor.id,
       sender_type: actor.type,
       type: saved.message_type,
       content: saved.message_content,
