@@ -358,12 +358,232 @@ export class TransactionService {
   }
 
   /**
-   * Called by BullMQ worker: if status still matches `expectedStatus`, mark failed and revert order book / locks (same as cancel).
+   * Shared wallet + status transition for `confirmReceived` and auto-complete
+   * when the payment_confirmed window expires (seller did not confirm in time).
+   * Caller must hold `transaction` row with pessimistic lock and status `payment_confirmed`.
+   */
+  private async settleTransactionFromPaymentConfirmed(
+    manager: EntityManager,
+    transaction: Transaction,
+    feePercents: {
+      transactionFeePercent: number;
+      smartrefFeePercent: number;
+      totalFeePercent: number;
+    },
+  ): Promise<{
+    response: ReturnType<TransactionService['toTransactionResponse']>;
+    buyerId: number;
+    sellerId: number;
+    transactionId: number;
+    amount: number;
+    smartrefFeePercent: number;
+  }> {
+    const { transactionFeePercent, smartrefFeePercent, totalFeePercent } =
+      feePercents;
+
+    if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
+      throw new BadRequestException(
+        'Only payment_confirmed transaction can be executed',
+      );
+    }
+
+    const amount = this.toNumber(transaction.trans_amount);
+
+    let orderBook: OrderBook | null = null;
+    if (transaction.trans_order_book != null) {
+      orderBook = await manager.findOne(OrderBook, {
+        where: { ob_id: transaction.trans_order_book },
+        lock: { mode: 'pessimistic_write' },
+      });
+    }
+
+    const sellerLockDebit = this.computeSellerLockDebitForExecute(
+      amount,
+      totalFeePercent,
+      orderBook,
+      transaction.trans_user_sell,
+      transaction.trans_user_buy,
+    );
+
+    const isSellListing =
+      orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
+
+    const platformFeeAmt = this.toNumber(
+      this.formatAmount((amount * transactionFeePercent) / 100),
+    );
+    const refFeeAmt = this.toNumber(
+      this.formatAmount((amount * smartrefFeePercent) / 100),
+    );
+    const netToBuyer = this.toNumber(
+      this.formatAmount(amount - platformFeeAmt - refFeeAmt),
+    );
+    if (!isSellListing && netToBuyer <= 0) {
+      throw new BadRequestException(
+        'Net coin to buyer must be positive; reduce P2P fee percentages in admin settings.',
+      );
+    }
+
+    const toBuyer = isSellListing ? amount : netToBuyer;
+
+    const sellerWallet = await manager.findOne(UserWallet, {
+      where: {
+        uw_user_id: transaction.trans_user_sell,
+        uw_wallet_coins: transaction.trans_coin,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!sellerWallet) throw new NotFoundException('Seller wallet not found');
+
+    const buyerWallet = await manager.findOne(UserWallet, {
+      where: {
+        uw_user_id: transaction.trans_user_buy,
+        uw_wallet_coins: transaction.trans_coin,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!buyerWallet) throw new NotFoundException('Buyer wallet not found');
+
+    const sellerLock = this.toNumber(sellerWallet.uw_lock_balance);
+    if (sellerLock < sellerLockDebit) {
+      throw new BadRequestException('Seller lock balance is not enough');
+    }
+
+    sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
+
+    if (isSellListing) {
+      // SELL listing: poster already locked coin at orderbook create; buyer receives delayed unlock via scheduler.
+      const buyerLock = this.toNumber(buyerWallet.uw_lock_balance);
+      buyerWallet.uw_lock_balance = buyerLock + toBuyer;
+      transaction.trans_coin_unlock_at = new Date(
+        Date.now() + P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
+      );
+      transaction.trans_lock_released_at = null;
+    } else {
+      // BUY listing: taker coin was locked at match; credit buyer available balance (net of fees) immediately.
+      buyerWallet.uw_balance = this.toNumber(buyerWallet.uw_balance) + toBuyer;
+      transaction.trans_coin_unlock_at = null;
+      transaction.trans_lock_released_at = new Date();
+    }
+
+    await manager.save(UserWallet, sellerWallet);
+    await manager.save(UserWallet, buyerWallet);
+
+    transaction.trans_status = TransactionStatus.EXECUTED;
+    const saved = await manager.save(Transaction, transaction);
+
+    const hydrated = await this.loadTransactionWithUsers(
+      (manager as any).getRepository(Transaction),
+      saved.trans_id,
+    );
+    return {
+      response: this.toTransactionResponse(hydrated ?? saved),
+      buyerId: transaction.trans_user_buy,
+      sellerId: transaction.trans_user_sell,
+      transactionId: saved.trans_id,
+      amount,
+      smartrefFeePercent,
+    };
+  }
+
+  /** Post-commit hooks after `settleTransactionFromPaymentConfirmed` (same as confirmReceived). */
+  private emitExecutedTransactionSideEffects(result: {
+    buyerId: number;
+    sellerId: number;
+    transactionId: number;
+    amount: number;
+    smartrefFeePercent: number;
+    response: ReturnType<TransactionService['toTransactionResponse']>;
+  }): void {
+    if (result.smartrefFeePercent > 0) {
+      const smartrefRewardAmount = this.toNumber(
+        this.formatAmount((result.amount * result.smartrefFeePercent) / 100),
+      );
+      void this.smartRefService
+        .disputeSmartref(result.sellerId, smartrefRewardAmount)
+        .catch((error) => {
+          console.error(
+            `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
+            error,
+          );
+        });
+    }
+
+    void this.transactionRepository
+      .findOne({ where: { trans_id: result.transactionId } })
+      .then((executedTransaction) => {
+        if (!executedTransaction) return;
+        return this.sendExecutedEmailToBuyer(executedTransaction);
+      })
+      .catch((error) => {
+        console.error(
+          `Failed executed-email path for transaction ${result.transactionId}:`,
+          error,
+        );
+      });
+
+    void this.notifyUsers(
+      [result.buyerId, result.sellerId],
+      'Transaction completed',
+      `Transaction ${result.response.reference_code} has been completed successfully.`,
+      {
+        transaction_id: result.response.id,
+        reference_code: result.response.reference_code,
+        status: result.response.status,
+      },
+    ).catch((error) => {
+      console.error(
+        `Failed notify users after tx ${result.transactionId} executed:`,
+        error,
+      );
+    });
+  }
+
+  /**
+   * Called by BullMQ worker: `pending` → fail + revert orderbook/locks (same as cancel).
+   * `payment_confirmed` → auto-execute (same settlement as confirmReceived): buyer may have
+   * paid fiat; do not release seller lock back into a matchable pool.
    */
   async applyExpirationJob(
     transactionId: number,
     expectedStatus: TransactionStatus,
   ): Promise<void> {
+    if (expectedStatus === TransactionStatus.PAYMENT_CONFIRMED) {
+      const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+        this.adminSettingsConfigService.getTransactionFeePercent(),
+        this.adminSettingsConfigService.getSmartrefFeePercent(),
+      ]);
+      const totalFeePercent = transactionFeePercent + smartrefFeePercent;
+
+      let executed: Awaited<
+        ReturnType<TransactionService['settleTransactionFromPaymentConfirmed']>
+      > | null = null;
+
+      await this.dataSource.transaction(async (manager) => {
+        const transaction = await manager.findOne(Transaction, {
+          where: { trans_id: transactionId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!transaction) return;
+        if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
+          return;
+        }
+        executed = await this.settleTransactionFromPaymentConfirmed(
+          manager,
+          transaction,
+          {
+            transactionFeePercent,
+            smartrefFeePercent,
+            totalFeePercent,
+          },
+        );
+      });
+
+      if (executed) {
+        this.emitExecutedTransactionSideEffects(executed);
+      }
+      return;
+    }
+
     await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
         where: { trans_id: transactionId },
@@ -429,6 +649,10 @@ export class TransactionService {
         'Expired: no action within the allowed time window';
       await manager.save(Transaction, transaction);
     });
+
+    if (expectedStatus !== TransactionStatus.PENDING) {
+      return;
+    }
 
     const updated = await this.transactionRepository.findOne({
       where: { trans_id: transactionId },
@@ -967,146 +1191,14 @@ export class TransactionService {
         );
       }
 
-      const amount = this.toNumber(transaction.trans_amount);
-
-      let orderBook: OrderBook | null = null;
-      if (transaction.trans_order_book != null) {
-        orderBook = await manager.findOne(OrderBook, {
-          where: { ob_id: transaction.trans_order_book },
-          lock: { mode: 'pessimistic_write' },
-        });
-      }
-
-      const sellerLockDebit = this.computeSellerLockDebitForExecute(
-        amount,
-        totalFeePercent,
-        orderBook,
-        transaction.trans_user_sell,
-        transaction.trans_user_buy,
-      );
-
-      const isSellListing =
-        orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
-
-      const platformFeeAmt = this.toNumber(
-        this.formatAmount((amount * transactionFeePercent) / 100),
-      );
-      const refFeeAmt = this.toNumber(
-        this.formatAmount((amount * smartrefFeePercent) / 100),
-      );
-      const netToBuyer = this.toNumber(
-        this.formatAmount(amount - platformFeeAmt - refFeeAmt),
-      );
-      if (!isSellListing && netToBuyer <= 0) {
-        throw new BadRequestException(
-          'Net coin to buyer must be positive; reduce P2P fee percentages in admin settings.',
-        );
-      }
-
-      const toBuyer = isSellListing ? amount : netToBuyer;
-
-      const sellerWallet = await manager.findOne(UserWallet, {
-        where: {
-          uw_user_id: transaction.trans_user_sell,
-          uw_wallet_coins: transaction.trans_coin,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!sellerWallet) throw new NotFoundException('Seller wallet not found');
-
-      const buyerWallet = await manager.findOne(UserWallet, {
-        where: {
-          uw_user_id: transaction.trans_user_buy,
-          uw_wallet_coins: transaction.trans_coin,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!buyerWallet) throw new NotFoundException('Buyer wallet not found');
-
-      const sellerLock = this.toNumber(sellerWallet.uw_lock_balance);
-      if (sellerLock < sellerLockDebit) {
-        throw new BadRequestException('Seller lock balance is not enough');
-      }
-
-      sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
-
-      if (isSellListing) {
-        const buyerLock = this.toNumber(buyerWallet.uw_lock_balance);
-        buyerWallet.uw_lock_balance = buyerLock + toBuyer;
-        transaction.trans_coin_unlock_at = new Date(
-          Date.now() + P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
-        );
-        transaction.trans_lock_released_at = null;
-      } else {
-        buyerWallet.uw_balance =
-          this.toNumber(buyerWallet.uw_balance) + toBuyer;
-        transaction.trans_coin_unlock_at = null;
-        transaction.trans_lock_released_at = new Date();
-      }
-
-      await manager.save(UserWallet, sellerWallet);
-      await manager.save(UserWallet, buyerWallet);
-
-      transaction.trans_status = TransactionStatus.EXECUTED;
-      const saved = await manager.save(Transaction, transaction);
-
-      const hydrated = await this.loadTransactionWithUsers(
-        (manager as any).getRepository(Transaction),
-        saved.trans_id,
-      );
-      return {
-        response: this.toTransactionResponse(hydrated ?? saved),
-        buyerId: transaction.trans_user_buy,
-        sellerId: transaction.trans_user_sell,
-        transactionId: saved.trans_id,
-        amount,
+      return this.settleTransactionFromPaymentConfirmed(manager, transaction, {
+        transactionFeePercent,
         smartrefFeePercent,
-      };
-    });
-
-    // Side effects after commit: không await — trả response ngay; lỗi chỉ log (nên có queue/retry ở production).
-    if (result.smartrefFeePercent > 0) {
-      const smartrefRewardAmount = this.toNumber(
-        this.formatAmount((result.amount * result.smartrefFeePercent) / 100),
-      );
-      void this.smartRefService
-        .disputeSmartref(result.sellerId, smartrefRewardAmount)
-        .catch((error) => {
-          console.error(
-            `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
-            error,
-          );
-        });
-    }
-
-    void this.transactionRepository
-      .findOne({ where: { trans_id: result.transactionId } })
-      .then((executedTransaction) => {
-        if (!executedTransaction) return;
-        return this.sendExecutedEmailToBuyer(executedTransaction);
-      })
-      .catch((error) => {
-        console.error(
-          `Failed executed-email path for transaction ${result.transactionId}:`,
-          error,
-        );
+        totalFeePercent,
       });
-
-    void this.notifyUsers(
-      [result.buyerId, result.sellerId],
-      'Transaction completed',
-      `Transaction ${result.response.reference_code} has been completed successfully.`,
-      {
-        transaction_id: result.response.id,
-        reference_code: result.response.reference_code,
-        status: result.response.status,
-      },
-    ).catch((error) => {
-      console.error(
-        `Failed notify users after tx ${result.transactionId} executed:`,
-        error,
-      );
     });
+
+    this.emitExecutedTransactionSideEffects(result);
 
     return result.response;
   }

@@ -62,6 +62,7 @@ export class TransactionExpiryQueueService
           const txService = this.moduleRef.get(TransactionService, {
             strict: false,
           });
+          // `pending` → fail + revert; `payment_confirmed` → auto-execute (same as confirmReceived).
           await txService.applyExpirationJob(
             job.data.transactionId,
             job.data.expectedStatus,
