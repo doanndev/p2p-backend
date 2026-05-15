@@ -942,14 +942,17 @@ export class TransactionService {
       },
     );
 
-    void this.transactionExpiryQueue
-      .scheduleExpiry(transactionId, TransactionStatus.PENDING)
-      .catch((err) => {
-        console.error(
-          `Failed to schedule pending expiry job for transaction ${transactionId}:`,
-          err,
-        );
-      });
+    try {
+      await this.transactionExpiryQueue.scheduleExpiry(
+        transactionId,
+        TransactionStatus.PENDING,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to schedule pending expiry job for transaction ${transactionId}:`,
+        err,
+      );
+    }
 
     void this.notifyUsers(
       [response.user_buy?.id, response.user_sell?.id],
@@ -1116,14 +1119,17 @@ export class TransactionService {
         error,
       );
     });
-    void this.transactionExpiryQueue
-      .scheduleExpiry(saved.trans_id, TransactionStatus.PAYMENT_CONFIRMED)
-      .catch((err) => {
-        console.error(
-          `Failed to schedule payment_confirmed expiry job for transaction ${saved.trans_id}:`,
-          err,
-        );
-      });
+    try {
+      await this.transactionExpiryQueue.scheduleExpiry(
+        saved.trans_id,
+        TransactionStatus.PAYMENT_CONFIRMED,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to schedule payment_confirmed expiry job for transaction ${saved.trans_id}:`,
+        err,
+      );
+    }
     const hydrated = await this.loadTransactionWithUsers(
       this.transactionRepository,
       saved.trans_id,

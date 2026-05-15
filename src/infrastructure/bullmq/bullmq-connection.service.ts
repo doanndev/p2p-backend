@@ -23,6 +23,9 @@ export class BullMqConnectionService implements OnApplicationShutdown {
       this.client.on('error', (err: Error) => {
         this.logger.warn(`BullMQ Redis: ${err.message}`);
       });
+      this.logger.log(
+        'BullMQ Redis client created (shared connection for queues/workers)',
+      );
     } catch (err) {
       this.logger.warn(
         `BullMQ Redis init failed: ${err instanceof Error ? err.message : err}`,
@@ -62,6 +65,7 @@ export class BullMqConnectionService implements OnApplicationShutdown {
     if (this.client) {
       await this.client.quit().catch(() => {});
       this.client = null;
+      this.logger.log('BullMQ Redis client closed');
     }
   }
 }

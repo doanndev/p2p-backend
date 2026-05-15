@@ -32,7 +32,7 @@ export class TransactionExpiryQueueService
     private readonly bullMq: BullMqConnectionService,
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     try {
       const redis = this.bullMq.getRedis();
       if (!redis) {
@@ -46,6 +46,7 @@ export class TransactionExpiryQueueService
         TRANSACTION_EXPIRY_QUEUE,
         { connection: redis },
       );
+      await this.queue.waitUntilReady();
 
       const workerConnection = this.bullMq.duplicateForWorker();
       if (!workerConnection) {
@@ -70,12 +71,23 @@ export class TransactionExpiryQueueService
         },
         { connection: workerConnection },
       );
+      await this.worker.waitUntilReady();
 
       this.worker.on('failed', (job, err: Error) => {
         this.logger.error(
           `Expiry job ${job?.id ?? '?'} failed: ${err?.message ?? err}`,
         );
       });
+
+      this.worker.on('completed', (job) => {
+        this.logger.debug(
+          `Expiry job completed: id=${job.id} data=${JSON.stringify(job.data)}`,
+        );
+      });
+
+      this.logger.log(
+        `BullMQ transaction-expiry queue ready (queue="${TRANSACTION_EXPIRY_QUEUE}", delayMs=${TRANSACTION_EXPIRY_DELAY_MS}, worker=inline; Redis keys use prefix "bull:${TRANSACTION_EXPIRY_QUEUE}:")`,
+      );
     } catch (err) {
       this.logger.warn(
         `Transaction expiry queue init failed: ${err instanceof Error ? err.message : err}`,
@@ -100,7 +112,8 @@ export class TransactionExpiryQueueService
     }
     const jobId = `tx-expiry-${transactionId}-${expectedStatus}`;
     try {
-      await this.queue.add(
+      await this.queue.waitUntilReady();
+      const job = await this.queue.add(
         'expire',
         { transactionId, expectedStatus },
         {
@@ -110,6 +123,9 @@ export class TransactionExpiryQueueService
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
         },
+      );
+      this.logger.log(
+        `Scheduled tx expiry job bullJobId=${job.id} customJobId=${jobId} delayMs=${TRANSACTION_EXPIRY_DELAY_MS} (scan Redis: bull:${TRANSACTION_EXPIRY_QUEUE}:*)`,
       );
     } catch (err) {
       this.logger.error(
