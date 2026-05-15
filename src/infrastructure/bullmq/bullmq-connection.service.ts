@@ -1,23 +1,20 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationShutdown,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 
 /**
  * Shared ioredis connection for BullMQ (queues / workers).
- * Import `BullMqModule` in any feature module that needs BullMQ.
+ * Import `BullMqModule` once (e.g. in `AppModule`); `BullMqConnectionService` is then injectable everywhere.
+ *
+ * Redis is created in the **constructor** so `getRedis()` is non-null before any other provider's
+ * `onModuleInit` runs. Otherwise `TransactionExpiryQueueService` could run first, see `null`, and
+ * disable the expiry queue for the whole process lifetime.
  */
 @Injectable()
-export class BullMqConnectionService
-  implements OnModuleInit, OnApplicationShutdown
-{
+export class BullMqConnectionService implements OnApplicationShutdown {
   private readonly logger = new Logger(BullMqConnectionService.name);
   private client: Redis | null = null;
 
-  onModuleInit(): void {
+  constructor() {
     const url = process.env.REDIS_URL || 'redis://localhost:6379';
     try {
       this.client = new Redis(url, {
