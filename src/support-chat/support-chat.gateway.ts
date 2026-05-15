@@ -20,7 +20,12 @@ import { SupportChatService } from './support-chat.service';
 import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ConversationRoomDto } from './dto/conversation-room.dto';
 import { SendMessageDto } from './dto/send-message.dto';
-import { SupportChatSystemEventType } from './entities/support-chat-message.entity';
+import {
+  SupportChatMessageType,
+  SupportChatSenderType,
+  SupportChatSystemEventType,
+} from './entities/support-chat-message.entity';
+import { ADMIN_SUPPORT_INBOX_ROOM } from './support-chat-inbox.constants';
 import {
   AuthenticatedSocket,
   createSocketAuthMiddleware,
@@ -114,6 +119,10 @@ export class SupportChatGateway
           userId: client.user_id,
         })}`,
       );
+
+      if (client.actor?.type === 'admin') {
+        await client.join(ADMIN_SUPPORT_INBOX_ROOM);
+      }
     } catch (error: any) {
       this.logger.error(
         `[connection:error] ${JSON.stringify({
@@ -157,16 +166,20 @@ export class SupportChatGateway
     );
     await client.join(supportRoomName(body.conversationId));
 
-    const systemMessage = await this.supportChatService.saveSystemEvent(
-      client.actor,
-      body.conversationId,
-      client.actor.type === 'admin'
-        ? SupportChatSystemEventType.ADMIN_JOINED
-        : SupportChatSystemEventType.USER_JOINED,
-    );
-    client
-      .to(supportRoomName(body.conversationId))
-      .emit('receive_message', systemMessage);
+    const skipSystemEvent =
+      Boolean(body.silent) && client.actor.type === 'admin';
+    if (!skipSystemEvent) {
+      const systemMessage = await this.supportChatService.saveSystemEvent(
+        client.actor,
+        body.conversationId,
+        client.actor.type === 'admin'
+          ? SupportChatSystemEventType.ADMIN_JOINED
+          : SupportChatSystemEventType.USER_JOINED,
+      );
+      client
+        .to(supportRoomName(body.conversationId))
+        .emit('receive_message', systemMessage);
+    }
     this.logger.debug(
       `[event:join_conversation:ok] ${JSON.stringify({
         ...this.socketMeta(client),
@@ -200,16 +213,20 @@ export class SupportChatGateway
     );
     await client.leave(supportRoomName(body.conversationId));
 
-    const systemMessage = await this.supportChatService.saveSystemEvent(
-      client.actor,
-      body.conversationId,
-      client.actor.type === 'admin'
-        ? SupportChatSystemEventType.ADMIN_LEFT
-        : SupportChatSystemEventType.USER_LEFT,
-    );
-    client
-      .to(supportRoomName(body.conversationId))
-      .emit('receive_message', systemMessage);
+    const skipSystemEvent =
+      Boolean(body.silent) && client.actor.type === 'admin';
+    if (!skipSystemEvent) {
+      const systemMessage = await this.supportChatService.saveSystemEvent(
+        client.actor,
+        body.conversationId,
+        client.actor.type === 'admin'
+          ? SupportChatSystemEventType.ADMIN_LEFT
+          : SupportChatSystemEventType.USER_LEFT,
+      );
+      client
+        .to(supportRoomName(body.conversationId))
+        .emit('receive_message', systemMessage);
+    }
     this.logger.debug(
       `[event:leave_conversation:ok] ${JSON.stringify({
         ...this.socketMeta(client),
@@ -249,6 +266,14 @@ export class SupportChatGateway
     this.server
       .to(supportRoomName(body.conversationId))
       .emit('receive_message', message);
+
+    if (
+      message.sender_type === SupportChatSenderType.USER &&
+      message.message_type !== SupportChatMessageType.SYSTEM_EVENT
+    ) {
+      await this.emitAdminSupportInboxUpdate(body.conversationId, message);
+    }
+
     this.logger.debug(
       `[event:send_message:ok] ${JSON.stringify({
         ...this.socketMeta(client),
@@ -341,6 +366,11 @@ export class SupportChatGateway
       actorId: client.actor.id,
       seenAt: new Date(),
     });
+
+    if (client.actor.type === 'admin') {
+      await this.emitAdminSupportUnreadSummary();
+    }
+
     this.logger.debug(
       `[event:seen:ok] ${JSON.stringify({
         ...this.socketMeta(client),
@@ -350,6 +380,37 @@ export class SupportChatGateway
     return { ok: true };
   }
 
+  /** Tin user mới → notify mọi admin đang online (room inbox). */
+  private async emitAdminSupportInboxUpdate(
+    conversationId: number,
+    message: Record<string, unknown>,
+  ) {
+    const summary = await this.supportChatService.getAdminUnreadSummary();
+    const convUnread = summary.data.byConversation[conversationId] ?? 0;
+    const content = String(message.content ?? '');
+    const preview =
+      message.message_type === SupportChatMessageType.IMAGE
+        ? '[image]'
+        : content.length > 120
+          ? `${content.slice(0, 120)}…`
+          : content;
+
+    this.server.to(ADMIN_SUPPORT_INBOX_ROOM).emit('support_message_pending', {
+      conversationId,
+      message,
+      preview,
+      conversationUnread: convUnread,
+      totalUnread: summary.data.total,
+    });
+  }
+
+  private async emitAdminSupportUnreadSummary() {
+    const summary = await this.supportChatService.getAdminUnreadSummary();
+    this.server
+      .to(ADMIN_SUPPORT_INBOX_ROOM)
+      .emit('support_unread_updated', summary.data);
+  }
+
   emitConversationClosed(
     conversationId: number,
     payload?: Record<string, unknown>,
@@ -357,5 +418,6 @@ export class SupportChatGateway
     this.server
       .to(supportRoomName(conversationId))
       .emit('conversation_closed', { conversationId, ...(payload || {}) });
+    void this.emitAdminSupportUnreadSummary();
   }
 }

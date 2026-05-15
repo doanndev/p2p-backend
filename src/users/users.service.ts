@@ -1441,6 +1441,21 @@ export class UsersService {
       );
     }
 
+    const userForAdmin = await this.userRepository.findOne({
+      where: { uid: userId },
+      select: ['uid', 'uname'],
+    });
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.KYC,
+      title: 'KYC documents submitted',
+      message: `User #${userId} (${userForAdmin?.uname ?? 'unknown'}) submitted ID documents; awaiting paper proof.`,
+      data: {
+        user_id: userId,
+        verification_id: savedVerify.uv_id,
+        status: savedVerify.uv_status,
+      },
+    });
+
     const response = {
       statusCode: 201,
       message:
@@ -1525,6 +1540,21 @@ export class UsersService {
         `Failed to update KYC verification record: ${error.message || 'Unknown error'}`,
       );
     }
+
+    const userForAdmin = await this.userRepository.findOne({
+      where: { uid: userId },
+      select: ['uid', 'uname'],
+    });
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.KYC,
+      title: 'KYC resubmitted after retry',
+      message: `User #${userId} (${userForAdmin?.uname ?? 'unknown'}) updated ID documents; awaiting new paper proof.`,
+      data: {
+        user_id: userId,
+        verification_id: savedVerify.uv_id,
+        status: savedVerify.uv_status,
+      },
+    });
 
     const response = {
       statusCode: 200,

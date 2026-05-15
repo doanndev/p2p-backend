@@ -1,6 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
 
 export class ConversationRoomDto {
   @ApiProperty()
@@ -8,4 +8,10 @@ export class ConversationRoomDto {
   @IsInt()
   @Min(1)
   conversationId: number;
+
+  /** Admin: join/leave room không tạo system event (dùng khi xem chat, tránh spam). */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  silent?: boolean;
 }
