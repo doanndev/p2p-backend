@@ -1,9 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# Build yêu cầu file .env trong context ./backend (gitignore — chỉ có trên máy build).
-# File được COPY vào image → Nest ConfigModule đọc /app/.env lúc chạy.
-# Deploy kiểu một tar: docker save → VPS docker load → docker run / compose (không cần copy .env ra host).
-# CẢNH BÁO: không push image/tar có .env thật lên registry công khai; coi tar như secret.
+# Env at runtime: docker run --env-file ... (CI/CD staging) or -e / compose env.
+# Do not bake .env into the image (secrets must not be in registry layers).
 
 FROM node:20-bookworm-slim AS builder
 
@@ -20,7 +18,7 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=8012
+ENV PORT=8000
 ENV YARN_CACHE_FOLDER=/tmp/.yarn-cache
 
 COPY package.json yarn.lock ./
@@ -30,8 +28,7 @@ RUN corepack enable \
   && rm -rf /tmp/.yarn-cache /root/.cache /tmp/*
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/.env ./.env
 
-EXPOSE 8012
+EXPOSE 8000
 
 CMD ["node", "dist/main.js"]
