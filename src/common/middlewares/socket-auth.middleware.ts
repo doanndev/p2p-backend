@@ -5,6 +5,13 @@ import { Socket } from 'socket.io';
 import { Repository } from 'typeorm';
 import { User, UserStatus } from '../../users/entities/user.entity';
 import { Admin, AdminStatus } from '../../admins/entities/admin.entity';
+import {
+  getClientOriginLike,
+  matchesSupportChatOriginUrl,
+  parseSupportChatCookie,
+  selectSupportChatToken,
+  splitCommaUrls,
+} from '../../support-chat/support-chat-auth-context.util';
 
 export type SocketActor =
   | { type: 'user'; id: number; user?: User }
@@ -26,16 +33,6 @@ interface CreateSocketAuthMiddlewareOptions {
   logger?: Logger;
 }
 
-function parseCookie(header: string | undefined): Record<string, string> {
-  if (!header) return {};
-  return header.split(';').reduce<Record<string, string>>((acc, part) => {
-    const [k, ...rest] = part.trim().split('=');
-    if (!k || rest.length === 0) return acc;
-    acc[k] = decodeURIComponent(rest.join('='));
-    return acc;
-  }, {});
-}
-
 export function createSocketAuthMiddleware(
   options: CreateSocketAuthMiddlewareOptions,
 ) {
@@ -48,53 +45,29 @@ export function createSocketAuthMiddleware(
     logger,
   } = options;
 
-  // Lấy danh sách URLs được phép
-  const frontendUrlsRaw =
-    configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000';
-  const frontendUrls = frontendUrlsRaw
-    .split(',')
-    .map((url) => url.trim())
-    .filter((url) => url);
-
-  const adminFrontendUrlsRaw =
-    configService.get<string>('ADMIN_FRONTEND_URLS') || '';
-  const adminFrontendUrls = adminFrontendUrlsRaw
-    .split(',')
-    .map((url) => url.trim())
-    .filter((url) => url);
-
-  /**
-   * Kiểm tra xem origin có khớp với danh sách URLs được phép không
-   */
-  function matchesUrls(origin: string, urls: string[]): boolean {
-    if (!origin) return false;
-    return urls.some((url) => {
-      const normalizedUrl = url.replace(/\/$/, '');
-      const regex = new RegExp(
-        `^https?://([a-z0-9-]+\\.)?${normalizedUrl
-          .replace('http://', '')
-          .replace('https://', '')
-          .replace(/\./g, '\\.')}(:\\d+)?$`,
-      );
-      return regex.test(origin);
-    });
-  }
+  const frontendUrls = splitCommaUrls(
+    configService.get<string>('FRONTEND_URLS') || 'http://localhost:3000',
+  );
+  const adminFrontendUrls = splitCommaUrls(
+    configService.get<string>('ADMIN_FRONTEND_URLS'),
+  );
 
   return async (socket: AuthenticatedSocket, next: NextFn) => {
     try {
       const cookieHeader =
         (socket.handshake.headers?.cookie as string | undefined) ?? undefined;
-      const cookies = parseCookie(cookieHeader);
+      const cookies = parseSupportChatCookie(cookieHeader);
 
-      // Lấy origin từ handshake headers
-      const socketOrigin =
-        (socket.handshake.headers.origin as string | undefined) ||
-        (socket.handshake.headers.referer as string | undefined) ||
-        '';
+      const socketOrigin = getClientOriginLike(socket.handshake.headers);
 
-      // Xác định origin type
-      const isAdminOrigin = matchesUrls(socketOrigin, adminFrontendUrls);
-      const isUserOrigin = matchesUrls(socketOrigin, frontendUrls);
+      const isAdminOrigin = matchesSupportChatOriginUrl(
+        socketOrigin,
+        adminFrontendUrls,
+      );
+      const isUserOrigin = matchesSupportChatOriginUrl(
+        socketOrigin,
+        frontendUrls,
+      );
       const originType = isAdminOrigin ? 'admin' : 'user';
 
       logger?.debug(
@@ -114,8 +87,14 @@ export function createSocketAuthMiddleware(
       const adminToken =
         (socket.handshake.auth?.admin_access_token as string | undefined) ||
         cookies['admin_access_token'];
-      const selectedTokenType = originType === 'admin' ? 'admin' : 'user';
-      const token = selectedTokenType === 'admin' ? adminToken : userToken;
+
+      const { selectedTokenType, token } = selectSupportChatToken({
+        originLike: socketOrigin,
+        adminFrontendUrls,
+        userToken,
+        adminToken,
+        emptyOriginPolicy: 'socket',
+      });
 
       logger?.debug(
         `[socket-auth:token-selection] ${JSON.stringify({

@@ -19,6 +19,8 @@ import {
   UserCodeType,
 } from './entities/user-code.entity';
 import { EmailService } from '../systems/email.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
+import { NotificationType } from './entities/notification.entity';
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
 import { BankMutationSecurityDto } from './dto/bank-mutation-security.dto';
 
@@ -37,6 +39,7 @@ export class BankUsersService {
     @InjectRepository(UserCode)
     private readonly userCodeRepository: Repository<UserCode>,
     private readonly emailService: EmailService,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private generateEmailCode(): string {
@@ -105,7 +108,7 @@ export class BankUsersService {
       id: b.bu_id,
       userId: b.bu_user_id,
       bankName: b.bu_bank_name,
-      bankBranch: b.bu_bank_branch,
+      passbookImageUrl: b.bu_passbook_image_url,
       bankAccountName: b.bu_bank_account_name,
       bankAccountNumber: b.bu_bank_account_number,
       approvalStatus: b.bu_approval_status,
@@ -116,7 +119,7 @@ export class BankUsersService {
   async createMyBank(userId: number, dto: CreateBankUserDto) {
     const requestUser = await this.userRepository.findOne({
       where: { uid: userId },
-      select: ['uid', 'uverify', 'ufulllname'],
+      select: ['uid', 'uverify', 'ufulllname', 'uname', 'uemail'],
     });
     if (!requestUser) throw new NotFoundException('User not found');
     if (requestUser.uverify !== true) {
@@ -143,8 +146,7 @@ export class BankUsersService {
     const created = this.bankUserRepository.create({
       bu_user_id: userId,
       bu_bank_name: dto.bankName.trim(),
-      bu_bank_branch:
-        dto.bankBranch === undefined ? null : (dto.bankBranch ?? null),
+      bu_passbook_image_url: dto.passbookImageUrl.trim(),
       bu_bank_account_name: requestUser.ufulllname.trim(),
       bu_bank_account_number: dto.bankAccountNumber.trim(),
       bu_approval_status: BankUserApprovalStatus.PENDING,
@@ -152,13 +154,24 @@ export class BankUsersService {
     });
     const saved = await this.bankUserRepository.save(created);
 
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.USER,
+      title: 'New bank account pending approval',
+      message: `User #${userId} (${requestUser.uname ?? 'unknown'}) submitted a bank account for approval.`,
+      data: {
+        bank_user_id: saved.bu_id,
+        user_id: userId,
+        bank_name: saved.bu_bank_name,
+      },
+    });
+
     return {
       message: 'Bank create request submitted and waiting for admin approval',
       requestId: String(saved.bu_id),
       requestedAt: requestedAt.toISOString(),
       bank: {
         bankName: saved.bu_bank_name,
-        bankBranch: saved.bu_bank_branch,
+        passbookImageUrl: saved.bu_passbook_image_url,
         bankAccountName: saved.bu_bank_account_name,
         bankAccountNumber: saved.bu_bank_account_number,
       },
@@ -197,7 +210,7 @@ export class BankUsersService {
             : { id: row.bu_user_id },
           bank: {
             bankName: row.bu_bank_name,
-            bankBranch: row.bu_bank_branch,
+            passbookImageUrl: row.bu_passbook_image_url,
             bankAccountName: row.bu_bank_account_name,
             bankAccountNumber: row.bu_bank_account_number,
           },
@@ -312,8 +325,8 @@ export class BankUsersService {
     if (dto.bankName !== undefined) {
       bank.bu_bank_name = dto.bankName.trim();
     }
-    if (dto.bankBranch !== undefined) {
-      bank.bu_bank_branch = dto.bankBranch ?? null;
+    if (dto.passbookImageUrl !== undefined) {
+      bank.bu_passbook_image_url = dto.passbookImageUrl.trim();
     }
     if (dto.bankAccountNumber !== undefined) {
       bank.bu_bank_account_number = dto.bankAccountNumber.trim();
@@ -324,7 +337,7 @@ export class BankUsersService {
       id: saved.bu_id,
       userId: saved.bu_user_id,
       bankName: saved.bu_bank_name,
-      bankBranch: saved.bu_bank_branch,
+      passbookImageUrl: saved.bu_passbook_image_url,
       bankAccountName: saved.bu_bank_account_name,
       bankAccountNumber: saved.bu_bank_account_number,
     };

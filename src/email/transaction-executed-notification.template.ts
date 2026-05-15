@@ -1,4 +1,5 @@
 import { getBrandLogoBarHtml } from './brand-logo.partial';
+import { formatDecimalDisplay } from './format-decimal-display';
 
 type TransactionExecutedNotificationPayload = {
   referenceCode: string;
@@ -11,17 +12,6 @@ type TransactionExecutedNotificationPayload = {
   heroImageUrl?: string;
   backgroundImageUrl?: string;
 };
-
-function formatNumber(value: number | string): string {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  if (Number.isNaN(parsed)) {
-    return String(value);
-  }
-  return parsed.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 8,
-  });
-}
 
 function formatTime(createdAt?: Date | string): string {
   if (!createdAt) return 'Just now';
@@ -49,9 +39,9 @@ export function getTransactionExecutedNotificationEmailHtml(
     ['Type', 'P2P Transaction'],
     ['Status', 'Executed'],
     ['Reference code', referenceCode],
-    ['Amount', `${formatNumber(amount)} ${coinSymbol}`],
+    ['Amount', `${formatDecimalDisplay(amount)} ${coinSymbol}`],
     totalPrice !== undefined
-      ? ['Total', `${formatNumber(totalPrice)} ${nationalSymbol}`]
+      ? ['Total', `${formatDecimalDisplay(totalPrice)} ${nationalSymbol}`]
       : null,
     ['Updated at', formatTime(createdAt)],
   ]

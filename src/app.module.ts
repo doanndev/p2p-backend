@@ -22,6 +22,7 @@ import { CurrenciesModule } from './currencies/currencies.module';
 import { BullMqModule } from './infrastructure/bullmq/bullmq.module';
 import { SmartRefModule } from './smart-ref/smart-ref.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ForumModule } from './forum/forum.module';
 import { SentryModule } from '@sentry/nestjs/setup';
 import { APP_FILTER } from '@nestjs/core';
 import { AllExceptionsSentryFilter } from './exceptions/all-exceptions-sentry.filter';
@@ -60,6 +61,7 @@ import { AllExceptionsSentryFilter } from './exceptions/all-exceptions-sentry.fi
     CurrenciesModule,
     SmartRefModule,
     NotificationsModule,
+    ForumModule,
   ],
   controllers: [AppController], // Các controller của ứng dụng
   providers: [

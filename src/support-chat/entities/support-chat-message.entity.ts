@@ -17,6 +17,7 @@ export enum SupportChatSenderType {
 
 export enum SupportChatMessageType {
   TEXT = 'text',
+  IMAGE = 'image',
   SYSTEM_EVENT = 'system_event',
 }
 

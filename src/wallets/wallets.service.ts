@@ -75,6 +75,7 @@ import { WalletsSchedulerService } from './wallets-scheduler.service';
 import { RpcRateLimitService } from '../common/rpc-rate-limit.service';
 import { AdminSettingsConfigService } from '../settings/admin-settings-config.service';
 import { requireTotpIfEnabled } from '../common/helpers/two-factor.helper';
+import { apiDecimal } from '../common/helpers/decimal-api.util';
 import { CacheService } from '../systems/cache.service';
 import { EmailService } from '../systems/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -1275,7 +1276,7 @@ export class WalletsService implements OnModuleInit {
           );
           if (fromTokenAccountInfo.amount < transferAmount) {
             throw new BadRequestException(
-              `Insufficient token balance. Available: ${Number(fromTokenAccountInfo.amount) / Math.pow(10, decimals)}, Required: ${amount}`,
+              `Insufficient token balance. Available: ${apiDecimal(Number(fromTokenAccountInfo.amount) / Math.pow(10, decimals))}, Required: ${apiDecimal(amount)}`,
             );
           }
 
@@ -1565,7 +1566,7 @@ export class WalletsService implements OnModuleInit {
               const availableBalance =
                 Number(senderBalance - estimatedGasFee) / Math.pow(10, 18);
               throw new BadRequestException(
-                `Insufficient balance. Available: ${availableBalance.toFixed(8)} ${coin.coin_symbol}, Required: ${amount} ${coin.coin_symbol} (plus gas fee)`,
+                `Insufficient balance. Available: ${apiDecimal(availableBalance)} ${coin.coin_symbol}, Required: ${apiDecimal(amount)} ${coin.coin_symbol} (plus gas fee)`,
               );
             }
 
@@ -1626,7 +1627,7 @@ export class WalletsService implements OnModuleInit {
                 const availableBalance =
                   Number(senderBalance) / Math.pow(10, decimals);
                 throw new BadRequestException(
-                  `Insufficient token balance. Available: ${availableBalance}, Required: ${amount}`,
+                  `Insufficient token balance. Available: ${apiDecimal(availableBalance)}, Required: ${apiDecimal(amount)}`,
                 );
               }
             } catch (error) {

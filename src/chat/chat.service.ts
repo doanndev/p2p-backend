@@ -12,6 +12,10 @@ import { Transaction } from '../orderbook/entities/transaction.entity';
 import { OrderBook } from '../orderbook/entities/order-book.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
 import { Admin, AdminStatus } from '../admins/entities/admin.entity';
+import {
+  apiDecimal,
+  apiDecimalOrNull,
+} from '../common/helpers/decimal-api.util';
 
 export type ChatActor = { type: 'user' | 'admin'; id: number };
 
@@ -54,11 +58,11 @@ export class ChatService {
       option: orderbook.ob_option,
       coin_symbol: orderbook.ob_coin_symbol,
       national_symbol: orderbook.ob_national_symbol,
-      amount: orderbook.ob_amount,
-      amount_remaining: orderbook.ob_amount_remaining,
-      price: orderbook.ob_price,
-      national_min: orderbook.ob_national_min,
-      national_max: orderbook.ob_national_max,
+      amount: apiDecimal(orderbook.ob_amount),
+      amount_remaining: apiDecimal(orderbook.ob_amount_remaining),
+      price: apiDecimal(orderbook.ob_price),
+      national_min: apiDecimalOrNull(orderbook.ob_national_min),
+      national_max: apiDecimalOrNull(orderbook.ob_national_max),
       status: orderbook.ob_status,
       description: orderbook.ob_description,
       created_at: orderbook.ob_created_at,
@@ -80,11 +84,11 @@ export class ChatService {
       type: transaction.trans_type,
       coin_symbol: transaction.trans_coin_symbol,
       national_symbol: transaction.trans_national_symbol,
-      amount: transaction.trans_amount,
-      price: transaction.trans_price,
-      price_usd: transaction.trans_price_usd,
-      total_price: transaction.trans_total_price,
-      total_usd: transaction.trans_total_usd,
+      amount: apiDecimal(transaction.trans_amount),
+      price: apiDecimal(transaction.trans_price),
+      price_usd: apiDecimal(transaction.trans_price_usd),
+      total_price: apiDecimal(transaction.trans_total_price),
+      total_usd: apiDecimal(transaction.trans_total_usd),
       dispute_status: transaction.trans_dispute_status,
       time_bank: transaction.trans_time_bank,
       status: transaction.trans_status,
@@ -120,6 +124,28 @@ export class ChatService {
       status: room.room_status,
       created_at: room.room_created_at,
       closed_at: room.room_closed_at,
+    };
+  }
+
+  private toChatMessagePublic(m: ChatMessage) {
+    const isAdmin = m.message_sender_admin_id != null;
+    const senderType = isAdmin ? 'admin' : 'user';
+    const senderId = isAdmin
+      ? (m.message_sender_admin_id as number)
+      : (m.message_sender_id as number);
+    return {
+      id: m.message_id,
+      room_id: m.message_room_id,
+      sender_id: senderId,
+      sender_type: senderType,
+      type: m.message_type,
+      content: m.message_content,
+      file_url: m.message_file_url,
+      file_name: m.message_file_name,
+      file_size: m.message_file_size,
+      is_read: m.message_is_read,
+      created_at: m.message_created_at,
+      read_at: m.message_read_at,
     };
   }
 
@@ -258,19 +284,7 @@ export class ChatService {
       order: { message_id: 'ASC' },
     });
 
-    return messages.map((m) => ({
-      id: m.message_id,
-      room_id: m.message_room_id,
-      sender_id: m.message_sender_id,
-      type: m.message_type,
-      content: m.message_content,
-      file_url: m.message_file_url,
-      file_name: m.message_file_name,
-      file_size: m.message_file_size,
-      is_read: m.message_is_read,
-      created_at: m.message_created_at,
-      read_at: m.message_read_at,
-    }));
+    return messages.map((m) => this.toChatMessagePublic(m));
   }
 
   async getActiveRoomsByUser(userId: number) {
@@ -341,19 +355,7 @@ export class ChatService {
       order: { message_id: 'ASC' },
     });
 
-    return messages.map((m) => ({
-      id: m.message_id,
-      room_id: m.message_room_id,
-      sender_id: m.message_sender_id,
-      type: m.message_type,
-      content: m.message_content,
-      file_url: m.message_file_url,
-      file_name: m.message_file_name,
-      file_size: m.message_file_size,
-      is_read: m.message_is_read,
-      created_at: m.message_created_at,
-      read_at: m.message_read_at,
-    }));
+    return messages.map((m) => this.toChatMessagePublic(m));
   }
 
   async adminCreateOrReopenRoom(adminId: number, transactionId: number) {
@@ -394,14 +396,24 @@ export class ChatService {
     return { message: 'Message deleted successfully', id: messageId };
   }
 
+  /**
+   * Gửi tin text hoặc ảnh (URL https) — đúng một trong hai, giống support chat.
+   */
   async saveTextMessage(
     actor: ChatActor,
     transactionId: number,
-    content: string,
+    content?: string,
+    imageUrl?: string,
   ) {
-    const trimmed = (content ?? '').trim();
-    if (!trimmed) throw new BadRequestException('Message content is required');
-    if (trimmed.length > 5000) {
+    const text = (content ?? '').trim();
+    const url = (imageUrl ?? '').trim();
+    if (text && url) {
+      throw new BadRequestException('Send text and image in separate messages');
+    }
+    if (!text && !url) {
+      throw new BadRequestException('Message content or imageUrl is required');
+    }
+    if (text.length > 5000) {
       throw new BadRequestException('Message content is too long');
     }
 
@@ -413,11 +425,15 @@ export class ChatService {
       throw new BadRequestException('Chat room is closed');
     }
 
+    const isImage = Boolean(url);
+    const storedContent = isImage ? url : text;
+
     const message = this.chatMessageRepository.create({
       message_room_id: room.room_id,
-      message_sender_id: actor.id,
-      message_type: ChatMessageType.TEXT,
-      message_content: trimmed,
+      message_sender_id: actor.type === 'user' ? actor.id : null,
+      message_sender_admin_id: actor.type === 'admin' ? actor.id : null,
+      message_type: isImage ? ChatMessageType.IMAGE : ChatMessageType.TEXT,
+      message_content: storedContent,
       message_file_url: null,
       message_file_name: null,
       message_file_size: null,
@@ -431,7 +447,7 @@ export class ChatService {
       id: saved.message_id,
       transaction_id: transactionId,
       room_id: saved.message_room_id,
-      sender_id: saved.message_sender_id,
+      sender_id: actor.id,
       sender_type: actor.type,
       type: saved.message_type,
       content: saved.message_content,

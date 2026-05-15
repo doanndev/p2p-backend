@@ -963,7 +963,7 @@ export class AdminsUsersOpsService {
       display_name: string;
       bu_id: number;
       bu_bank_name: string;
-      bu_bank_branch: string | null;
+      bu_passbook_image_url: string | null;
       bu_bank_account_name: string;
       bu_bank_account_number: string;
     }>;
@@ -997,7 +997,7 @@ export class AdminsUsersOpsService {
       .addSelect('u.ufulllname', 'ufulllname')
       .addSelect('bu.bu_id', 'bu_id')
       .addSelect('bu.bu_bank_name', 'bu_bank_name')
-      .addSelect('bu.bu_bank_branch', 'bu_bank_branch')
+      .addSelect('bu.bu_passbook_image_url', 'bu_passbook_image_url')
       .addSelect('bu.bu_bank_account_name', 'bu_bank_account_name')
       .addSelect('bu.bu_bank_account_number', 'bu_bank_account_number');
 
@@ -1043,7 +1043,7 @@ export class AdminsUsersOpsService {
           ufulllname: string;
           bu_id: string;
           bu_bank_name: string;
-          bu_bank_branch: string | null;
+          bu_passbook_image_url: string | null;
           bu_bank_account_name: string;
           bu_bank_account_number: string;
         }>(),
@@ -1058,7 +1058,7 @@ export class AdminsUsersOpsService {
       display_name: item.ufulllname,
       bu_id: Number(item.bu_id),
       bu_bank_name: item.bu_bank_name,
-      bu_bank_branch: item.bu_bank_branch,
+      bu_passbook_image_url: item.bu_passbook_image_url,
       bu_bank_account_name: item.bu_bank_account_name,
       bu_bank_account_number: item.bu_bank_account_number,
     }));

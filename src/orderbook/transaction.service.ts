@@ -37,11 +37,16 @@ import {
 import { SmartRefService } from '../smart-ref/smart-ref.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AdminNotificationsService } from '../notifications/admin-notifications.service';
 import { NotificationType } from '../users/entities/notification.entity';
 import {
   DEFAULT_ORDERBOOK_PER_TRANSACTION_AMOUNT_MIN,
   P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
 } from './orderbook.constants';
+import {
+  apiDecimal,
+  apiDecimalOrNull,
+} from '../common/helpers/decimal-api.util';
 
 /** Max coin (USDT) buy exposure per user level. */
 const BUYER_MAX_COIN_LIMIT_BY_LEVEL: Record<number, number> = {
@@ -73,6 +78,7 @@ export class TransactionService {
     private readonly smartRefService: SmartRefService,
     private readonly currenciesService: CurrenciesService,
     private readonly notificationsService: NotificationsService,
+    private readonly adminNotificationsService: AdminNotificationsService,
   ) {}
 
   private toNumber(value: string | number): number {
@@ -105,28 +111,21 @@ export class TransactionService {
 
     if (amount < effectiveMin) {
       throw new BadRequestException(
-        `Transaction amount must be at least ${effectiveMin}`,
+        `Transaction amount must be at least ${apiDecimal(effectiveMin)}`,
       );
     }
     if (configuredMax != null && amount > configuredMax) {
       throw new BadRequestException(
-        `Transaction amount must not exceed ${configuredMax}`,
+        `Transaction amount must not exceed ${apiDecimal(configuredMax)}`,
       );
     }
   }
 
-  /** Same as orderbook sell create: tx fee % + smartref % from admin settings. */
-  private async getP2pOrderbookFeePercentTotal(): Promise<number> {
-    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
-      this.adminSettingsConfigService.getTransactionFeePercent(),
-      this.adminSettingsConfigService.getSmartrefFeePercent(),
-    ]);
-    return transactionFeePercent + smartrefFeePercent;
-  }
-
   /**
-   * Locked coin for a trade amount — must match seller lock debit on execute
-   * and buy-orderbook seller lock on create/cancel/expiry.
+   * Locked coin for a trade amount — SELL listing: poster locked amount+fees at
+   * orderbook create; execute debits the same. BUY listing: taker locks only
+   * `amount` at match; execute debits `amount` from lock and credits buyer net
+   * after fees.
    */
   private computeSellerLockCoinAmount(
     amount: number,
@@ -152,17 +151,13 @@ export class TransactionService {
       orderBook != null &&
       orderBook.ob_option === OrderBookOption.BUY &&
       orderBook.ob_user_id === transUserBuy;
-    if (posterIsSeller || posterIsBuyer) {
+    if (posterIsSeller) {
       return this.computeSellerLockCoinAmount(amount, totalFeePercent);
     }
+    if (posterIsBuyer) {
+      return this.toNumber(this.formatAmount(amount));
+    }
     return amount;
-  }
-
-  private async computeBuyOrderbookSellerLockCoinAmount(
-    amount: number,
-  ): Promise<number> {
-    const totalFeePercent = await this.getP2pOrderbookFeePercentTotal();
-    return this.computeSellerLockCoinAmount(amount, totalFeePercent);
   }
 
   private getBuyerMaxCoinLimitByLevel(level: number): number {
@@ -270,7 +265,7 @@ export class TransactionService {
       id: bankUser.bu_id,
       userId: bankUser.bu_user_id,
       bankName: bankUser.bu_bank_name,
-      bankBranch: bankUser.bu_bank_branch,
+      passbookImageUrl: bankUser.bu_passbook_image_url,
       bankAccountName: bankUser.bu_bank_account_name,
       bankAccountNumber: bankUser.bu_bank_account_number,
     };
@@ -296,11 +291,11 @@ export class TransactionService {
       type: t.trans_type,
       coin_symbol: t.trans_coin_symbol,
       national_symbol: t.trans_national_symbol,
-      amount: t.trans_amount,
-      price: t.trans_price,
-      price_usd: t.trans_price_usd,
-      total_price: t.trans_total_price,
-      total_usd: t.trans_total_usd,
+      amount: apiDecimal(t.trans_amount),
+      price: apiDecimal(t.trans_price),
+      price_usd: apiDecimal(t.trans_price_usd),
+      total_price: apiDecimal(t.trans_total_price),
+      total_usd: apiDecimal(t.trans_total_usd),
       dispute_status: t.trans_dispute_status,
       time_bank: t.trans_time_bank,
       status: t.trans_status,
@@ -331,11 +326,11 @@ export class TransactionService {
       option: orderBook.ob_option,
       coin_symbol: orderBook.ob_coin_symbol,
       national_symbol: orderBook.ob_national_symbol,
-      amount: orderBook.ob_amount,
-      amount_remaining: orderBook.ob_amount_remaining,
-      price: orderBook.ob_price,
-      national_min: orderBook.ob_national_min,
-      national_max: orderBook.ob_national_max,
+      amount: apiDecimal(orderBook.ob_amount),
+      amount_remaining: apiDecimal(orderBook.ob_amount_remaining),
+      price: apiDecimal(orderBook.ob_price),
+      national_min: apiDecimalOrNull(orderBook.ob_national_min),
+      national_max: apiDecimalOrNull(orderBook.ob_national_max),
       status: orderBook.ob_status,
       description: orderBook.ob_description,
       created_at: orderBook.ob_created_at,
@@ -363,12 +358,232 @@ export class TransactionService {
   }
 
   /**
-   * Called by BullMQ worker: if status still matches `expectedStatus`, mark failed and revert order book / locks (same as cancel).
+   * Shared wallet + status transition for `confirmReceived` and auto-complete
+   * when the payment_confirmed window expires (seller did not confirm in time).
+   * Caller must hold `transaction` row with pessimistic lock and status `payment_confirmed`.
+   */
+  private async settleTransactionFromPaymentConfirmed(
+    manager: EntityManager,
+    transaction: Transaction,
+    feePercents: {
+      transactionFeePercent: number;
+      smartrefFeePercent: number;
+      totalFeePercent: number;
+    },
+  ): Promise<{
+    response: ReturnType<TransactionService['toTransactionResponse']>;
+    buyerId: number;
+    sellerId: number;
+    transactionId: number;
+    amount: number;
+    smartrefFeePercent: number;
+  }> {
+    const { transactionFeePercent, smartrefFeePercent, totalFeePercent } =
+      feePercents;
+
+    if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
+      throw new BadRequestException(
+        'Only payment_confirmed transaction can be executed',
+      );
+    }
+
+    const amount = this.toNumber(transaction.trans_amount);
+
+    let orderBook: OrderBook | null = null;
+    if (transaction.trans_order_book != null) {
+      orderBook = await manager.findOne(OrderBook, {
+        where: { ob_id: transaction.trans_order_book },
+        lock: { mode: 'pessimistic_write' },
+      });
+    }
+
+    const sellerLockDebit = this.computeSellerLockDebitForExecute(
+      amount,
+      totalFeePercent,
+      orderBook,
+      transaction.trans_user_sell,
+      transaction.trans_user_buy,
+    );
+
+    const isSellListing =
+      orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
+
+    const platformFeeAmt = this.toNumber(
+      this.formatAmount((amount * transactionFeePercent) / 100),
+    );
+    const refFeeAmt = this.toNumber(
+      this.formatAmount((amount * smartrefFeePercent) / 100),
+    );
+    const netToBuyer = this.toNumber(
+      this.formatAmount(amount - platformFeeAmt - refFeeAmt),
+    );
+    if (!isSellListing && netToBuyer <= 0) {
+      throw new BadRequestException(
+        'Net coin to buyer must be positive; reduce P2P fee percentages in admin settings.',
+      );
+    }
+
+    const toBuyer = isSellListing ? amount : netToBuyer;
+
+    const sellerWallet = await manager.findOne(UserWallet, {
+      where: {
+        uw_user_id: transaction.trans_user_sell,
+        uw_wallet_coins: transaction.trans_coin,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!sellerWallet) throw new NotFoundException('Seller wallet not found');
+
+    const buyerWallet = await manager.findOne(UserWallet, {
+      where: {
+        uw_user_id: transaction.trans_user_buy,
+        uw_wallet_coins: transaction.trans_coin,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!buyerWallet) throw new NotFoundException('Buyer wallet not found');
+
+    const sellerLock = this.toNumber(sellerWallet.uw_lock_balance);
+    if (sellerLock < sellerLockDebit) {
+      throw new BadRequestException('Seller lock balance is not enough');
+    }
+
+    sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
+
+    if (isSellListing) {
+      // SELL listing: poster already locked coin at orderbook create; buyer receives delayed unlock via scheduler.
+      const buyerLock = this.toNumber(buyerWallet.uw_lock_balance);
+      buyerWallet.uw_lock_balance = buyerLock + toBuyer;
+      transaction.trans_coin_unlock_at = new Date(
+        Date.now() + P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
+      );
+      transaction.trans_lock_released_at = null;
+    } else {
+      // BUY listing: taker coin was locked at match; credit buyer available balance (net of fees) immediately.
+      buyerWallet.uw_balance = this.toNumber(buyerWallet.uw_balance) + toBuyer;
+      transaction.trans_coin_unlock_at = null;
+      transaction.trans_lock_released_at = new Date();
+    }
+
+    await manager.save(UserWallet, sellerWallet);
+    await manager.save(UserWallet, buyerWallet);
+
+    transaction.trans_status = TransactionStatus.EXECUTED;
+    const saved = await manager.save(Transaction, transaction);
+
+    const hydrated = await this.loadTransactionWithUsers(
+      (manager as any).getRepository(Transaction),
+      saved.trans_id,
+    );
+    return {
+      response: this.toTransactionResponse(hydrated ?? saved),
+      buyerId: transaction.trans_user_buy,
+      sellerId: transaction.trans_user_sell,
+      transactionId: saved.trans_id,
+      amount,
+      smartrefFeePercent,
+    };
+  }
+
+  /** Post-commit hooks after `settleTransactionFromPaymentConfirmed` (same as confirmReceived). */
+  private emitExecutedTransactionSideEffects(result: {
+    buyerId: number;
+    sellerId: number;
+    transactionId: number;
+    amount: number;
+    smartrefFeePercent: number;
+    response: ReturnType<TransactionService['toTransactionResponse']>;
+  }): void {
+    if (result.smartrefFeePercent > 0) {
+      const smartrefRewardAmount = this.toNumber(
+        this.formatAmount((result.amount * result.smartrefFeePercent) / 100),
+      );
+      void this.smartRefService
+        .disputeSmartref(result.sellerId, smartrefRewardAmount)
+        .catch((error) => {
+          console.error(
+            `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
+            error,
+          );
+        });
+    }
+
+    void this.transactionRepository
+      .findOne({ where: { trans_id: result.transactionId } })
+      .then((executedTransaction) => {
+        if (!executedTransaction) return;
+        return this.sendExecutedEmailToBuyer(executedTransaction);
+      })
+      .catch((error) => {
+        console.error(
+          `Failed executed-email path for transaction ${result.transactionId}:`,
+          error,
+        );
+      });
+
+    void this.notifyUsers(
+      [result.buyerId, result.sellerId],
+      'Transaction completed',
+      `Transaction ${result.response.reference_code} has been completed successfully.`,
+      {
+        transaction_id: result.response.id,
+        reference_code: result.response.reference_code,
+        status: result.response.status,
+      },
+    ).catch((error) => {
+      console.error(
+        `Failed notify users after tx ${result.transactionId} executed:`,
+        error,
+      );
+    });
+  }
+
+  /**
+   * Called by BullMQ worker: `pending` → fail + revert orderbook/locks (same as cancel).
+   * `payment_confirmed` → auto-execute (same settlement as confirmReceived): buyer may have
+   * paid fiat; do not release seller lock back into a matchable pool.
    */
   async applyExpirationJob(
     transactionId: number,
     expectedStatus: TransactionStatus,
   ): Promise<void> {
+    if (expectedStatus === TransactionStatus.PAYMENT_CONFIRMED) {
+      const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+        this.adminSettingsConfigService.getTransactionFeePercent(),
+        this.adminSettingsConfigService.getSmartrefFeePercent(),
+      ]);
+      const totalFeePercent = transactionFeePercent + smartrefFeePercent;
+
+      let executed: Awaited<
+        ReturnType<TransactionService['settleTransactionFromPaymentConfirmed']>
+      > | null = null;
+
+      await this.dataSource.transaction(async (manager) => {
+        const transaction = await manager.findOne(Transaction, {
+          where: { trans_id: transactionId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!transaction) return;
+        if (transaction.trans_status !== TransactionStatus.PAYMENT_CONFIRMED) {
+          return;
+        }
+        executed = await this.settleTransactionFromPaymentConfirmed(
+          manager,
+          transaction,
+          {
+            transactionFeePercent,
+            smartrefFeePercent,
+            totalFeePercent,
+          },
+        );
+      });
+
+      if (executed) {
+        this.emitExecutedTransactionSideEffects(executed);
+      }
+      return;
+    }
+
     await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
         where: { trans_id: transactionId },
@@ -390,10 +605,6 @@ export class TransactionService {
       }
 
       const amount = this.toNumber(transaction.trans_amount);
-      const buyLockTotal =
-        orderBook.ob_option === OrderBookOption.BUY
-          ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
-          : amount;
       const remaining = this.toNumber(orderBook.ob_amount_remaining);
       orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
       if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
@@ -418,7 +629,7 @@ export class TransactionService {
         }
 
         const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-        if (lockBalance < buyLockTotal) {
+        if (lockBalance < amount) {
           transaction.trans_status = TransactionStatus.FAILED;
           transaction.trans_message =
             transaction.trans_message ?? 'Expired (insufficient lock balance)';
@@ -426,9 +637,9 @@ export class TransactionService {
           return;
         }
 
-        sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
+        sellerWallet.uw_lock_balance = lockBalance - amount;
         sellerWallet.uw_balance =
-          this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
+          this.toNumber(sellerWallet.uw_balance) + amount;
         await manager.save(UserWallet, sellerWallet);
       }
 
@@ -438,6 +649,10 @@ export class TransactionService {
         'Expired: no action within the allowed time window';
       await manager.save(Transaction, transaction);
     });
+
+    if (expectedStatus !== TransactionStatus.PENDING) {
+      return;
+    }
 
     const updated = await this.transactionRepository.findOne({
       where: { trans_id: transactionId },
@@ -478,9 +693,9 @@ export class TransactionService {
       seller.uemail,
       {
         referenceCode: transaction.transs_reference_code,
-        amount: transaction.trans_amount,
+        amount: apiDecimal(transaction.trans_amount),
         coinSymbol: transaction.trans_coin_symbol,
-        totalPrice: transaction.trans_total_price,
+        totalPrice: apiDecimal(transaction.trans_total_price),
         nationalSymbol: transaction.trans_national_symbol,
       },
     );
@@ -500,9 +715,9 @@ export class TransactionService {
 
     await this.emailService.sendTransactionExecutedNotification(buyer.uemail, {
       referenceCode: transaction.transs_reference_code,
-      amount: transaction.trans_amount,
+      amount: apiDecimal(transaction.trans_amount),
       coinSymbol: transaction.trans_coin_symbol,
-      totalPrice: transaction.trans_total_price,
+      totalPrice: apiDecimal(transaction.trans_total_price),
       nationalSymbol: transaction.trans_national_symbol,
     });
   }
@@ -547,7 +762,7 @@ export class TransactionService {
         'bu.bu_id',
         'bu.bu_user_id',
         'bu.bu_bank_name',
-        'bu.bu_bank_branch',
+        'bu.bu_passbook_image_url',
         'bu.bu_bank_account_name',
         'bu.bu_bank_account_number',
       ])
@@ -611,7 +826,7 @@ export class TransactionService {
 
           if (dto.amount > available) {
             throw new BadRequestException(
-              `Buy limit exceeded. Level ${buyer.ulevel} max is ${maxLimitCoin} USDT; available now is ${this.formatAmount(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
+              `Buy limit exceeded. Level ${buyer.ulevel} max is ${maxLimitCoin} USDT; available now is ${apiDecimal(available)} USDT (open buy ads + taker buys in progress in the last 24h).`,
             );
           }
         }
@@ -635,6 +850,11 @@ export class TransactionService {
               'Invalid buId: bank user does not belong to seller or is not active',
             );
           }
+          if (!bankUser.bu_passbook_image_url?.trim()) {
+            throw new BadRequestException(
+              'This bank account has no passbook image on file. Please update the bank with a passbook image URL before matching this buy orderbook.',
+            );
+          }
           transactionBuId = dto.buId;
         }
 
@@ -646,8 +866,7 @@ export class TransactionService {
           if (!sellerWallet)
             throw new NotFoundException('Seller wallet not found');
 
-          const sellerLockTotal =
-            await this.computeBuyOrderbookSellerLockCoinAmount(dto.amount);
+          const sellerLockTotal = this.toNumber(this.formatAmount(dto.amount));
           const sellerAvailableBalance = this.toNumber(sellerWallet.uw_balance);
           if (sellerAvailableBalance < sellerLockTotal) {
             throw new BadRequestException(
@@ -723,14 +942,17 @@ export class TransactionService {
       },
     );
 
-    void this.transactionExpiryQueue
-      .scheduleExpiry(transactionId, TransactionStatus.PENDING)
-      .catch((err) => {
-        console.error(
-          `Failed to schedule pending expiry job for transaction ${transactionId}:`,
-          err,
-        );
-      });
+    try {
+      await this.transactionExpiryQueue.scheduleExpiry(
+        transactionId,
+        TransactionStatus.PENDING,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to schedule pending expiry job for transaction ${transactionId}:`,
+        err,
+      );
+    }
 
     void this.notifyUsers(
       [response.user_buy?.id, response.user_sell?.id],
@@ -777,7 +999,7 @@ export class TransactionService {
       'bu.bu_id',
       'bu.bu_user_id',
       'bu.bu_bank_name',
-      'bu.bu_bank_branch',
+      'bu.bu_passbook_image_url',
       'bu.bu_bank_account_name',
       'bu.bu_bank_account_number',
     ]);
@@ -851,7 +1073,7 @@ export class TransactionService {
         'bu.bu_id',
         'bu.bu_user_id',
         'bu.bu_bank_name',
-        'bu.bu_bank_branch',
+        'bu.bu_passbook_image_url',
         'bu.bu_bank_account_name',
         'bu.bu_bank_account_number',
       ])
@@ -897,14 +1119,17 @@ export class TransactionService {
         error,
       );
     });
-    void this.transactionExpiryQueue
-      .scheduleExpiry(saved.trans_id, TransactionStatus.PAYMENT_CONFIRMED)
-      .catch((err) => {
-        console.error(
-          `Failed to schedule payment_confirmed expiry job for transaction ${saved.trans_id}:`,
-          err,
-        );
-      });
+    try {
+      await this.transactionExpiryQueue.scheduleExpiry(
+        saved.trans_id,
+        TransactionStatus.PAYMENT_CONFIRMED,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to schedule payment_confirmed expiry job for transaction ${saved.trans_id}:`,
+        err,
+      );
+    }
     const hydrated = await this.loadTransactionWithUsers(
       this.transactionRepository,
       saved.trans_id,
@@ -932,10 +1157,11 @@ export class TransactionService {
   }
 
   async confirmReceived(userId: number, id: number) {
-    const [totalFeePercent, smartrefFeePercent] = await Promise.all([
-      this.getP2pOrderbookFeePercentTotal(),
+    const [transactionFeePercent, smartrefFeePercent] = await Promise.all([
+      this.adminSettingsConfigService.getTransactionFeePercent(),
       this.adminSettingsConfigService.getSmartrefFeePercent(),
     ]);
+    const totalFeePercent = transactionFeePercent + smartrefFeePercent;
 
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager.findOne(Transaction, {
@@ -971,131 +1197,14 @@ export class TransactionService {
         );
       }
 
-      const amount = this.toNumber(transaction.trans_amount);
-
-      let orderBook: OrderBook | null = null;
-      if (transaction.trans_order_book != null) {
-        orderBook = await manager.findOne(OrderBook, {
-          where: { ob_id: transaction.trans_order_book },
-          lock: { mode: 'pessimistic_write' },
-        });
-      }
-
-      const sellerLockDebit = this.computeSellerLockDebitForExecute(
-        amount,
-        totalFeePercent,
-        orderBook,
-        transaction.trans_user_sell,
-        transaction.trans_user_buy,
-      );
-
-      const toBuyer = amount;
-
-      const sellerWallet = await manager.findOne(UserWallet, {
-        where: {
-          uw_user_id: transaction.trans_user_sell,
-          uw_wallet_coins: transaction.trans_coin,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!sellerWallet) throw new NotFoundException('Seller wallet not found');
-
-      const buyerWallet = await manager.findOne(UserWallet, {
-        where: {
-          uw_user_id: transaction.trans_user_buy,
-          uw_wallet_coins: transaction.trans_coin,
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!buyerWallet) throw new NotFoundException('Buyer wallet not found');
-
-      const sellerLock = this.toNumber(sellerWallet.uw_lock_balance);
-      if (sellerLock < sellerLockDebit) {
-        throw new BadRequestException('Seller lock balance is not enough');
-      }
-
-      sellerWallet.uw_lock_balance = sellerLock - sellerLockDebit;
-
-      const isSellListing =
-        orderBook !== null && orderBook.ob_option === OrderBookOption.SELL;
-
-      if (isSellListing) {
-        const buyerLock = this.toNumber(buyerWallet.uw_lock_balance);
-        buyerWallet.uw_lock_balance = buyerLock + toBuyer;
-        transaction.trans_coin_unlock_at = new Date(
-          Date.now() + P2P_SELL_LISTING_BUYER_COIN_UNLOCK_DELAY_MS,
-        );
-        transaction.trans_lock_released_at = null;
-      } else {
-        buyerWallet.uw_balance =
-          this.toNumber(buyerWallet.uw_balance) + toBuyer;
-        transaction.trans_coin_unlock_at = null;
-        transaction.trans_lock_released_at = new Date();
-      }
-
-      await manager.save(UserWallet, sellerWallet);
-      await manager.save(UserWallet, buyerWallet);
-
-      transaction.trans_status = TransactionStatus.EXECUTED;
-      const saved = await manager.save(Transaction, transaction);
-
-      const hydrated = await this.loadTransactionWithUsers(
-        (manager as any).getRepository(Transaction),
-        saved.trans_id,
-      );
-      return {
-        response: this.toTransactionResponse(hydrated ?? saved),
-        buyerId: transaction.trans_user_buy,
-        sellerId: transaction.trans_user_sell,
-        transactionId: saved.trans_id,
-        amount,
+      return this.settleTransactionFromPaymentConfirmed(manager, transaction, {
+        transactionFeePercent,
         smartrefFeePercent,
-      };
-    });
-
-    // Side effects after commit: không await — trả response ngay; lỗi chỉ log (nên có queue/retry ở production).
-    if (result.smartrefFeePercent > 0) {
-      const smartrefRewardAmount = this.toNumber(
-        this.formatAmount((result.amount * result.smartrefFeePercent) / 100),
-      );
-      void this.smartRefService
-        .disputeSmartref(result.sellerId, smartrefRewardAmount)
-        .catch((error) => {
-          console.error(
-            `Failed to distribute smartref rewards for seller ${result.sellerId} on tx ${result.transactionId}:`,
-            error,
-          );
-        });
-    }
-
-    void this.transactionRepository
-      .findOne({ where: { trans_id: result.transactionId } })
-      .then((executedTransaction) => {
-        if (!executedTransaction) return;
-        return this.sendExecutedEmailToBuyer(executedTransaction);
-      })
-      .catch((error) => {
-        console.error(
-          `Failed executed-email path for transaction ${result.transactionId}:`,
-          error,
-        );
+        totalFeePercent,
       });
-
-    void this.notifyUsers(
-      [result.buyerId, result.sellerId],
-      'Transaction completed',
-      `Transaction ${result.response.reference_code} has been completed successfully.`,
-      {
-        transaction_id: result.response.id,
-        reference_code: result.response.reference_code,
-        status: result.response.status,
-      },
-    ).catch((error) => {
-      console.error(
-        `Failed notify users after tx ${result.transactionId} executed:`,
-        error,
-      );
     });
+
+    this.emitExecutedTransactionSideEffects(result);
 
     return result.response;
   }
@@ -1133,10 +1242,6 @@ export class TransactionService {
         }
 
         const amount = this.toNumber(transaction.trans_amount);
-        const buyLockTotal =
-          orderBook.ob_option === OrderBookOption.BUY
-            ? await this.computeBuyOrderbookSellerLockCoinAmount(amount)
-            : amount;
         const remaining = this.toNumber(orderBook.ob_amount_remaining);
         orderBook.ob_amount_remaining = this.formatAmount(remaining + amount);
         if (orderBook.ob_status === OrderBookStatus.EXECUTED) {
@@ -1156,15 +1261,15 @@ export class TransactionService {
             throw new NotFoundException('Seller wallet not found');
 
           const lockBalance = this.toNumber(sellerWallet.uw_lock_balance);
-          if (lockBalance < buyLockTotal) {
+          if (lockBalance < amount) {
             throw new BadRequestException(
               'Seller lock balance is not enough to unlock',
             );
           }
 
-          sellerWallet.uw_lock_balance = lockBalance - buyLockTotal;
+          sellerWallet.uw_lock_balance = lockBalance - amount;
           sellerWallet.uw_balance =
-            this.toNumber(sellerWallet.uw_balance) + buyLockTotal;
+            this.toNumber(sellerWallet.uw_balance) + amount;
           await manager.save(UserWallet, sellerWallet);
         }
 
@@ -1299,6 +1404,18 @@ export class TransactionService {
           err,
         );
       });
+
+    this.adminNotificationsService.notifySuperAdmins({
+      type: NotificationType.TRANSACTION,
+      title: 'Dispute opened',
+      message: `Dispute #${response.id} opened on transaction ${tx.transs_reference_code}.`,
+      data: {
+        dispute_id: response.id,
+        transaction_id: tx.trans_id,
+        reference_code: tx.transs_reference_code,
+      },
+    });
+
     return response;
   }
 

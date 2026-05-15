@@ -19,8 +19,14 @@ export class BankUser {
   @Column({ name: 'bu_bank_name', type: 'varchar' })
   bu_bank_name: string;
 
-  @Column({ name: 'bu_bank_branch', type: 'varchar', nullable: true })
-  bu_bank_branch: string | null;
+  /** Ảnh sổ tài khoản (passbook) — URL do client upload (ví dụ Cloudinary), dùng xác minh. */
+  @Column({
+    name: 'bu_passbook_image_url',
+    type: 'varchar',
+    length: 2048,
+    nullable: true,
+  })
+  bu_passbook_image_url: string | null;
 
   @Column({ name: 'bu_bank_account_name', type: 'varchar' })
   bu_bank_account_name: string;
