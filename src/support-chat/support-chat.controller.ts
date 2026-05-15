@@ -25,6 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { SupportChatService } from './support-chat.service';
 import { SupportChatHttpAuthGuard } from './guards/support-chat-http-auth.guard';
+import { SupportChatAdminGuard } from './guards/support-chat-admin.guard';
 import { QueryConversationsDto } from './dto/query-conversations.dto';
 import { QueryConversationMessagesDto } from './dto/query-conversation-messages.dto';
 import { SupportChatGateway } from './support-chat.gateway';
@@ -58,15 +59,17 @@ export class SupportChatController {
       '- **Namespace**: `/support-chat`',
       '- **Auth**: cookie `access_token` hoặc `admin_access_token`, hoặc `handshake.auth.access_token` / `handshake.auth.admin_access_token`',
       '- **Room**: `conversation:{conversationId}` (mỗi conversation là một room)',
+      '- **Admin inbox room**: `admin:support-inbox` — auto-join khi admin connect; nhận `support_message_pending` / `support_unread_updated`',
       '',
       '## Client → Server events',
       '',
       '### 1) join_conversation',
       '```json',
-      '{ "conversationId": 12 }',
+      '{ "conversationId": 12, "silent": true }',
       '```',
       '- Validate quyền truy cập conversation trước khi join room.',
-      '- Khi join thành công sẽ tạo `SYSTEM_EVENT` (`USER_JOINED`/`ADMIN_JOINED`) và emit `receive_message` cho các participant khác trong room.',
+      '- `silent: true` (admin): join không tạo system event — dùng khi mở panel chat.',
+      '- Mặc định: tạo `SYSTEM_EVENT` (`USER_JOINED`/`ADMIN_JOINED`) và emit `receive_message` cho room.',
       '',
       '### 2) leave_conversation',
       '```json',
@@ -110,6 +113,8 @@ export class SupportChatController {
       '- `stop_typing`',
       '- `seen`',
       '- `conversation_closed`',
+      '- `support_message_pending` (admin inbox — tin user mới)',
+      '- `support_unread_updated` (admin inbox — `{ total, byConversation }`)',
       '',
       '## Ack response mẫu',
       '```json',
@@ -195,6 +200,28 @@ export class SupportChatController {
       req.supportChatActor,
       query,
     );
+  }
+
+  @Get('admin/unread-summary')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SupportChatAdminGuard)
+  @ApiOperation({
+    summary: 'Admin: unread support messages summary (open conversations)',
+  })
+  @ApiOkResponse({
+    description: 'Total unread and per-conversation counts',
+    schema: {
+      example: {
+        statusCode: 200,
+        data: {
+          total: 3,
+          byConversation: { '12': 2, '15': 1 },
+        },
+      },
+    },
+  })
+  getAdminUnreadSummary() {
+    return this.supportChatService.getAdminUnreadSummary();
   }
 
   @Get(':id')

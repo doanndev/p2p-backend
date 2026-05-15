@@ -37,6 +37,8 @@ export class AdminsStatisticsService {
       total_deposit: number;
       total_withdraw: number;
       total_balance: number;
+      total_reward: number;
+      total_transfer_main: number;
     };
   }> {
     // 1. Tổng số users
@@ -103,6 +105,8 @@ export class AdminsStatisticsService {
         total_deposit: totalDeposit,
         total_withdraw: totalWithdraw,
         total_balance: totalBalance,
+        total_reward: totalReward,
+        total_transfer_main: totalTransferMain,
       },
     };
   }
@@ -115,6 +119,8 @@ export class AdminsStatisticsService {
       total_deposit: number;
       total_withdraw: number;
       total_balance: number;
+      total_reward: number;
+      total_transfer_main: number;
     };
   }> {
     const platform = await this.getPlatformStatistics();

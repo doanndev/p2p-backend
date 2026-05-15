@@ -12,7 +12,7 @@ import { TransactionStatus } from './entities/transaction.entity';
 export const TRANSACTION_EXPIRY_QUEUE = 'transaction-expiry';
 
 /** Delay before expiry job runs (30 minutes). */
-export const TRANSACTION_EXPIRY_DELAY_MS = 2 * 60 * 1000;
+export const TRANSACTION_EXPIRY_DELAY_MS = 30 * 60 * 1000;
 
 export type TransactionExpiryJobData = {
   transactionId: number;

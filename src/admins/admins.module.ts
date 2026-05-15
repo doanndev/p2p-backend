@@ -8,6 +8,9 @@ import { AdminsStatisticalController } from './admins-statistical.controller';
 import { AdminUsersController } from './admin-users.controller';
 import { AdminWalletController } from './admin-wallet.controller';
 import { AdminsKycController } from './admins-kyc.controller';
+import { AdminsPendingSummaryController } from './admins-pending-summary.controller';
+import { AdminsPendingSummaryService } from './admins-pending-summary.service';
+import { SettingBankOrder } from '../orderbook/entities/setting-bank-order.entity';
 import { AdminsAuthService } from './admins-auth.service';
 import { AdminsStatisticsService } from './admins-statistics.service';
 import { AdminsUsersOpsService } from './admins-users-ops.service';
@@ -78,6 +81,7 @@ import { OrderbookModule } from '../orderbook/orderbook.module';
       KolArticle,
       Transaction,
       AdminNotification,
+      SettingBankOrder,
     ]),
     PassportModule,
     ConfigModule,
@@ -98,6 +102,7 @@ import { OrderbookModule } from '../orderbook/orderbook.module';
     AdminUsersController,
     AdminWalletController,
     AdminsKycController,
+    AdminsPendingSummaryController,
   ],
   providers: [
     AdminsAuthService,
@@ -105,6 +110,7 @@ import { OrderbookModule } from '../orderbook/orderbook.module';
     AdminsUsersOpsService,
     AdminsWalletOpsService,
     AdminsKycService,
+    AdminsPendingSummaryService,
     AdminJwtStrategy,
     AdminJwtAuthGuard,
     AdminPermissionGuard,

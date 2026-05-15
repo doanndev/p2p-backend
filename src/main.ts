@@ -46,7 +46,8 @@ async function bootstrap() {
   // Gộp tất cả URLs được phép cho CORS
   const allAllowedUrls = [...frontendUrls, ...adminFrontendUrls];
 
-  const port = 8000;
+  const configuredPort = Number(configService.get<string>('PORT'));
+  const port = Number.isFinite(configuredPort) ? configuredPort : 8012;
 
   // Cấu hình CORS hỗ trợ subdomain
   app.enableCors({

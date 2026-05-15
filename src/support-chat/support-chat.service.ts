@@ -461,6 +461,60 @@ export class SupportChatService {
     return this.toMessageResponse(saved);
   }
 
+  /** Tin từ user (text/image) trong hội thoại OPEN mà admin chưa đọc. */
+  async countAdminUnreadForConversation(conversationId: number): Promise<number> {
+    return this.supportChatMessageRepository
+      .createQueryBuilder('m')
+      .innerJoin(SupportChat, 'c', 'c.id = m.conversation_id')
+      .where('m.conversation_id = :conversationId', { conversationId })
+      .andWhere('c.status = :status', { status: SupportChatStatus.OPEN })
+      .andWhere('m.sender_type = :senderType', {
+        senderType: SupportChatSenderType.USER,
+      })
+      .andWhere('m.seen_by_admin_at IS NULL')
+      .andWhere('m.message_type IN (:...types)', {
+        types: [SupportChatMessageType.TEXT, SupportChatMessageType.IMAGE],
+      })
+      .getCount();
+  }
+
+  /**
+   * Tổng unread admin + map theo conversation (chỉ hội thoại OPEN).
+   * Dùng cho sidebar badge và WS inbox sync.
+   */
+  async getAdminUnreadSummary() {
+    const rows = await this.supportChatMessageRepository
+      .createQueryBuilder('m')
+      .innerJoin(SupportChat, 'c', 'c.id = m.conversation_id')
+      .select('m.conversation_id', 'conversationId')
+      .addSelect('COUNT(*)', 'unread')
+      .where('c.status = :status', { status: SupportChatStatus.OPEN })
+      .andWhere('m.sender_type = :senderType', {
+        senderType: SupportChatSenderType.USER,
+      })
+      .andWhere('m.seen_by_admin_at IS NULL')
+      .andWhere('m.message_type IN (:...types)', {
+        types: [SupportChatMessageType.TEXT, SupportChatMessageType.IMAGE],
+      })
+      .groupBy('m.conversation_id')
+      .getRawMany<{ conversationId: string; unread: string }>();
+
+    const byConversation: Record<number, number> = {};
+    let total = 0;
+    for (const row of rows) {
+      const id = Number(row.conversationId);
+      const count = Number(row.unread) || 0;
+      if (!id || count <= 0) continue;
+      byConversation[id] = count;
+      total += count;
+    }
+
+    return {
+      statusCode: 200,
+      data: { total, byConversation },
+    };
+  }
+
   async markConversationSeen(actor: SupportChatActor, conversationId: number) {
     await this.assertCanAccessConversation(actor, conversationId);
 

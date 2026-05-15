@@ -536,7 +536,7 @@ export class WalletsController {
     description:
       'Trừ số dư người gửi và cộng cho người nhận trong một giao dịch DB (ACID). ' +
       'Bắt buộc `emailCode` (lấy qua `POST /wallets/exchange/internal/verify-code`). ' +
-      'Kiểm tra KYC, 2FA, số dư, phí rút (1 đơn vị coin khi hết lượt free), max withdraw giống `POST /wallets/withdraw`.',
+      'Kiểm tra KYC, 2FA, số dư, phí rút nền tảng (0 đơn vị coin khi hết lượt free — hiện không thu), max withdraw giống `POST /wallets/withdraw`.',
   })
   @ApiBody({
     type: InternalExchangeDto,

@@ -70,6 +70,18 @@ export class AdminUsersController {
     return result;
   }
 
+  /** Static path must be registered before `@Get(':id')` or Nest matches `need-levelup` as an id. */
+  @Get('need-levelup')
+  @ApiOperation({ summary: 'Danh sách user đang chờ duyệt level-up' })
+  @ApiOkResponse({
+    description: 'Danh sách user need_levelup=true',
+  })
+  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
+  @HttpCode(HttpStatus.OK)
+  async getUsersNeedLevelUp() {
+    return this.adminsUsersOpsService.getUsersNeedLevelUp();
+  }
+
   @Get('kols-register')
   @ApiOperation({ summary: 'Danh sách hồ sơ đăng ký KOL' })
   @ApiOkResponse({
@@ -118,17 +130,6 @@ export class AdminUsersController {
       userIdNumber,
     );
     return result;
-  }
-
-  @Get('need-levelup')
-  @ApiOperation({ summary: 'Danh sách user đang chờ duyệt level-up' })
-  @ApiOkResponse({
-    description: 'Danh sách user need_levelup=true',
-  })
-  @UseGuards(AdminJwtAuthGuard, AdminPermissionReadUsersGuard)
-  @HttpCode(HttpStatus.OK)
-  async getUsersNeedLevelUp() {
-    return this.adminsUsersOpsService.getUsersNeedLevelUp();
   }
 
   @Get('bank-users')
